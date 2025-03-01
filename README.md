@@ -63,23 +63,39 @@ The exact hardware requirements for the default 500x500cm room are unknown, but 
 sudo apt install build-essential libsdl2-dev libglew-dev nvidia-cuda-toolkit
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
-nvcc -o echolocation_game echolocation_game.cu -lSDL2 -lGL -lGLEW
+nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL2 -lSDL2_mixer -lpthread -ltinyxml2
 ./echolocation_game
 ```
 
 ### Windows (MSYS2)
-* Install CUDA Toolkit
+* Install CUDA Toolkit latest 12.X version
 * Install Visual Studio Community Edition with option "Desktop Environment with C++"
-
+* **You must use the MINGW64 shell of MSYS2!**
 ```
 MSVC_PATH=$(ls -d "/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/"*/bin/Hostx64/x64 | head -n 1)
 CUDA_PATH=$(ls -d "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v"*/bin | head -n 1)
 export PATH="$MSVC_PATH:$CUDA_PATH:$PATH"
 pacman -Syu
-pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-SDL2 mingw-w64-x86_64-glew
+pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-SDL2 mingw-w64-x86_64-glew git wget unzip base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake
+wget https://github.com/libsdl-org/SDL/releases/download/release-2.32.0/SDL2-devel-2.32.0-VC.zip
+unzip SDL2-devel-2.32.0-VC.zip
+mkdir -p ~/SDL2-2.32.0/include/SDL2
+ln -s ~/SDL2-2.32.0/include/*.h ~/SDL2-2.32.0/include/SDL2/
+wget https://github.com/nigels-com/glew/releases/download/glew-2.2.0/glew-2.2.0.tgz
+tar xvf glew-2.2.0.tgz
+wget https://github.com/leethomason/tinyxml2/archive/refs/tags/10.0.0.zip
+unzip 10.0.0.zip
+cd tinyxml2-10.0.0
+export CC=/mingw64/bin/gcc
+export CXX=/mingw64/bin/g++
+export PATH="/mingw64/bin:$PATH"
+cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=$HOME/tinyxml2-10.0.0/install .
+make -j$(nproc)
+make install
+cd $HOME
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
-nvcc -o echolocation_game.exe echolocation_game.cu -lSDL2 -lGL -lGLEW
+nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.2.0/include -L$HOME/glew-2.2.0/lib/Release/x64 -I$HOME/SDL2-2.32.0/include -L$HOME/SDL2-2.32.0/lib/x64 -I$HOME/tinyxml2-10.0.0/install/include -L$HOME/tinyxml2-10.0.0/install/lib -lmingw32 -lSDL2main -lSDL2 -lGL -lGLEW -allow-unsupported-compiler
 ./echolocation_game.exe
 ```
 
