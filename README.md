@@ -4,7 +4,7 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 License: GPL v3 (https://www.gnu.org/licenses/gpl-3.0)
 
-Experimental prototype for a 2D echolocation simulation game using CUDA, SDL2, OpenGL, and GLEW. Navigate with sound pulses, featuring a dual view (static and first-person), sliding collisions, and a dynamic cane.
+Experimental prototype for a 2D echolocation simulation game using CUDA, SDL2, OpenGL, and GLEW. Navigate with sound pulses, featuring a dual view (static and first-person), sliding collisions, and a virtual cane (cane not implemented yet).
 
 The sound wave simulation algorithm employs a finite-difference method to solve the 2D wave equation on a grid, leveraging CUDA to parallelize pressure updates and reflections, simulating wave propagation at 343 m/s with a spatial resolution of 0.01 meters and a 48 kHz audio capture rate.
 
