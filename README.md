@@ -12,6 +12,8 @@ The sound wave simulation algorithm employs a finite-difference method to solve 
 
 The code was written with Grok-3 mainly, but also ChatGPT-o1. They were unable to optimize speed even further. GPU utilization on 3090 is fairly high.
 
+The current result seems fairly convincing to me. In the brief period I had time to actually close my eyes and try, I noticed that it triggers my very limited ability of echolocation somewhat (I can see very faint shades, rotations and movements of objects with closed eyes). But from just 10 minutes of playing, depending on the hour of the day, I scored from awful to sort of ok in being able to navigate the maps.
+
 This prototype was mainly written for baseline comparison purposes, to determine how well echolocation can work with highly accurate simulated sound waves.
 
 If this program turns out to trigger people who can already echolocate in real life, more simplified an less computationally extreme simulation methods could be tested.
@@ -22,7 +24,7 @@ It could also be used as a training tool for people to learn to echolocate, sinc
 
 Reducing the accuracy of the simulation unfortunately results in poor sound quality very fast. 
 
-There are lots of other methods for aurealization, some faster some slower. But next to none of them rely on real sound wave simulations. And those that do that I have seen require huge 100GB pre-computed maps for simple rooms/buildings to work at all in 3D space, which heavily limits the usability of those methods to blind people. On the other hand, since echolocation in humans is an unstudied phenomenon, it would probably be very unwise to start out with methods that make a lot of assumptions and optimizations to cut corners, which could be detrimental to how echolocation works.
+There are lots of other methods for aurealization, some faster some slower. But next to none of them are based on actual sound wave simulations. And those that do that I have seen, require huge 100GB pre-computed maps for simple rooms/buildings to work at all in 3D space, which heavily limits the usability of those methods to blind people. When I tested those methods, from what I can tell from my own very limited ability of echolocation, it either triggered it sometimes even remarkably, but then it seemed all jumbled up and distorted like a broken 3D mesh. Or it didn't trigger anything at all, indicating that spatial information in sound had been lost somehow. Since echolocation in humans is an unstudied phenomenon, it would probably be very unwise to start out with methods that make a lot of assumptions and optimizations to cut corners, which could be detrimental to how echolocation works.
 
 
 ## Features
