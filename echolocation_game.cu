@@ -15,11 +15,11 @@
 #endif
 
 #define CUDA_CHECK(call) { \
-    cudaError_t err=call; \
-    if(err!=cudaSuccess){ \
-        fprintf(stderr,"CUDA error at %s:%d - %s\n",__FILE__,__LINE__,cudaGetErrorString(err));\
-        exit(1);\
-    }\
+    cudaError_t err = call; \
+    if (err != cudaSuccess) { \
+        fprintf(stderr, "CUDA error at %s:%d - %s\n", __FILE__, __LINE__, cudaGetErrorString(err)); \
+        exit(1); \
+    } \
 }
 
 static float g_DX              = 0.01f;
@@ -35,7 +35,7 @@ static int   g_pulseIntervalSteps;
 static int   g_pulseDurationSteps;
 
 static float g_waveVolumeScale = 0.05f;
-static float g_toneVolumeScale = 0.5f;
+static float g_toneVolumeScale = 1.0f;
 
 static const float SPEED_OF_SOUND = 343.0f;
 static const int   SIZE = 500;
@@ -44,7 +44,7 @@ static const int   WINDOW_HEIGHT = SIZE;
 static const int   PULSE_DELAY = 1000;
 static const float PULSE_AMPLITUDE = 750.0f;
 static const int   AUDIO_BATCH = 4096;
-static const float ZOOM_FACTOR = 4.0f;
+__constant__ float ZOOM_FACTOR = 4.0f; // Moved to device constant
 
 struct Rect { float x, y, width, height; };
 struct Circle { float cx, cy, r; };
@@ -52,6 +52,9 @@ struct ToneMarker {
     float x, y; 
     char type; // 'O' for obstacle, 'W' for win, 'I' for item
     int sampleOffset; // Tracks WAV playback progress
+    float* audioData; // Host-side WAV data
+    int audioLen;     // Length of WAV data
+    bool isPlaying;   // Playback state
 };
 
 static std::vector<Rect> g_rects;
@@ -60,13 +63,9 @@ static std::vector<ToneMarker> g_toneMarkers;
 static ToneMarker* d_toneMarkers = nullptr;
 static int g_numToneMarkers = 0;
 
-// WAV audio data
 static float* h_audioO = nullptr;
 static float* h_audioW = nullptr;
 static float* h_audioI = nullptr;
-static float* d_audioO = nullptr;
-static float* d_audioW = nullptr;
-static float* d_audioI = nullptr;
 static int audioLenO = 0;
 static int audioLenW = 0;
 static int audioLenI = 0;
@@ -108,12 +107,11 @@ static void initAudio()
         exit(1);
     }
     if (wavSpec.format != AUDIO_F32SYS) {
-        // Convert 16-bit integer to 32-bit float if necessary
-        audioLenO = wavLength / sizeof(int16_t); // 16-bit samples
+        audioLenO = wavLength / sizeof(int16_t);
         h_audioO = (float*)malloc(audioLenO * sizeof(float));
         int16_t* src = (int16_t*)wavBuffer;
         for (int i = 0; i < audioLenO; i++) {
-            h_audioO[i] = src[i] / 32768.0f; // Scale [-32768, 32767] to [-1.0, 1.0]
+            h_audioO[i] = src[i] / 32768.0f;
         }
         SDL_FreeWAV(wavBuffer);
     } else {
@@ -122,8 +120,6 @@ static void initAudio()
         memcpy(h_audioO, wavBuffer, audioLenO * sizeof(float));
         SDL_FreeWAV(wavBuffer);
     }
-    CUDA_CHECK(cudaMalloc(&d_audioO, audioLenO * sizeof(float)));
-    CUDA_CHECK(cudaMemcpy(d_audioO, h_audioO, audioLenO * sizeof(float), cudaMemcpyHostToDevice));
 
     // Load win.wav
     if (!SDL_LoadWAV("win.wav", &wavSpec, &wavBuffer, &wavLength)) {
@@ -144,8 +140,6 @@ static void initAudio()
         memcpy(h_audioW, wavBuffer, audioLenW * sizeof(float));
         SDL_FreeWAV(wavBuffer);
     }
-    CUDA_CHECK(cudaMalloc(&d_audioW, audioLenW * sizeof(float)));
-    CUDA_CHECK(cudaMemcpy(d_audioW, h_audioW, audioLenW * sizeof(float), cudaMemcpyHostToDevice));
 
     // Load powerup.wav
     if (!SDL_LoadWAV("powerup.wav", &wavSpec, &wavBuffer, &wavLength)) {
@@ -166,8 +160,6 @@ static void initAudio()
         memcpy(h_audioI, wavBuffer, audioLenI * sizeof(float));
         SDL_FreeWAV(wavBuffer);
     }
-    CUDA_CHECK(cudaMalloc(&d_audioI, audioLenI * sizeof(float)));
-    CUDA_CHECK(cudaMemcpy(d_audioI, h_audioI, audioLenI * sizeof(float), cudaMemcpyHostToDevice));
 
     printf("[AUDIO] Loaded WAV files: O=%d samples, W=%d samples, I=%d samples\n", audioLenO, audioLenW, audioLenI);
 }
@@ -195,7 +187,7 @@ static void updatePlayerComponents(Player &p)
     g_mic_r_x = p.pivot_x + rx * c - ry * s;
     g_mic_r_y = p.pivot_y + rx * s + ry * c;
 
-    g_wedge_x = p.pivot_x + wx * c - wy * s; // Still computed for dynamic mask
+    g_wedge_x = p.pivot_x + wx * c - wy * s;
     g_wedge_y = p.pivot_y + wx * s + wy * c;
 
     g_pulse_x = p.pivot_x + px * c - py * s;
@@ -273,10 +265,21 @@ static void parseSVGElement(tinyxml2::XMLElement* elem, float* h_mask)
                 elem->QueryFloatAttribute("x", &tm.x);
                 elem->QueryFloatAttribute("y", &tm.y);
                 tm.y = SIZE - tm.y;
-                if (strstr(text, "O")) tm.type = 'O';
-                else if (strstr(text, "W")) tm.type = 'W';
-                else if (strstr(text, "I")) tm.type = 'I';
+                if (strstr(text, "O")) {
+                    tm.type = 'O';
+                    tm.audioData = h_audioO;
+                    tm.audioLen = audioLenO;
+                } else if (strstr(text, "W")) {
+                    tm.type = 'W';
+                    tm.audioData = h_audioW;
+                    tm.audioLen = audioLenW;
+                } else if (strstr(text, "I")) {
+                    tm.type = 'I';
+                    tm.audioData = h_audioI;
+                    tm.audioLen = audioLenI;
+                }
                 tm.sampleOffset = 0;
+                tm.isPlaying = false;
                 printf("[SVG] Tone Marker (%c): x=%.1f, y=%.1f\n", tm.type, tm.x, tm.y);
                 g_toneMarkers.push_back(tm);
             }
@@ -400,13 +403,7 @@ __global__ void addPulse(float* p, float sx, float sy, float amplitude,
 
 __global__ void captureAndReduce(const float* p, float lx, float ly,
                                  float rx, float ry, int sampleIndex,
-                                 float* audioL, float* audioR, float waveVolume,
-                                 float player_x, float player_y, float player_angle,
-                                 ToneMarker* toneMarkers, int numToneMarkers,
-                                 const float* audioO, int lenO,
-                                 const float* audioW, int lenW,
-                                 const float* audioI, int lenI,
-                                 float toneVolumeScale)
+                                 float* audioL, float* audioR, float waveVolume)
 {
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         int ilx = (int)roundf(lx), ily = (int)roundf(ly);
@@ -420,36 +417,6 @@ __global__ void captureAndReduce(const float* p, float lx, float ly,
         float vr = p[iry * SIZE + irx];
         audioL[sampleIndex] = vl * waveVolume;
         audioR[sampleIndex] = vr * waveVolume;
-
-        for (int i = 0; i < numToneMarkers; i++) {
-            float dx = toneMarkers[i].x - player_x;
-            float dy = toneMarkers[i].y - player_y;
-            float dist = sqrtf(dx * dx + dy * dy);
-            if (dist < 50.f) {
-                float angle = atan2f(dy, dx) - player_angle;
-                float pan = sinf(angle);
-                float atten = 1.f - dist / 50.f;
-                float sample = 0.f;
-                int offset = toneMarkers[i].sampleOffset;
-
-                if (toneMarkers[i].type == 'O' && offset < lenO) {
-                    sample = audioO[offset];
-                    toneMarkers[i].sampleOffset = (offset + 1) % lenO;
-                }
-                else if (toneMarkers[i].type == 'W' && offset < lenW) {
-                    sample = audioW[offset];
-                    toneMarkers[i].sampleOffset = (offset + 1) % lenW;
-                }
-                else if (toneMarkers[i].type == 'I' && offset < lenI) {
-                    sample = audioI[offset];
-                    toneMarkers[i].sampleOffset = (offset + 1) % lenI;
-                }
-
-                sample *= atten * toneVolumeScale;
-                audioL[sampleIndex] += sample * (0.5f + 0.5f * pan);
-                audioR[sampleIndex] += sample * (0.5f - 0.5f * pan);
-            }
-        }
     }
 }
 
@@ -632,7 +599,7 @@ void main(){
     else if (pressure < -6.5) color = vec3(1, 1, 0);       // Gold for 'I'
     else if (pressure < -5.5) color = vec3(0, 1, 1);       // Cyan for 'W'
     else if (pressure < -4.5) color = vec3(1, 0, 1);       // Purple for 'O'
-    else if (pressure < -3.5) color = vec3(0.5, 0, 0.5);   // Dark purple (wedge, removed)
+    else if (pressure < -3.5) color = vec3(0.5, 0, 0.5);   // Dark purple (unused)
     else if (pressure < -2.5) color = vec3(1, 0, 0);       // Red (pulse)
     else if (pressure < -1.5) color = vec3(0, 1, 0);       // Green (mic)
     else if (pressure < -0.5) color = vec3(1, 1, 0);       // Yellow (objects)
@@ -688,11 +655,11 @@ static void initGraphics(GraphicsContext &gfx)
     glClearColor(0, 0, 0, 1);
 
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vs, 1, &vertexShaderSource, nullptr);
+    glShaderSource(vs, 1, &vertexShaderSource, NULL);
     glCompileShader(vs); checkGLError("VertexCompile");
 
     GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fs, 1, &fragmentShaderSource, nullptr);
+    glShaderSource(fs, 1, &fragmentShaderSource, NULL);
     glCompileShader(fs); checkGLError("FragmentCompile");
 
     gfx.shader = glCreateProgram();
@@ -705,7 +672,7 @@ static void initGraphics(GraphicsContext &gfx)
 
     glGenBuffers(1, &gfx.vbo);
     glBindBuffer(GL_ARRAY_BUFFER, gfx.vbo);
-    glBufferData(GL_ARRAY_BUFFER, SIZE * SIZE * 2 * 3 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, SIZE * SIZE * 2 * 3 * sizeof(float), NULL, GL_DYNAMIC_DRAW);
 
     CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&gfx.cuda_vbo_resource, gfx.vbo,
                                             cudaGraphicsMapFlagsWriteDiscard));
@@ -775,7 +742,7 @@ int main(int argc, char** argv)
     want.format = AUDIO_F32SYS;
     want.channels = 2;
     want.samples = 1024;
-    SDL_AudioDeviceID simDev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+    SDL_AudioDeviceID simDev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (!simDev) {
         fprintf(stderr, "Failed open sim audio:%s\n", SDL_GetError());
         exit(1);
@@ -788,12 +755,25 @@ int main(int argc, char** argv)
     beepSpec.format = AUDIO_F32SYS;
     beepSpec.channels = 2;
     beepSpec.samples = 1024;
-    SDL_AudioDeviceID beepDev = SDL_OpenAudioDevice(nullptr, 0, &beepSpec, &have, 0);
+    SDL_AudioDeviceID beepDev = SDL_OpenAudioDevice(NULL, 0, &beepSpec, &have, 0);
     if (!beepDev) {
         fprintf(stderr, "Failed beep audio:%s\n", SDL_GetError());
         exit(1);
     }
     SDL_PauseAudioDevice(beepDev, 0);
+
+    SDL_AudioSpec markerSpec;
+    SDL_zero(markerSpec);
+    markerSpec.freq = have.freq;
+    markerSpec.format = AUDIO_F32SYS;
+    markerSpec.channels = 2;
+    markerSpec.samples = 1024;
+    SDL_AudioDeviceID markerDev = SDL_OpenAudioDevice(NULL, 0, &markerSpec, &have, 0);
+    if (!markerDev) {
+        fprintf(stderr, "Failed marker audio:%s\n", SDL_GetError());
+        exit(1);
+    }
+    SDL_PauseAudioDevice(markerDev, 0);
 
     g_sampleRate = have.freq;
     recalcDerivedParams();
@@ -872,7 +852,7 @@ int main(int argc, char** argv)
         CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float), cudaMemcpyHostToDevice));
         free(h_dynamic);
 
-        const Uint8* ks = SDL_GetKeyboardState(nullptr);
+        const Uint8* ks = SDL_GetKeyboardState(NULL);
         Player newP = g_player;
         float moveSpeed = 50.f;
         float rotSpeed = PI / 2.f;
@@ -1014,6 +994,49 @@ int main(int argc, char** argv)
             lastSlideTime = nowT;
         }
 
+        // Handle marker audio playback
+        for (int i = 0; i < g_numToneMarkers; i++) {
+            ToneMarker& tm = g_toneMarkers[i];
+            float dx = tm.x - g_player.pivot_x;
+            float dy = tm.y - g_player.pivot_y;
+            float dist = sqrtf(dx * dx + dy * dy);
+            if (dist < 50.f) {
+                if (!tm.isPlaying) {
+                    tm.isPlaying = true;
+                    tm.sampleOffset = 0;
+                    printf("[MARKER DEBUG] Started %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
+                           tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
+                }
+                if (tm.sampleOffset < tm.audioLen) {
+                    float angle = atan2f(dy, dx) - g_player.angle;
+                    float pan = sinf(angle);
+                    float atten = fmaxf(0.2f, 1.f - dist / 50.f);
+                    int samplesToPlay = (int)(dtFrame * g_sampleRate);
+                    if (tm.sampleOffset + samplesToPlay > tm.audioLen) {
+                        samplesToPlay = tm.audioLen - tm.sampleOffset;
+                    }
+                    float* markerBuf = (float*)malloc(samplesToPlay * 2 * sizeof(float));
+                    for (int j = 0; j < samplesToPlay; j++) {
+                        float sample = tm.audioData[tm.sampleOffset + j] * atten * g_toneVolumeScale;
+                        markerBuf[2 * j] = sample * (0.5f + 0.5f * pan);
+                        markerBuf[2 * j + 1] = sample * (0.5f - 0.5f * pan);
+                    }
+                    SDL_QueueAudio(markerDev, markerBuf, samplesToPlay * 2 * sizeof(float));
+                    tm.sampleOffset += samplesToPlay;
+                    free(markerBuf);
+                }
+                if (tm.sampleOffset >= tm.audioLen) {
+                    tm.sampleOffset = 0; // Loop
+                }
+            } else {
+                if (tm.isPlaying) {
+                    tm.isPlaying = false;
+                    printf("[MARKER DEBUG] Stopped %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
+                           tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
+                }
+            }
+        }
+
         wasSliding = sliding;
 
         int rawSteps = (int)ceilf(dtFrame / g_DT);
@@ -1037,13 +1060,7 @@ int main(int argc, char** argv)
 
             captureAndReduce<<<1, 32>>>(d_p_next, g_mic_l_x, g_mic_l_y,
                                       g_mic_r_x, g_mic_r_y, audioBatchIndex,
-                                      d_audioL, d_audioR, g_waveVolumeScale,
-                                      g_player.pivot_x, g_player.pivot_y, g_player.angle,
-                                      d_toneMarkers, g_numToneMarkers,
-                                      d_audioO, audioLenO,
-                                      d_audioW, audioLenW,
-                                      d_audioI, audioLenI,
-                                      g_toneVolumeScale);
+                                      d_audioL, d_audioR, g_waveVolumeScale);
             CUDA_CHECK(cudaGetLastError());
 
             audioBatchIndex++;
@@ -1117,11 +1134,9 @@ int main(int argc, char** argv)
 
     SDL_CloseAudioDevice(beepDev);
     SDL_CloseAudioDevice(simDev);
+    SDL_CloseAudioDevice(markerDev);
 
     if (d_toneMarkers) CUDA_CHECK(cudaFree(d_toneMarkers));
-    CUDA_CHECK(cudaFree(d_audioO));
-    CUDA_CHECK(cudaFree(d_audioW));
-    CUDA_CHECK(cudaFree(d_audioI));
     free(h_audioO);
     free(h_audioW);
     free(h_audioI);
