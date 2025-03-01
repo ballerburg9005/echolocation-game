@@ -22,6 +22,9 @@ It could also be used as a training tool for people to learn to echolocate, sinc
 
 Reducing the accuracy of the simulation unfortunately results in poor sound quality very fast. 
 
+There are lots of other methods for aurealization, some faster some slower. But next to none of them rely on real sound wave simulations. And those that do that I have seen require huge 100GB pre-computed maps for simple rooms/buildings to work at all in 3D space, which heavily limits the usability of those methods to blind people. On the other hand, since echolocation in humans is an unstudied phenomenon, it would probably be very unwise to start out with methods that make a lot of assumptions and optimizations to cut corners, which could be detrimental to how echolocation works.
+
+
 ## Features
 - Levels are loaded via SVG (drawing.svg or first command parameter)
 - Echolocation: Pulses inside reasonable accurate physics simulation emitting from funnel forward from the player
