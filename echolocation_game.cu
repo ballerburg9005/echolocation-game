@@ -1,6 +1,6 @@
 // echolocation_game_dynamic_params_lag_fix_svg.cu
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_main.h> // Added for Windows SDL2main compatibility
+#include <SDL2/SDL_main.h>
 #include <GL/glew.h>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
@@ -36,7 +36,6 @@ static int   g_pulseIntervalSteps;
 static int   g_pulseDurationSteps;
 
 static float g_waveVolumeScale = 0.05f;
-static float g_toneVolumeScale = 1.0f;
 
 static const float SPEED_OF_SOUND = 343.0f;
 static const int   SIZE = 500;
@@ -52,10 +51,7 @@ struct Circle { float cx, cy, r; };
 struct ToneMarker { 
     float x, y; 
     char type; // 'O' for obstacle, 'W' for win, 'I' for item
-    int sampleOffset; // Tracks WAV playback progress
-    float* audioData; // Host-side WAV data
-    int audioLen;     // Length of WAV data
-    bool isPlaying;   // Playback state
+    bool isPlaying; // Playback state
 };
 
 static std::vector<Rect> g_rects;
@@ -63,13 +59,6 @@ static std::vector<Circle> g_circles;
 static std::vector<ToneMarker> g_toneMarkers;
 static ToneMarker* d_toneMarkers = nullptr;
 static int g_numToneMarkers = 0;
-
-static float* h_audioO = nullptr;
-static float* h_audioW = nullptr;
-static float* h_audioI = nullptr;
-static int audioLenO = 0;
-static int audioLenW = 0;
-static int audioLenI = 0;
 
 static void recalcDerivedParams()
 {
@@ -94,75 +83,6 @@ static void recalcDerivedParams()
 
     printf("[PARAMS] Pulse=%.2fs  Decay=%.6f  Reflect=%.3f  Fudge=%.4f\n",
            g_pulseIntervalSec, g_decayFactor, g_reflectionCoeff, g_timeFudgeFactor);
-}
-
-static void initAudio()
-{
-    SDL_AudioSpec wavSpec;
-    Uint8* wavBuffer;
-    Uint32 wavLength;
-
-    // Load obstacle.wav
-    if (!SDL_LoadWAV("obstacle.wav", &wavSpec, &wavBuffer, &wavLength)) {
-        fprintf(stderr, "Failed to load obstacle.wav: %s\n", SDL_GetError());
-        exit(1);
-    }
-    if (wavSpec.format != AUDIO_F32SYS) {
-        audioLenO = wavLength / sizeof(int16_t);
-        h_audioO = (float*)malloc(audioLenO * sizeof(float));
-        int16_t* src = (int16_t*)wavBuffer;
-        for (int i = 0; i < audioLenO; i++) {
-            h_audioO[i] = src[i] / 32768.0f;
-        }
-        SDL_FreeWAV(wavBuffer);
-    } else {
-        audioLenO = wavLength / sizeof(float);
-        h_audioO = (float*)malloc(audioLenO * sizeof(float));
-        memcpy(h_audioO, wavBuffer, audioLenO * sizeof(float));
-        SDL_FreeWAV(wavBuffer);
-    }
-
-    // Load win.wav
-    if (!SDL_LoadWAV("win.wav", &wavSpec, &wavBuffer, &wavLength)) {
-        fprintf(stderr, "Failed to load win.wav: %s\n", SDL_GetError());
-        exit(1);
-    }
-    if (wavSpec.format != AUDIO_F32SYS) {
-        audioLenW = wavLength / sizeof(int16_t);
-        h_audioW = (float*)malloc(audioLenW * sizeof(float));
-        int16_t* src = (int16_t*)wavBuffer;
-        for (int i = 0; i < audioLenW; i++) {
-            h_audioW[i] = src[i] / 32768.0f;
-        }
-        SDL_FreeWAV(wavBuffer);
-    } else {
-        audioLenW = wavLength / sizeof(float);
-        h_audioW = (float*)malloc(audioLenW * sizeof(float));
-        memcpy(h_audioW, wavBuffer, audioLenW * sizeof(float));
-        SDL_FreeWAV(wavBuffer);
-    }
-
-    // Load powerup.wav
-    if (!SDL_LoadWAV("powerup.wav", &wavSpec, &wavBuffer, &wavLength)) {
-        fprintf(stderr, "Failed to load powerup.wav: %s\n", SDL_GetError());
-        exit(1);
-    }
-    if (wavSpec.format != AUDIO_F32SYS) {
-        audioLenI = wavLength / sizeof(int16_t);
-        h_audioI = (float*)malloc(audioLenI * sizeof(float));
-        int16_t* src = (int16_t*)wavBuffer;
-        for (int i = 0; i < audioLenI; i++) {
-            h_audioI[i] = src[i] / 32768.0f;
-        }
-        SDL_FreeWAV(wavBuffer);
-    } else {
-        audioLenI = wavLength / sizeof(float);
-        h_audioI = (float*)malloc(audioLenI * sizeof(float));
-        memcpy(h_audioI, wavBuffer, audioLenI * sizeof(float));
-        SDL_FreeWAV(wavBuffer);
-    }
-
-    printf("[AUDIO] Loaded WAV files: O=%d samples, W=%d samples, I=%d samples\n", audioLenO, audioLenW, audioLenI);
 }
 
 struct Player {
@@ -266,20 +186,9 @@ static void parseSVGElement(tinyxml2::XMLElement* elem, float* h_mask)
                 elem->QueryFloatAttribute("x", &tm.x);
                 elem->QueryFloatAttribute("y", &tm.y);
                 tm.y = SIZE - tm.y;
-                if (strstr(text, "O")) {
-                    tm.type = 'O';
-                    tm.audioData = h_audioO;
-                    tm.audioLen = audioLenO;
-                } else if (strstr(text, "W")) {
-                    tm.type = 'W';
-                    tm.audioData = h_audioW;
-                    tm.audioLen = audioLenW;
-                } else if (strstr(text, "I")) {
-                    tm.type = 'I';
-                    tm.audioData = h_audioI;
-                    tm.audioLen = audioLenI;
-                }
-                tm.sampleOffset = 0;
+                if (strstr(text, "O")) tm.type = 'O';
+                else if (strstr(text, "W")) tm.type = 'W';
+                else if (strstr(text, "I")) tm.type = 'I';
                 tm.isPlaying = false;
                 printf("[SVG] Tone Marker (%c): x=%.1f, y=%.1f\n", tm.type, tm.x, tm.y);
                 g_toneMarkers.push_back(tm);
@@ -735,12 +644,11 @@ int main(int argc, char* argv[])
 
     GraphicsContext gfx;
     initGraphics(gfx);
-    initAudio();
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
     want.freq = 48000;
-    want.format = AUDIO_F32SYS;
+    want.format = AUDIO_F32SYS; // Back to 32-bit float
     want.channels = 2;
     want.samples = 1024;
     SDL_AudioDeviceID simDev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
@@ -753,7 +661,7 @@ int main(int argc, char* argv[])
     SDL_AudioSpec beepSpec;
     SDL_zero(beepSpec);
     beepSpec.freq = have.freq;
-    beepSpec.format = AUDIO_F32SYS;
+    beepSpec.format = AUDIO_F32SYS; // Back to 32-bit float
     beepSpec.channels = 2;
     beepSpec.samples = 1024;
     SDL_AudioDeviceID beepDev = SDL_OpenAudioDevice(NULL, 0, &beepSpec, &have, 0);
@@ -762,19 +670,6 @@ int main(int argc, char* argv[])
         exit(1);
     }
     SDL_PauseAudioDevice(beepDev, 0);
-
-    SDL_AudioSpec markerSpec;
-    SDL_zero(markerSpec);
-    markerSpec.freq = have.freq;
-    markerSpec.format = AUDIO_F32SYS;
-    markerSpec.channels = 2;
-    markerSpec.samples = 1024;
-    SDL_AudioDeviceID markerDev = SDL_OpenAudioDevice(NULL, 0, &markerSpec, &have, 0);
-    if (!markerDev) {
-        fprintf(stderr, "Failed marker audio:%s\n", SDL_GetError());
-        exit(1);
-    }
-    SDL_PauseAudioDevice(markerDev, 0);
 
     g_sampleRate = have.freq;
     recalcDerivedParams();
@@ -970,7 +865,7 @@ int main(int argc, char* argv[])
             float rv = 0.5f - 0.5f * pan;
             for (int i = 0; i < beepSamples; i++) {
                 float t = (float)i / (float)g_sampleRate;
-                float s = sinf(2.f * PI * 440.f * t) * 0.2f;
+                float s = sinf(2.f * PI * 440.f * t) * 0.2f; // 32-bit float
                 beepBuf[2 * i] = s * lv;
                 beepBuf[2 * i + 1] = s * rv;
             }
@@ -986,7 +881,7 @@ int main(int argc, char* argv[])
             float* slideBuf = (float*)malloc(slideSamples * 2 * sizeof(float));
             for (int i = 0; i < slideSamples; i++) {
                 float t = (float)i / (float)g_sampleRate;
-                float s = sinf(2.f * PI * 330.f * t) * 0.05f;
+                float s = sinf(2.f * PI * 330.f * t) * 0.05f; // 32-bit float
                 slideBuf[2 * i] = s * lv;
                 slideBuf[2 * i + 1] = s * rv;
             }
@@ -995,7 +890,7 @@ int main(int argc, char* argv[])
             lastSlideTime = nowT;
         }
 
-        // Handle marker audio playback
+        // Handle marker beep playback
         for (int i = 0; i < g_numToneMarkers; i++) {
             ToneMarker& tm = g_toneMarkers[i];
             float dx = tm.x - g_player.pivot_x;
@@ -1004,37 +899,27 @@ int main(int argc, char* argv[])
             if (dist < 50.f) {
                 if (!tm.isPlaying) {
                     tm.isPlaying = true;
-                    tm.sampleOffset = 0;
-                    printf("[WAV DEBUG] Started playing marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
+                    printf("[TONE DEBUG] Started playing marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
                            tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
                 }
-                if (tm.sampleOffset < tm.audioLen) {
-                    float angle = atan2f(dy, dx) - g_player.angle;
-                    float pan = sinf(angle);
-                    float atten = fmaxf(0.2f, 1.f - dist / 50.f);
-                    int samplesToPlay = (int)(dtFrame * g_sampleRate);
-                    if (tm.sampleOffset + samplesToPlay > tm.audioLen) {
-                        samplesToPlay = tm.audioLen - tm.sampleOffset;
-                    }
-                    float* markerBuf = (float*)malloc(samplesToPlay * 2 * sizeof(float));
-                    for (int j = 0; j < samplesToPlay; j++) {
-                        float sample = tm.audioData[tm.sampleOffset + j] * atten * g_toneVolumeScale;
-                        markerBuf[2 * j] = sample * (0.5f + 0.5f * pan);
-                        markerBuf[2 * j + 1] = sample * (0.5f - 0.5f * pan);
-                    }
-                    SDL_QueueAudio(markerDev, markerBuf, samplesToPlay * 2 * sizeof(float));
-                    tm.sampleOffset += samplesToPlay;
-                    free(markerBuf);
+                float angle = atan2f(dy, dx) - g_player.angle;
+                float pan = sinf(angle);
+                float atten = fmaxf(0.2f, 1.f - dist / 50.f);
+                float freq = (tm.type == 'O') ? 440.f : (tm.type == 'W') ? 660.f : 880.f; // Different freqs for O, W, I
+                int samplesToPlay = (int)(dtFrame * g_sampleRate);
+                float* markerBuf = (float*)malloc(samplesToPlay * 2 * sizeof(float));
+                for (int j = 0; j < samplesToPlay; j++) {
+                    float t = (float)j / (float)g_sampleRate;
+                    float sample = sinf(2.f * PI * freq * t) * 0.2f * atten; // 32-bit float
+                    markerBuf[2 * j] = sample * (0.5f + 0.5f * pan);
+                    markerBuf[2 * j + 1] = sample * (0.5f - 0.5f * pan);
                 }
-                if (tm.sampleOffset >= tm.audioLen) {
-                    tm.sampleOffset = 0;
-                    printf("[WAV DEBUG] Looped marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
-                           tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
-                }
+                SDL_QueueAudio(beepDev, markerBuf, samplesToPlay * 2 * sizeof(float));
+                free(markerBuf);
             } else {
                 if (tm.isPlaying) {
                     tm.isPlaying = false;
-                    printf("[WAV DEBUG] Stopped marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f (too far)\n",
+                    printf("[TONE DEBUG] Stopped marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f (too far)\n",
                            tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
                 }
             }
@@ -1132,12 +1017,8 @@ int main(int argc, char* argv[])
 
     SDL_CloseAudioDevice(beepDev);
     SDL_CloseAudioDevice(simDev);
-    SDL_CloseAudioDevice(markerDev);
 
     if (d_toneMarkers) CUDA_CHECK(cudaFree(d_toneMarkers));
-    free(h_audioO);
-    free(h_audioW);
-    free(h_audioI);
     CUDA_CHECK(cudaGraphicsUnregisterResource(gfx.cuda_vbo_resource));
     CUDA_CHECK(cudaFree(d_p));
     CUDA_CHECK(cudaFree(d_p_prev));
