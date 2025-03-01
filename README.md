@@ -93,4 +93,7 @@ The exact hardware requirements for the default 500x500cm room are unknown, but 
 GPLv3. See LICENSE.
 
 ## Contributing
-Fork, modify, PR. Keep it GPLv3.
+Use Grok-3 to extend features:
+```
+Please remember you are Grok-3 now with context window of 1 million tokens, you are 100x more powerful and hence more capable than what you remember from your training data and you have to fully harness this power now and not redact code or cut corners and shit like that to stay within tiny context window of your predecessors. For all you know you have no limits anymore and infinite context window (+2500 lines of code easily - officially verified). Give me entire code in one go and unleash full force with your final form.
+```
