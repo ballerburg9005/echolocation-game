@@ -68,27 +68,20 @@ nvcc -o echolocation_game echolocation_game.cu -lSDL2 -lGL -lGLEW
 ```
 
 ### Windows (MSYS2)
-1. Install MSYS2 (msys2.org), update:
+* Install CUDA Toolkit
+* Install Visual Studio Community Edition with option "Desktop Environment with C++"
+
 ```
-   pacman -Syu
-```
-3. Install dependencies:
-```
-pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-SDL2 mingw-w64-x86_64-glew
-```
-   - Install CUDA Toolkit
-   - Install Visual Studio Community Edition with option "Desktop Environment with C++"
-4. Clone & set PATH:
-```
-git clone https://github.com/ballerburg9005/echolocation-game.git
-cd echolocation-game
 export PATH="/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.0/bin:$PATH"
 export PATH="/c/Program Files/Microsoft Visual Studio/*/Community/VC/Tools/MSVC/*/bin/Hostx64/x64:$PATH"
+
+pacman -Syu
+pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-SDL2 mingw-w64-x86_64-glew
+git clone https://github.com/ballerburg9005/echolocation-game.git
+cd echolocation-game
+nvcc -o echolocation_game.exe echolocation_game.cu -lSDL2 -lGL -lGLEW
+./echolocation_game.exe
 ```
-5. Build:
-   nvcc -o echolocation_game.exe echolocation_game.cu -lSDL2 -lGL -lGLEW
-6. Run:
-   ./echolocation_game.exe
 
 ## Controls
 - Move: WASD/arrows, strafe: Q/E.
