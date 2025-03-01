@@ -62,7 +62,7 @@ The exact hardware requirements for the default 500x500cm room are unknown, but 
 1. Install:
    sudo apt install build-essential libsdl2-dev libglew-dev nvidia-cuda-toolkit
 2. Clone:
-   git clone https://github.com/yourusername/echolocation-game.git
+   git clone https://github.com/ballerburg9005/echolocation-game.git
    cd echolocation-game
 3. Build:
    nvcc -o echolocation_game echolocation_game.cu -lSDL2 -lGL -lGLEW
