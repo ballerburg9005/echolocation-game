@@ -26,7 +26,7 @@ Reducing the accuracy of the simulation to increase the room size, unfortunately
 - Levels are loaded via SVG (drawing.svg or first command parameter)
 - Echolocation: Pulses inside reasonable accurate physics simulation emitting from funnel forward from the player
 - Controls: WASD/arrows (move), Q/E (strafe), mouse (cane).
-- Adjustable: Pulse interval (1/2), decay (3/4), reflection (5/6), time fudge (7/8).
+- Adjustable: Pulse interval (1/2), decay (3/4), reflection (5/6), time fudge (7/8). (buttons can bug out if you mash too long)
 - Player: 16cm mic distance, funnel apex at (0,0), pulse 1 unit below, mics 2 units below apex.
 
 ## Bugs
