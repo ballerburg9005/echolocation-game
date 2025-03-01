@@ -1,5 +1,6 @@
 // echolocation_game_dynamic_params_lag_fix_svg.cu
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_main.h> // Added for Windows SDL2main compatibility
 #include <GL/glew.h>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
@@ -686,7 +687,7 @@ static void initGraphics(GraphicsContext &gfx)
     glEnableVertexAttribArray(1);
 }
 
-int main(int argc, char** argv)
+int main(int argc, char* argv[])
 {
     const char* svgFile = (argc >= 2) ? argv[1] : "drawing.svg";
     float* h_mask = (float*)calloc(SIZE * SIZE, sizeof(float));
@@ -1004,7 +1005,7 @@ int main(int argc, char** argv)
                 if (!tm.isPlaying) {
                     tm.isPlaying = true;
                     tm.sampleOffset = 0;
-                    printf("[MARKER DEBUG] Started %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
+                    printf("[WAV DEBUG] Started playing marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
                            tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
                 }
                 if (tm.sampleOffset < tm.audioLen) {
@@ -1026,12 +1027,14 @@ int main(int argc, char** argv)
                     free(markerBuf);
                 }
                 if (tm.sampleOffset >= tm.audioLen) {
-                    tm.sampleOffset = 0; // Loop
+                    tm.sampleOffset = 0;
+                    printf("[WAV DEBUG] Looped marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
+                           tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
                 }
             } else {
                 if (tm.isPlaying) {
                     tm.isPlaying = false;
-                    printf("[MARKER DEBUG] Stopped %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
+                    printf("[WAV DEBUG] Stopped marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f (too far)\n",
                            tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
                 }
             }
