@@ -85,9 +85,9 @@ The exact hardware requirements for the default 500x500cm room are unknown, but 
 
 ## Controls
 - Move: WASD/arrows, strafe: Q/E.
-- Cane: Hold left mouse, move to extend.
-- Params: 1/2 (pulse), 3/4 (decay), 5/6 (reflect), 7/8 (fudge).
-- Toggle objects: Space.
+- Cane: Hold left mouse, move to extend. (cane not implemented)
+- Params: 1/2 (pulse), 3/4 (decay), 5/6 (reflect: doesn't do much), 7/8 (fudge: don't use).
+- Toggle yellow (=reflective) objects visibiliy: Space.
 
 ## License
 GPLv3. See LICENSE.
