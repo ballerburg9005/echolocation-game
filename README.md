@@ -45,11 +45,15 @@ Use Inkscape and save as plain SVG. The page dimensions must be in pixels and ma
 Load levels like so:
     ./echolocation_game level.svg
 
-## Prerequisites
-
-### Hardware
+## Hardware
 
 The exact hardware requirements for the default 500x500cm room are unknown, but approximately half that of a 3090. Memory usage is below 1GB and utilization 65% with 3090.
+
+## Running on Windows
+
+There is an untested Windows build available with CUDA 12.8. You can download it in the (Releases)[https://github.com/ballerburg9005/echolocation-game/releases] section on the right.
+
+## Building from source
 
 ### Linux
 - CUDA Toolkit, SDL2 (libsdl2-dev), GLEW (libglew-dev), GCC, NVCC.
