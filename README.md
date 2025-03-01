@@ -59,28 +59,35 @@ The exact hardware requirements for the default 500x500cm room are unknown, but 
 ## Build and Run
 
 ### Linux
-1. Install:
-   sudo apt install build-essential libsdl2-dev libglew-dev nvidia-cuda-toolkit
-2. Clone:
-   git clone https://github.com/ballerburg9005/echolocation-game.git
-   cd echolocation-game
-3. Build:
-   nvcc -o echolocation_game echolocation_game.cu -lSDL2 -lGL -lGLEW
-4. Run:
-   ./echolocation_game
+```
+sudo apt install build-essential libsdl2-dev libglew-dev nvidia-cuda-toolkit
+git clone https://github.com/ballerburg9005/echolocation-game.git
+cd echolocation-game
+nvcc -o echolocation_game echolocation_game.cu -lSDL2 -lGL -lGLEW
+./echolocation_game
+```
 
 ### Windows (MSYS2)
 1. Install MSYS2 (msys2.org), update:
+```
    pacman -Syu
-2. Install dependencies:
-   pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-SDL2 mingw-w64-x86_64-glew
-   - Install CUDA Toolkit, add nvcc to PATH (e.g., C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.0\bin).
-3. Clone:
-   git clone https://github.com/ballerburg9005/echolocation-game.git
-   cd echolocation-game
-4. Build:
+```
+3. Install dependencies:
+```
+pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-SDL2 mingw-w64-x86_64-glew
+```
+   - Install CUDA Toolkit
+   - Install Visual Studio Community Edition with option "Desktop Environment with C++"
+4. Clone & set PATH:
+```
+git clone https://github.com/ballerburg9005/echolocation-game.git
+cd echolocation-game
+export PATH="/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.0/bin:$PATH"
+export PATH="/c/Program Files/Microsoft Visual Studio/*/Community/VC/Tools/MSVC/*/bin/Hostx64/x64:$PATH"
+```
+5. Build:
    nvcc -o echolocation_game.exe echolocation_game.cu -lSDL2 -lGL -lGLEW
-5. Run:
+6. Run:
    ./echolocation_game.exe
 
 ## Controls
