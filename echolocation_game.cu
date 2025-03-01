@@ -14,6 +14,14 @@
 #define PI 3.14159265358979323846f
 #endif
 
+#define CUDA_CHECK(call) { \
+    cudaError_t err=call; \
+    if(err!=cudaSuccess){ \
+        fprintf(stderr,"CUDA error at %s:%d - %s\n",__FILE__,__LINE__,cudaGetErrorString(err));\
+        exit(1);\
+    }\
+}
+
 static float g_DX              = 0.01f;
 static float g_DT;
 static float g_pulseIntervalSec= 1.0f;
@@ -27,7 +35,7 @@ static int   g_pulseIntervalSteps;
 static int   g_pulseDurationSteps;
 
 static float g_waveVolumeScale = 0.05f;
-static float g_toneVolumeScale = 0.2f;
+static float g_toneVolumeScale = 0.5f;
 
 static const float SPEED_OF_SOUND = 343.0f;
 static const int   SIZE = 500;
@@ -40,13 +48,28 @@ static const float ZOOM_FACTOR = 4.0f;
 
 struct Rect { float x, y, width, height; };
 struct Circle { float cx, cy, r; };
-struct ToneMarker { float x, y; };
+struct ToneMarker { 
+    float x, y; 
+    char type; // 'O' for obstacle, 'W' for win, 'I' for item
+    int sampleOffset; // Tracks WAV playback progress
+};
 
 static std::vector<Rect> g_rects;
 static std::vector<Circle> g_circles;
 static std::vector<ToneMarker> g_toneMarkers;
 static ToneMarker* d_toneMarkers = nullptr;
 static int g_numToneMarkers = 0;
+
+// WAV audio data
+static float* h_audioO = nullptr;
+static float* h_audioW = nullptr;
+static float* h_audioI = nullptr;
+static float* d_audioO = nullptr;
+static float* d_audioW = nullptr;
+static float* d_audioI = nullptr;
+static int audioLenO = 0;
+static int audioLenW = 0;
+static int audioLenI = 0;
 
 static void recalcDerivedParams()
 {
@@ -73,6 +96,82 @@ static void recalcDerivedParams()
            g_pulseIntervalSec, g_decayFactor, g_reflectionCoeff, g_timeFudgeFactor);
 }
 
+static void initAudio()
+{
+    SDL_AudioSpec wavSpec;
+    Uint8* wavBuffer;
+    Uint32 wavLength;
+
+    // Load obstacle.wav
+    if (!SDL_LoadWAV("obstacle.wav", &wavSpec, &wavBuffer, &wavLength)) {
+        fprintf(stderr, "Failed to load obstacle.wav: %s\n", SDL_GetError());
+        exit(1);
+    }
+    if (wavSpec.format != AUDIO_F32SYS) {
+        // Convert 16-bit integer to 32-bit float if necessary
+        audioLenO = wavLength / sizeof(int16_t); // 16-bit samples
+        h_audioO = (float*)malloc(audioLenO * sizeof(float));
+        int16_t* src = (int16_t*)wavBuffer;
+        for (int i = 0; i < audioLenO; i++) {
+            h_audioO[i] = src[i] / 32768.0f; // Scale [-32768, 32767] to [-1.0, 1.0]
+        }
+        SDL_FreeWAV(wavBuffer);
+    } else {
+        audioLenO = wavLength / sizeof(float);
+        h_audioO = (float*)malloc(audioLenO * sizeof(float));
+        memcpy(h_audioO, wavBuffer, audioLenO * sizeof(float));
+        SDL_FreeWAV(wavBuffer);
+    }
+    CUDA_CHECK(cudaMalloc(&d_audioO, audioLenO * sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_audioO, h_audioO, audioLenO * sizeof(float), cudaMemcpyHostToDevice));
+
+    // Load win.wav
+    if (!SDL_LoadWAV("win.wav", &wavSpec, &wavBuffer, &wavLength)) {
+        fprintf(stderr, "Failed to load win.wav: %s\n", SDL_GetError());
+        exit(1);
+    }
+    if (wavSpec.format != AUDIO_F32SYS) {
+        audioLenW = wavLength / sizeof(int16_t);
+        h_audioW = (float*)malloc(audioLenW * sizeof(float));
+        int16_t* src = (int16_t*)wavBuffer;
+        for (int i = 0; i < audioLenW; i++) {
+            h_audioW[i] = src[i] / 32768.0f;
+        }
+        SDL_FreeWAV(wavBuffer);
+    } else {
+        audioLenW = wavLength / sizeof(float);
+        h_audioW = (float*)malloc(audioLenW * sizeof(float));
+        memcpy(h_audioW, wavBuffer, audioLenW * sizeof(float));
+        SDL_FreeWAV(wavBuffer);
+    }
+    CUDA_CHECK(cudaMalloc(&d_audioW, audioLenW * sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_audioW, h_audioW, audioLenW * sizeof(float), cudaMemcpyHostToDevice));
+
+    // Load powerup.wav
+    if (!SDL_LoadWAV("powerup.wav", &wavSpec, &wavBuffer, &wavLength)) {
+        fprintf(stderr, "Failed to load powerup.wav: %s\n", SDL_GetError());
+        exit(1);
+    }
+    if (wavSpec.format != AUDIO_F32SYS) {
+        audioLenI = wavLength / sizeof(int16_t);
+        h_audioI = (float*)malloc(audioLenI * sizeof(float));
+        int16_t* src = (int16_t*)wavBuffer;
+        for (int i = 0; i < audioLenI; i++) {
+            h_audioI[i] = src[i] / 32768.0f;
+        }
+        SDL_FreeWAV(wavBuffer);
+    } else {
+        audioLenI = wavLength / sizeof(float);
+        h_audioI = (float*)malloc(audioLenI * sizeof(float));
+        memcpy(h_audioI, wavBuffer, audioLenI * sizeof(float));
+        SDL_FreeWAV(wavBuffer);
+    }
+    CUDA_CHECK(cudaMalloc(&d_audioI, audioLenI * sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_audioI, h_audioI, audioLenI * sizeof(float), cudaMemcpyHostToDevice));
+
+    printf("[AUDIO] Loaded WAV files: O=%d samples, W=%d samples, I=%d samples\n", audioLenO, audioLenW, audioLenI);
+}
+
 struct Player {
     float pivot_x;
     float pivot_y;
@@ -96,7 +195,7 @@ static void updatePlayerComponents(Player &p)
     g_mic_r_x = p.pivot_x + rx * c - ry * s;
     g_mic_r_y = p.pivot_y + rx * s + ry * c;
 
-    g_wedge_x = p.pivot_x + wx * c - wy * s;
+    g_wedge_x = p.pivot_x + wx * c - wy * s; // Still computed for dynamic mask
     g_wedge_y = p.pivot_y + wx * s + wy * c;
 
     g_pulse_x = p.pivot_x + px * c - py * s;
@@ -169,12 +268,16 @@ static void parseSVGElement(tinyxml2::XMLElement* elem, float* h_mask)
         else if (strcmp(name, "text") == 0) {
             XMLElement* tspan = elem->FirstChildElement("tspan");
             const char* text = tspan ? tspan->GetText() : elem->GetText();
-            if (text && strstr(text, "O")) {
+            if (text && (strstr(text, "O") || strstr(text, "W") || strstr(text, "I"))) {
                 ToneMarker tm;
                 elem->QueryFloatAttribute("x", &tm.x);
                 elem->QueryFloatAttribute("y", &tm.y);
                 tm.y = SIZE - tm.y;
-                printf("[SVG] Tone Marker: x=%.1f, y=%.1f\n", tm.x, tm.y);
+                if (strstr(text, "O")) tm.type = 'O';
+                else if (strstr(text, "W")) tm.type = 'W';
+                else if (strstr(text, "I")) tm.type = 'I';
+                tm.sampleOffset = 0;
+                printf("[SVG] Tone Marker (%c): x=%.1f, y=%.1f\n", tm.type, tm.x, tm.y);
                 g_toneMarkers.push_back(tm);
             }
         }
@@ -242,14 +345,6 @@ static void updateDynamicMask(const float* h_static, float* h_dynamic, float wed
     }
 }
 
-#define CUDA_CHECK(call) { \
-    cudaError_t err=call; \
-    if(err!=cudaSuccess){ \
-        fprintf(stderr,"CUDA error at %s:%d - %s\n",__FILE__,__LINE__,cudaGetErrorString(err));\
-        exit(1);\
-    }\
-}
-
 __global__ void updatePressure(float* p_next, const float* p, const float* p_prev,
                                const float* mask, float c2, int size, float reflection)
 {
@@ -307,8 +402,11 @@ __global__ void captureAndReduce(const float* p, float lx, float ly,
                                  float rx, float ry, int sampleIndex,
                                  float* audioL, float* audioR, float waveVolume,
                                  float player_x, float player_y, float player_angle,
-                                 const ToneMarker* toneMarkers, int numToneMarkers,
-                                 int sampleRate, float toneVolume)
+                                 ToneMarker* toneMarkers, int numToneMarkers,
+                                 const float* audioO, int lenO,
+                                 const float* audioW, int lenW,
+                                 const float* audioI, int lenI,
+                                 float toneVolumeScale)
 {
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         int ilx = (int)roundf(lx), ily = (int)roundf(ly);
@@ -331,10 +429,25 @@ __global__ void captureAndReduce(const float* p, float lx, float ly,
                 float angle = atan2f(dy, dx) - player_angle;
                 float pan = sinf(angle);
                 float atten = 1.f - dist / 50.f;
-                float tone = sinf(2.f * PI * 440.f * sampleIndex / (float)sampleRate) * 
-                           toneVolume * atten;
-                audioL[sampleIndex] += tone * (0.5f + 0.5f * pan);
-                audioR[sampleIndex] += tone * (0.5f - 0.5f * pan);
+                float sample = 0.f;
+                int offset = toneMarkers[i].sampleOffset;
+
+                if (toneMarkers[i].type == 'O' && offset < lenO) {
+                    sample = audioO[offset];
+                    toneMarkers[i].sampleOffset = (offset + 1) % lenO;
+                }
+                else if (toneMarkers[i].type == 'W' && offset < lenW) {
+                    sample = audioW[offset];
+                    toneMarkers[i].sampleOffset = (offset + 1) % lenW;
+                }
+                else if (toneMarkers[i].type == 'I' && offset < lenI) {
+                    sample = audioI[offset];
+                    toneMarkers[i].sampleOffset = (offset + 1) % lenI;
+                }
+
+                sample *= atten * toneVolumeScale;
+                audioL[sampleIndex] += sample * (0.5f + 0.5f * pan);
+                audioR[sampleIndex] += sample * (0.5f - 0.5f * pan);
             }
         }
     }
@@ -381,26 +494,23 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                 if (dpx * dpx + dpy * dpy <= 1.f) {
                     vbo_data[vbo_idx + 2] = -3.f;
                 } else {
-                    float dxw = x - wx, dyw = y - wy;
-                    if (dxw * dxw + dyw * dyw <= 4.f) {
-                        vbo_data[vbo_idx + 2] = -4.f;
-                    } else {
-                        bool toneMarker = false;
-                        for (int i = 0; i < numToneMarkers; i++) {
-                            float dtx = x - toneMarkers[i].x;
-                            float dty = y - toneMarkers[i].y;
-                            if (dtx * dtx + dty * dty <= 25.f) {
-                                vbo_data[vbo_idx + 2] = -5.f;
-                                toneMarker = true;
-                                break;
-                            }
+                    bool toneMarker = false;
+                    for (int i = 0; i < numToneMarkers; i++) {
+                        float dtx = x - toneMarkers[i].x;
+                        float dty = y - toneMarkers[i].y;
+                        if (dtx * dtx + dty * dty <= 25.f) {
+                            if (toneMarkers[i].type == 'O') vbo_data[vbo_idx + 2] = -5.f;
+                            else if (toneMarkers[i].type == 'W') vbo_data[vbo_idx + 2] = -6.f;
+                            else if (toneMarkers[i].type == 'I') vbo_data[vbo_idx + 2] = -7.f;
+                            toneMarker = true;
+                            break;
                         }
-                        if (!toneMarker) {
-                            if (showObj && mask[idx] > 0.f) {
-                                vbo_data[vbo_idx + 2] = -1.f;
-                            } else {
-                                vbo_data[vbo_idx + 2] = tanhf(wave * 0.01f);
-                            }
+                    }
+                    if (!toneMarker) {
+                        if (showObj && mask[idx] > 0.f) {
+                            vbo_data[vbo_idx + 2] = -1.f;
+                        } else {
+                            vbo_data[vbo_idx + 2] = tanhf(wave * 0.01f);
                         }
                     }
                 }
@@ -431,7 +541,9 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         float dtx = x - toneMarkers[i].x;
                         float dty = y - toneMarkers[i].y;
                         if (dtx * dtx + dty * dty <= 25.f) {
-                            vbo_data[fp_idx + 2] = -5.f;
+                            if (toneMarkers[i].type == 'O') vbo_data[fp_idx + 2] = -5.f;
+                            else if (toneMarkers[i].type == 'W') vbo_data[fp_idx + 2] = -6.f;
+                            else if (toneMarkers[i].type == 'I') vbo_data[fp_idx + 2] = -7.f;
                             toneMarker = true;
                             break;
                         }
@@ -451,11 +563,10 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
     }
 }
 
-// Collision detection with increased resolution and correct orientation
 static bool checkPlayerCollision(float px, float py, const float* h_mask, float& collisionAngle, float playerAngle)
 {
-    int base = (int)ceilf(sqrtf(6.f * 6.f + 5.5f * 5.5f)); // ~8.5 units
-    int radius = base + 10 - 5; // ~13.5 units
+    int base = (int)ceilf(sqrtf(6.f * 6.f + 5.5f * 5.5f));
+    int radius = base + 10 - 5;
     int ixmin = (int)fmaxf(0, floorf(px - radius));
     int ixmax = (int)fminf(SIZE - 1, ceilf(px + radius));
     int iymin = (int)fmaxf(0, floorf(py - radius));
@@ -463,7 +574,7 @@ static bool checkPlayerCollision(float px, float py, const float* h_mask, float&
     int r2 = radius * radius;
 
     bool collided = false;
-    const int nS = 360, nR = 5; // 360 steps (1° increments)
+    const int nS = 360, nR = 5;
     float best = -1.f, bestAngle = 0.f;
 
     for (int i = 0; i < nS; i++) {
@@ -517,12 +628,14 @@ layout(location=1) in float pressure;
 out vec3 color;
 void main(){
     gl_Position = vec4(pos, 0, 1);
-    if (pressure < -9.0)      color = vec3(0, 0, 0);
-    else if (pressure < -4.5) color = vec3(1, 0, 1);
-    else if (pressure < -3.5) color = vec3(0.5, 0, 0.5);
-    else if (pressure < -2.5) color = vec3(1, 0, 0);
-    else if (pressure < -1.5) color = vec3(0, 1, 0);
-    else if (pressure < -0.5) color = vec3(1, 1, 0);
+    if (pressure < -9.0)      color = vec3(0, 0, 0);       // Black (invisible)
+    else if (pressure < -6.5) color = vec3(1, 1, 0);       // Gold for 'I'
+    else if (pressure < -5.5) color = vec3(0, 1, 1);       // Cyan for 'W'
+    else if (pressure < -4.5) color = vec3(1, 0, 1);       // Purple for 'O'
+    else if (pressure < -3.5) color = vec3(0.5, 0, 0.5);   // Dark purple (wedge, removed)
+    else if (pressure < -2.5) color = vec3(1, 0, 0);       // Red (pulse)
+    else if (pressure < -1.5) color = vec3(0, 1, 0);       // Green (mic)
+    else if (pressure < -0.5) color = vec3(1, 1, 0);       // Yellow (objects)
     else {
         float r = (pressure > 0 ? pressure : 0);
         float b = (pressure < 0 ? -pressure : 0);
@@ -654,6 +767,7 @@ int main(int argc, char** argv)
 
     GraphicsContext gfx;
     initGraphics(gfx);
+    initAudio();
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
@@ -682,7 +796,6 @@ int main(int argc, char** argv)
     SDL_PauseAudioDevice(beepDev, 0);
 
     g_sampleRate = have.freq;
-
     recalcDerivedParams();
 
     dim3 thr(32, 32);
@@ -795,35 +908,31 @@ int main(int argc, char** argv)
             dy -= strafeSpeed * dtFrame * sy;
         }
 
-        // Cap movement step to prevent overshooting
         float moveMag = sqrtf(dx * dx + dy * dy);
-        float maxStep = 13.5f; // Collision radius
+        float maxStep = 13.5f;
         if (moveMag > maxStep) {
             dx = dx * maxStep / moveMag;
             dy = dy * maxStep / moveMag;
             moveMag = maxStep;
         }
 
-        // Collision and sliding
         float collisionAngle = 0.f;
         newP.pivot_x += dx;
         newP.pivot_y += dy;
         bool collided = checkPlayerCollision(newP.pivot_x, newP.pivot_y, h_mask, collisionAngle, newP.angle);
 
         if (collided) {
-            float normalAngle = collisionAngle + newP.angle - PI / 2.f; // Absolute normal
+            float normalAngle = collisionAngle + newP.angle - PI / 2.f;
             float normalX = cosf(normalAngle);
             float normalY = sinf(normalAngle);
-            float dot = dx * normalX + dy * normalY; // Penetration component
+            float dot = dx * normalX + dy * normalY;
 
-            // Tangent direction
             float tangentAngle = normalAngle + PI / 2.f;
             float tangentX = cosf(tangentAngle);
             float tangentY = sinf(tangentAngle);
-            float slideDot = dx * tangentX + dy * tangentY; // Tangential component
-            if (fabsf(slideDot) > maxStep) slideDot = (slideDot > 0 ? maxStep : -maxStep); // Cap sliding distance
+            float slideDot = dx * tangentX + dy * tangentY;
+            if (fabsf(slideDot) > maxStep) slideDot = (slideDot > 0 ? maxStep : -maxStep);
 
-            // Try sliding along primary tangent
             float newX = g_player.pivot_x + slideDot * tangentX;
             float newY = g_player.pivot_y + slideDot * tangentY;
             float tempAngle;
@@ -834,7 +943,6 @@ int main(int argc, char** argv)
                 collisionAngle = tempAngle;
                 sliding = (fabsf(slideDot) > 0.01f);
             } else {
-                // Try opposite tangent direction
                 tangentAngle = normalAngle - PI / 2.f;
                 tangentX = cosf(tangentAngle);
                 tangentY = sinf(tangentAngle);
@@ -850,7 +958,6 @@ int main(int argc, char** argv)
                     collisionAngle = tempAngle;
                     sliding = (fabsf(slideDot) > 0.01f);
                 } else {
-                    // Iterative push away from wall
                     float pushX = g_player.pivot_x;
                     float pushY = g_player.pivot_y;
                     float stepSize = 1.0f;
@@ -865,7 +972,6 @@ int main(int argc, char** argv)
                 }
             }
 
-            // Apply damping to reduce wobble
             newP.pivot_x = g_player.pivot_x * 0.2f + newP.pivot_x * 0.8f;
             newP.pivot_y = g_player.pivot_y * 0.2f + newP.pivot_y * 0.8f;
         } else {
@@ -876,7 +982,6 @@ int main(int argc, char** argv)
         g_player = newP;
         updatePlayerComponents(g_player);
 
-        // Initial collision beep
         double nowT = simTime;
         if (!wasSliding && collided && nowT - lastBeep > beepGap) {
             float pan = sinf(collisionAngle);
@@ -892,7 +997,6 @@ int main(int argc, char** argv)
             lastBeep = nowT;
         }
 
-        // Sliding tone
         if (sliding && nowT - lastSlideTime > 0.1) {
             float pan = sinf(collisionAngle);
             float lv = 0.5f + 0.5f * pan;
@@ -935,8 +1039,11 @@ int main(int argc, char** argv)
                                       g_mic_r_x, g_mic_r_y, audioBatchIndex,
                                       d_audioL, d_audioR, g_waveVolumeScale,
                                       g_player.pivot_x, g_player.pivot_y, g_player.angle,
-                                      d_toneMarkers, g_numToneMarkers, 
-                                      g_sampleRate, g_toneVolumeScale);
+                                      d_toneMarkers, g_numToneMarkers,
+                                      d_audioO, audioLenO,
+                                      d_audioW, audioLenW,
+                                      d_audioI, audioLenI,
+                                      g_toneVolumeScale);
             CUDA_CHECK(cudaGetLastError());
 
             audioBatchIndex++;
@@ -957,11 +1064,19 @@ int main(int argc, char** argv)
             CUDA_CHECK(cudaMemcpy(hostL, d_audioL, audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
             CUDA_CHECK(cudaMemcpy(hostR, d_audioR, audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
 
+            float maxL = 0.0f, maxR = 0.0f;
             for (int k = 0; k < audioBatchIndex; k++) {
+                if (fabsf(hostL[k]) > maxL) maxL = fabsf(hostL[k]);
+                if (fabsf(hostR[k]) > maxR) maxR = fabsf(hostR[k]);
                 h_audioBuffer[2 * k] = hostL[k];
                 h_audioBuffer[2 * k + 1] = hostR[k];
             }
+            printf("[AUDIO DEBUG] Batch %d samples, MaxL=%.4f, MaxR=%.4f\n", audioBatchIndex, maxL, maxR);
+
             SDL_QueueAudio(simDev, h_audioBuffer, audioBatchIndex * 2 * sizeof(float));
+            CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(), 
+                                g_numToneMarkers * sizeof(ToneMarker), 
+                                cudaMemcpyHostToDevice));
             free(hostL);
             free(hostR);
             audioBatchIndex = 0;
@@ -1004,6 +1119,12 @@ int main(int argc, char** argv)
     SDL_CloseAudioDevice(simDev);
 
     if (d_toneMarkers) CUDA_CHECK(cudaFree(d_toneMarkers));
+    CUDA_CHECK(cudaFree(d_audioO));
+    CUDA_CHECK(cudaFree(d_audioW));
+    CUDA_CHECK(cudaFree(d_audioI));
+    free(h_audioO);
+    free(h_audioW);
+    free(h_audioI);
     CUDA_CHECK(cudaGraphicsUnregisterResource(gfx.cuda_vbo_resource));
     CUDA_CHECK(cudaFree(d_p));
     CUDA_CHECK(cudaFree(d_p_prev));
