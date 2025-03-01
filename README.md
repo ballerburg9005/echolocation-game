@@ -20,7 +20,7 @@ Once a room-sized 3D simulation is computationally possible (which it isn't with
 
 It could also be used as a training tool for people to learn to echolocate, since it provides a clean simple environment and highly idealized conditions.
 
-Reducing the accuracy of the simulation to increase the room size, unfortunately results in poor sound quality very fast. 
+Reducing the accuracy of the simulation unfortunately results in poor sound quality very fast. 
 
 ## Features
 - Levels are loaded via SVG (drawing.svg or first command parameter)
