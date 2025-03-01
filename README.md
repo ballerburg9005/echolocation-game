@@ -26,14 +26,15 @@ Reducing the accuracy of the simulation to increase the room size, unfortunately
 - Levels are loaded via SVG (drawing.svg or first command parameter)
 - Echolocation: Pulses inside reasonable accurate physics simulation emitting from funnel forward from the player
 - Controls: WASD/arrows (move), Q/E (strafe), mouse (cane).
-- Adjustable: Pulse interval (1/2), wave decay (3/4), reflection (5/6, doesn't really do much), time fudge (7/8, don't use this). (buttons can bug out if you mash too long)
+- Adjustable: Pulse interval (1/2), wave decay (3/4), reflection (5/6, doesn't really do much), time fudge (7/8, don't use this).
 - Player: 16cm mic distance, funnel apex at (0,0), pulse 1 unit below, mics 2 units below apex.
 
 ## Bugs
 
-Grok-3 messed up the sliding on walls, it doesn't work consistently, and fixing it became too much of a nightmare.
+- Grok-3 messed up the sliding on walls, it doesn't work consistently, and fixing it became too much of a nightmare.
+- adjustibles parameters mapped on number keys 1-8 can bug out if you increase values to extremes
 
-## Creating levels
+## Creating levels (maps)
 
 Use Inkscape and save as plain SVG. The page dimensions must be in pixels and match SIZE (500) specified in .cu file.
 
