@@ -51,7 +51,7 @@ The exact hardware requirements for the default 500x500cm room are unknown, but 
 
 ## Running on Windows
 
-There is an untested Windows build available with CUDA 12.8. You can download it in the (Releases)[https://github.com/ballerburg9005/echolocation-game/releases] section on the right.
+There is an untested Windows build available with CUDA 12.8. You can download it in the [Releases](https://github.com/ballerburg9005/echolocation-game/releases) section on the right.
 
 ## Build and Run
 
