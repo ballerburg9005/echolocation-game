@@ -89,13 +89,15 @@ unzip glew-2.0.0-win32.zip
 wget https://github.com/leethomason/tinyxml2/archive/refs/tags/10.0.0.zip
 unzip 10.0.0.zip
 cd tinyxml2-10.0.0
-cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=$HOME/tinyxml2-10.0.0/install .
-make -j$(nproc)
-make install
+mkdir build
+cd build
+cmake -G "Visual Studio 17 2022" -DCMAKE_INSTALL_PREFIX=$HOME/tinyxml2-msvc -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ..
+cmake --build . --config Release
+cmake --install .
 cd $HOME
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
-nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.0.0/include -L$HOME/glew-2.0.0/lib/Release/x64 -I$HOME/SDL2-2.32.0/include -L$HOME/SDL2-2.32.0/lib/x64 -I$HOME/tinyxml2-10.0.0/install/include -L$HOME/tinyxml2-10.0.0/install/lib -lSDL2main -lSDL2 -lopengl32 -lglew32 -allow-unsupported-compiler -Xlinker /SUBSYSTEM:CONSOLE
+nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.0.0/include -L$HOME/glew-2.0.0/lib/Release/x64 -I$HOME/SDL2-2.32.0/include -L$HOME/SDL2-2.32.0/lib/x64 -I$HOME/tinyxml2-msvc/include -L$HOME/tinyxml2-msvc/lib -lSDL2main -lSDL2 -lopengl32 -lglew32 -ltinyxml2 -allow-unsupported-compiler -Xlinker /SUBSYSTEM:CONSOLE
 
 ./echolocation_game.exe
 ```
