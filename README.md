@@ -14,7 +14,7 @@ This prototype was mainly written for baseline comparison purposes, to determine
 
 If this program turns out to trigger people who can already echolocate in real life, more simplified an less computationally extreme simulation methods could be tested.
 
-Once a room-sized 3D simulation is computationally possible (which it isn't with the current method), it opens all kinds of possibilities for blind people to see structures with sound, not only limited to games, but possibly also embossed text, UI interfaces, websites etc. for crude naviation. 
+Once a room-sized 3D simulation is computationally possible (which it isn't with the current method), it opens all kinds of possibilities for blind people to see structures with sound, not only limited to games, but possibly also embossed text, UI interfaces, websites etc. for crude naviation. The accuracy to which echolocation can work in people given idealized conditions has yet to be studied though.
 
 It could also be used as a training tool for people to learn to echolocate, since it provides a clean simple environment and highly idealized conditions.
 
