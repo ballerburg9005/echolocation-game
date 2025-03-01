@@ -53,14 +53,6 @@ The exact hardware requirements for the default 500x500cm room are unknown, but 
 
 There is an untested Windows build available with CUDA 12.8. You can download it in the (Releases)[https://github.com/ballerburg9005/echolocation-game/releases] section on the right.
 
-## Building from source
-
-### Linux
-- CUDA Toolkit, SDL2 (libsdl2-dev), GLEW (libglew-dev), GCC, NVCC.
-
-### Windows (MSYS2)
-- MSYS2, CUDA Toolkit, SDL2, GLEW.
-
 ## Build and Run
 
 ### Linux
