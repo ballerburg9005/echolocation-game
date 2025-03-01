@@ -33,12 +33,13 @@ Reducing the accuracy of the simulation unfortunately results in poor sound qual
 
 - Grok-3 messed up the sliding on walls, it doesn't work consistently, and fixing it became too much of a nightmare.
 - adjustibles parameters mapped on number keys 1-8 can bug out if you increase values to extremes
+- the "O", "I", or "W" elements were meant to play sounds for "dead end", "item" and "win game", but this is bugged so they only buzz ("win game" has much higher pitch)
 
 ## Creating levels (maps)
 
 Use Inkscape and save as plain SVG. The page dimensions must be in pixels and match SIZE (500) specified in .cu file.
 
-- a Text element with with "O" is interepreted as a purple buzzing emitter (not wave simulated)
+- a Text element with with "O", "I", or "W" is interepreted as a pink, yellow or cyan buzzing emitter (not wave simulated)
 - only opaque square shapes and circles were tested, star shapes, lines and such do not work
 
 Load levels like so:
