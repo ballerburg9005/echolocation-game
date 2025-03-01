@@ -95,7 +95,7 @@ make install
 cd $HOME
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
-nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.0.0/include -L$HOME/glew-2.0.0/lib/Release/x64 -I$HOME/SDL2-2.32.0/include -L$HOME/SDL2-2.32.0/lib/x64 -I$HOME/tinyxml2-10.0.0/install/include -L$HOME/tinyxml2-10.0.0/install/lib -lSDL2main -lSDL2 -lopengl32 -lglew32 -allow-unsupported-compiler
+nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.0.0/include -L$HOME/glew-2.0.0/lib/Release/x64 -I$HOME/SDL2-2.32.0/include -L$HOME/SDL2-2.32.0/lib/x64 -I$HOME/tinyxml2-10.0.0/install/include -L$HOME/tinyxml2-10.0.0/install/lib -lSDL2main -lSDL2 -lopengl32 -lglew32 -allow-unsupported-compiler -Xlinker /SUBSYSTEM:CONSOLE
 
 ./echolocation_game.exe
 ```
