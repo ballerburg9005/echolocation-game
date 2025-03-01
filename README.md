@@ -35,7 +35,7 @@ Use Inkscape and save as plain SVG. The page dimensions must be in pixels and ma
 
 Load levels like so:
     ./echolocation_game level.svg
-i
+
 ## Prerequisites
 
 ### Hardware
