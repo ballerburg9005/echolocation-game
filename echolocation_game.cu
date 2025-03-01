@@ -44,7 +44,7 @@ static const int   WINDOW_HEIGHT = SIZE;
 static const int   PULSE_DELAY = 1000;
 static const float PULSE_AMPLITUDE = 750.0f;
 static const int   AUDIO_BATCH = 4096;
-__constant__ float ZOOM_FACTOR = 4.0f; // Moved to device constant
+__constant__ float ZOOM_FACTOR = 4.0f;
 
 struct Rect { float x, y, width, height; };
 struct Circle { float cx, cy, r; };
@@ -1081,15 +1081,10 @@ int main(int argc, char** argv)
             CUDA_CHECK(cudaMemcpy(hostL, d_audioL, audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
             CUDA_CHECK(cudaMemcpy(hostR, d_audioR, audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
 
-            float maxL = 0.0f, maxR = 0.0f;
             for (int k = 0; k < audioBatchIndex; k++) {
-                if (fabsf(hostL[k]) > maxL) maxL = fabsf(hostL[k]);
-                if (fabsf(hostR[k]) > maxR) maxR = fabsf(hostR[k]);
                 h_audioBuffer[2 * k] = hostL[k];
                 h_audioBuffer[2 * k + 1] = hostR[k];
             }
-            printf("[AUDIO DEBUG] Batch %d samples, MaxL=%.4f, MaxR=%.4f\n", audioBatchIndex, maxL, maxR);
-
             SDL_QueueAudio(simDev, h_audioBuffer, audioBatchIndex * 2 * sizeof(float));
             CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(), 
                                 g_numToneMarkers * sizeof(ToneMarker), 
