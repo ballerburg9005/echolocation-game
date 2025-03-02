@@ -40,12 +40,15 @@ There are lots of other methods for aurealization, some faster some slower. But 
 - adjustibles parameters mapped on number keys 1-8 can bug out if you increase values to extremes
 - the "O", "I", or "W" elements were meant to play sounds for "dead end", "item" and "win game", but this is bugged so they only buzz ("win game" has much higher pitch)
 
-## Creating levels (maps)
+## Creating levels
+
+![Image](https://github.com/user-attachments/assets/e497c606-967c-4250-b281-084434ca7ebf)
 
 Use Inkscape and save as plain SVG. The page dimensions must be in pixels and match SIZE (500) specified in .cu file.
 
 - a Text element with with "O", "I", or "W" is interepreted as a pink, yellow or cyan buzzing emitter (not wave simulated)
 - only opaque square shapes and circles were tested, star shapes, lines and such do not work
+- don't rotate shapes it doesn't work
 
 Load levels like so:
     ./echolocation_game level.svg
