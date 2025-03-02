@@ -1,5 +1,7 @@
 https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
+*The video shows the game being used. There are two 500px square viewports rendered side-by-side. The impression of the graphics is very simple like in early computer games such as Pac-Man. The full scene on the left-side viewport can easily be described: there is a vertical wall about 1/3rd to the left with an opening about 1/3rd from the bottom. In the top left corner is a purple dot. The right hand room has 3 medium-sized circles lined up vertically around the center on the right side spaced rougly with similar distance but higher distance to the boundaries of the level. There is a slightly larger almost square rectangle in the upper half of the entire level almost center but slightly more downwards. The player is near the bottom left corner facing downwards. The player is composed of two green dots representing the virtual microphones, with a yellow hollow wedge in the middle that has a open end in the downward direction (i.e. two lines with one common origin point diverging roughly by 45 degrees). Inside that wedge is a red dot which is the sound pulse origin. The right-side viewport renders the same scene relative to the player's rotation fixed in the middle facing always upwards. The viewport is zoomed in considerably (4x) and there is as much spacing between the pixels, indicating that one pixel corresponds to the resolution of the FDTD wave simulation (1px=1cm). During the simulation sound waves flash up on the screen from the pulses now and then, but due to the speed of sound being much higher than frame rate, they are only weakly and momentarily visible.
+
 # Echolocation Game
 
 License: GPL v3 (https://www.gnu.org/licenses/gpl-3.0)
@@ -50,6 +52,8 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 ## Creating levels
 
 ![Image](https://github.com/user-attachments/assets/e497c606-967c-4250-b281-084434ca7ebf)
+
+*The image contains a side-by-side view of the level evilmaze.svg in Inkscape SVG editor and as rendered by the game.* 
 
 Use Inkscape and save as plain SVG. The page dimensions must be in pixels and match SIZE (500) specified in .cu file.
 
