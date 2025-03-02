@@ -16,7 +16,7 @@ The current result seems fairly convincing to me. In the brief period I had time
 
 This prototype was mainly written for baseline comparison purposes, to determine how well echolocation can work with highly accurate simulated sound waves.
 
-Please beware that there is no scientifically established fool-proof method to simulate sound wave reflections accurately. And more can be done, such as multi-spectral reflection dynamics, which I found to be overkill for a prototype. Testing was mainly done on the basis of what impression it made to me while listening, and how well it triggered my own limited ability of echolocation. I was mainly trusting in Grok-3's incredible levels of proficiency with the subject and algorithms used, without any strict formal and scientific evaluation.
+Please beware that there is no scientifically established fool-proof method to simulate sound wave reflections accurately. And more can be done, such as multi-spectral reflection dynamics, which I found to be overkill for a prototype (I tried it and each frequency doubles compute, maxing out my 3090 with 3 frequencies). Testing was mainly done on the basis of what impression it made to me while listening, and how well it triggered my own limited ability of echolocation. I was mainly trusting in Grok-3's incredible levels of proficiency with the subject and algorithms used, without any strict formal and scientific evaluation.
 
 
 ## Vison for the future
