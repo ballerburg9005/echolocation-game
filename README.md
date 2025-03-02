@@ -16,6 +16,9 @@ The current result seems fairly convincing to me. In the brief period I had time
 
 This prototype was mainly written for baseline comparison purposes, to determine how well echolocation can work with highly accurate simulated sound waves.
 
+Please beware that there is no scientifically established fool-proof method to simulate sound wave reflections accurately. Testing was mainly done on the basis of what impression it made to me while listening, and how well it triggered my own limited ability of echolocation. I was mainly trusting in Grok-3's incredible levels of proficiency with the subject and algorithms used, without any strict formal and scientific evaluation.
+
+
 ## Vison for the future
 
 If this program turns out to trigger people easily and consistently who can already echolocate in real life, more simplified an less computationally extreme simulation methods could be tested.
