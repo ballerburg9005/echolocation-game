@@ -84,7 +84,7 @@ nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL
 ```
 
 ### Windows (MSYS2)
-* Install CUDA Toolkit latest 12.X version
+* Install CUDA Toolkit 11.8
 * Install Visual Studio Community Edition with option "Desktop Environment with C++"
 * **You must use the MINGW64 shell of MSYS2!**
 ```
