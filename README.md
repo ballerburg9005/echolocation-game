@@ -85,7 +85,7 @@ nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL
 
 ### Windows (MSYS2)
 * Install [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive)
-* Install [Visual Studio Community Edition 2019](https://visualstudio.microsoft.com/vs/older-downloads/) with option "Desktop Environment with C++"
+* Install [Microsoft Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) for Visual Studio 2019
 * **You must use the MINGW64 shell of MSYS2!**
 ```
 MSVC_PATH=$(ls -d "/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/"*/bin/Hostx64/x64 | head -n 1)
