@@ -70,7 +70,7 @@ The exact hardware requirements for the default 500x500cm room are unknown, but 
 
 ## Running on Windows
 
-There is an untested Windows build available with CUDA 12.8. You can download it in the [Releases](https://github.com/ballerburg9005/echolocation-game/releases) section on the right.
+There is an untested Windows build available with CUDA 12.8 (=your CUDA driver must be >=12.8). You can download it in the [Releases](https://github.com/ballerburg9005/echolocation-game/releases) section on the right.
 
 ## Build and Run
 
@@ -86,16 +86,14 @@ nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL
 ### Windows (MSYS2)
 * Install [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive)
 * Install [Microsoft Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and pick "individual component" -> "MSVC v142 - VS 2019 C++ x64/x86 build tools"
-* Install older [Windows SDK](https://developer.microsoft.com/en-us/windows/downloads/sdk-archive/) for example 1903 if error "nvcc fatal   : Host compiler targets unsupported OS."
+
+BEWARE: with this combo is an error currently. It works with CUDA 12.8 and recent Visual Studio Code Community edititon if you pick option "Desktop Environment with C++" during install.
+
 * **You must use the MINGW64 shell of MSYS2!**
 ```
 MSVC_PATH=$(ls -d "/c/Program Files (x86)/Microsoft Visual Studio/"*/BuildTools/VC/Tools/MSVC/*/bin/HostX64/x64 | head -n 1)
 CUDA_PATH=$(ls -d "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v"*/bin | head -n 1)
-SDK_VERSION=$(ls -d "/c/Program Files (x86)/Windows Kits/"*/Include/* | head -n 1 | grep -os '[^/]*$')
-export WindowsSdkDir="$(ls -d "/c/Program Files (x86)/Windows Kits/"* | head -n 1)"
-export INCLUDE="$(ls -d "/c/Program Files (x86)/Windows Kits/"*/Include/$SDK_VERSION | head -n 1):$INCLUDE"
-export LIB="$(ls -d "/c/Program Files (x86)/Windows Kits/"*/Lib/$SDK_VERSION | head -n 1):$LIB"
-export PATH="$MSVC_PATH:$CUDA_PATH:$(ls -d "/c/Program Files (x86)/Windows Kits/"*/bin/$SDK_VERSION/x64 | head -n 1):/mingw64/bin:$PATH"
+export PATH="$MSVC_PATH:$CUDA_PATH:/mingw64/bin:$PATH"
 export CC=/mingw64/bin/gcc
 export CXX=/mingw64/bin/g++
 pacman -Syu
