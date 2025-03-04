@@ -48,7 +48,7 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 - Grok-3 messed up the sliding on walls, it doesn't work consistently, and fixing it became too much of a nightmare.
 - adjustibles parameters mapped on number keys 1-8 can bug out if you increase values to extremes
 - the "O", "I", or "W" elements were meant to play sounds for "dead end", "item" and "win game", but this is bugged so they only buzz ("win game" has much higher pitch)
-- in some versions of code that I lost track of, it beeps on frontal and backside collision left and right. Not sure if that is also true to the Windows build.
+- in some versions of code that I lost track of, it beeps on frontal and backside collision *sometimes either* left or right not both. Not sure if that is also true to the Windows build.
 
 ## Creating levels
 
