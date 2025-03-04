@@ -56,7 +56,7 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 
 *The image contains a side-by-side view of the level evilmaze.svg in Inkscape SVG editor and as rendered by the game.* 
 
-Use Inkscape and save as plain SVG. The page dimensions must be in pixels and match SIZE (500) specified in .cu file.
+Use Inkscape and save as plain SVG. The page dimensions must be in pixels with scale=1.
 
 - a Text element with with "O", "I", or "W" is interepreted as a pink, yellow or cyan buzzing emitter (not wave simulated)
 - only opaque square shapes and circles were tested, star shapes, lines and such do not work
