@@ -37,7 +37,7 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 
 
 ## Features
-- Levels are loaded via SVG (drawing.svg or first command parameter)
+- Levels are loaded via SVG (drawing.svg or first command parameter, using drag&drop on the exe should work)
 - Echolocation: Pulses inside reasonable accurate physics simulation emitting from funnel forward from the player
 - Controls: WASD/arrows (move), Q/E (strafe), mouse (cane).
 - Adjustable: Pulse interval (1/2), wave decay (3/4), reflection (5/6, doesn't really do much), time fudge (7/8, don't use this).
