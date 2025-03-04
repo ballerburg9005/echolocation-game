@@ -91,10 +91,12 @@ nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL
 ```
 MSVC_PATH=$(ls -d "/c/Program Files (x86)/Microsoft Visual Studio/"*/BuildTools/VC/Tools/MSVC/*/bin/HostX64/x64 | head -n 1)
 CUDA_PATH=$(ls -d "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v"*/bin | head -n 1)
-export PATH="$MSVC_PATH:$CUDA_PATH:$PATH"
+SDK_PATH=$(ls -d "/c/Program Files (x86)/Windows Kits/"* | head -n 1)
+export INCLUDE="$(ls -d "$SDK_PATH/Include/"* | head -n 1):$INCLUDE"
+export LIB="$(ls -d "$SDK_PATH/Lib/"* | head -n 1):$LIB"
+export PATH="$MSVC_PATH:$CUDA_PATH:$SDK_PATH/bin/$SDK_VERSION/x64:/mingw64/bin:$PATH"
 export CC=/mingw64/bin/gcc
 export CXX=/mingw64/bin/g++
-export PATH="/mingw64/bin:$PATH"
 pacman -Syu
 pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-SDL2 mingw-w64-x86_64-glew git wget unzip base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake
 wget https://github.com/libsdl-org/SDL/releases/download/release-2.32.0/SDL2-devel-2.32.0-VC.zip
@@ -114,7 +116,8 @@ cmake --install .
 cd $HOME
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
-nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.0.0/include -L$HOME/glew-2.0.0/lib/Release/x64 -I$HOME/SDL2-2.32.0/include -L$HOME/SDL2-2.32.0/lib/x64 -I$HOME/tinyxml2-msvc/include -L$HOME/tinyxml2-msvc/lib -lSDL2main -lSDL2 -lopengl32 -lglew32 -ltinyxml2 -allow-unsupported-compiler -Xlinker /SUBSYSTEM:CONSOLE
+nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.0.0/include -L$HOME/glew-2.0.0/lib/Release/x64 -I$HOME/SDL2-2.32.0/include -L$HOME/SDL2-2.32.0/lib/x64 -I$HOME/tinyxml2-msvc/include -L$HOME/tinyxml2-msvc/lib -lSDL2main -lSDL2 -lopengl32 -lglew32 -ltinyxml2 -allow-unsupported-compiler -Xlinker /SUBSYSTEM:CONSOLE -diag-suppress 20012              
+
 
 ./echolocation_game.exe
 ```
