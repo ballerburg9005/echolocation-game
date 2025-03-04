@@ -86,9 +86,10 @@ nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL
 ### Windows (MSYS2)
 * Install [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive)
 * Install [Microsoft Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and pick "individual component" -> "MSVC v142 - VS 2019 C++ x64/x86 build tools"
+* Install older [Windows SDK](https://developer.microsoft.com/en-us/windows/downloads/sdk-archive/) for example 1903 if error "nvcc fatal   : Host compiler targets unsupported OS."
 * **You must use the MINGW64 shell of MSYS2!**
 ```
-MSVC_PATH=$(ls -d "/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/"*/bin/Hostx64/x64 | head -n 1)
+MSVC_PATH=$(ls -d "/c/Program Files (x86)/Microsoft Visual Studio/"*/BuildTools/VC/Tools/MSVC/*/bin/HostX64/x64 | head -n 1)
 CUDA_PATH=$(ls -d "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v"*/bin | head -n 1)
 export PATH="$MSVC_PATH:$CUDA_PATH:$PATH"
 export CC=/mingw64/bin/gcc
