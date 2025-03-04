@@ -91,10 +91,11 @@ nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL
 ```
 MSVC_PATH=$(ls -d "/c/Program Files (x86)/Microsoft Visual Studio/"*/BuildTools/VC/Tools/MSVC/*/bin/HostX64/x64 | head -n 1)
 CUDA_PATH=$(ls -d "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v"*/bin | head -n 1)
-SDK_PATH=$(ls -d "/c/Program Files (x86)/Windows Kits/"* | head -n 1)
-export INCLUDE="$(ls -d "$SDK_PATH/Include/"* | head -n 1):$INCLUDE"
-export LIB="$(ls -d "$SDK_PATH/Lib/"* | head -n 1):$LIB"
-export PATH="$MSVC_PATH:$CUDA_PATH:$SDK_PATH/bin/$SDK_VERSION/x64:/mingw64/bin:$PATH"
+SDK_VERSION=$(ls -d "/c/Program Files (x86)/Windows Kits/"*/Include/* | head -n 1 | grep -os '[^/]*$')
+export WindowsSdkDir="$(ls -d "/c/Program Files (x86)/Windows Kits/"* | head -n 1)"
+export INCLUDE="$(ls -d "/c/Program Files (x86)/Windows Kits/"*/Include/$SDK_VERSION | head -n 1):$INCLUDE"
+export LIB="$(ls -d "/c/Program Files (x86)/Windows Kits/"*/Lib/$SDK_VERSION | head -n 1):$LIB"
+export PATH="$MSVC_PATH:$CUDA_PATH:$(ls -d "/c/Program Files (x86)/Windows Kits/"*/bin/$SDK_VERSION/x64 | head -n 1):/mingw64/bin:$PATH"
 export CC=/mingw64/bin/gcc
 export CXX=/mingw64/bin/g++
 pacman -Syu
