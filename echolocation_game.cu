@@ -320,23 +320,19 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
     // the shared mask, never as abruptly changing solid walls (>0).
     // Smooth edge permeability reflects pressure from rotating hexagons
     // without zeroing pressure cells every frame.
-    const float ghostHere=fmaxf(0.0f,-mask[idx]);
+    const float softHere=echo::effectiveSoftCoverage(mask[idx]);
     const float left=wallL?center:echo::softGhostNeighbour(
-        center,p[idx-1],ghostHere,fmaxf(0.0f,-mask[idx-1]));
+        center,p[idx-1],softHere,echo::effectiveSoftCoverage(mask[idx-1]));
     const float right=wallR?center:echo::softGhostNeighbour(
-        center,p[idx+1],ghostHere,fmaxf(0.0f,-mask[idx+1]));
+        center,p[idx+1],softHere,echo::effectiveSoftCoverage(mask[idx+1]));
     const float down=wallD?center:echo::softGhostNeighbour(
-        center,p[idx-size],ghostHere,fmaxf(0.0f,-mask[idx-size]));
+        center,p[idx-size],softHere,echo::effectiveSoftCoverage(mask[idx-size]));
     const float up=wallU?center:echo::softGhostNeighbour(
-        center,p[idx+size],ghostHere,fmaxf(0.0f,-mask[idx+size]));
+        center,p[idx+size],softHere,echo::effectiveSoftCoverage(mask[idx+size]));
     const int adjacentWalls = (int)wallL + (int)wallR + (int)wallD + (int)wallU;
-    // Static SVG walls and collectible shards remain hard cells.
-    // Rotating ghosts instead reflect via subcell soft edge couplings.
-    const bool touchesShard=(wallL && mask[idx-1]>2.5f) ||
-                            (wallR && mask[idx+1]>2.5f) ||
-                            (wallD && mask[idx-size]>2.5f) ||
-                            (wallU && mask[idx+size]>2.5f);
-    const float localReflection=touchesShard?0.62f:reflection;
+    // Static SVG walls remain hard. Both rotating ghosts and the smaller
+    // spinning candies reflect via subcell smooth edge couplings.
+    const float localReflection=reflection;
     const float damping = echo::wallDamping(localReflection,
                                              sqrtf(c2),adjacentWalls);
     float next = echo::impedanceWaveStep(center, previous, left, right,
@@ -458,11 +454,12 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         // whole 11.5cm guide fits inside the player's
                         // 13cm collision radius, and cannot clip into a
                         // wall or masquerade as a solid mouth.
-                        if (showObj && mask[idx] > 2.5f) {
-                            vbo_data[vbo_idx + 2] = -7.f;
-                        } else if (mask[idx] > 0.f) {
+                        if(mask[idx] > 0.f) {
                             vbo_data[vbo_idx + 2] = showObj?-1.f:0.f;
-                        } else if (showObj && mask[idx] < -0.32f) {
+                        } else if(showObj && mask[idx] < -1.20f) {
+                            vbo_data[vbo_idx + 2] = -7.f;
+                        } else if(showObj && mask[idx] < -0.32f &&
+                                  mask[idx]>=-1.0f) {
                             vbo_data[vbo_idx + 2] = -8.f;
                         } else if (displayFunnel && mask[idx]==0.0f) {
                             vbo_data[vbo_idx + 2] = -4.f;
@@ -507,11 +504,12 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 2.5f) {
-                            vbo_data[fp_idx + 2] = -7.f;
-                        } else if (mask[idx] > 0.f) {
+                        if(mask[idx] > 0.f) {
                             vbo_data[fp_idx + 2] = showObj?-1.f:0.f;
-                        } else if (showObj && mask[idx] < -0.32f) {
+                        } else if(showObj && mask[idx] < -1.20f) {
+                            vbo_data[fp_idx + 2] = -7.f;
+                        } else if(showObj && mask[idx] < -0.32f &&
+                                  mask[idx]>=-1.0f) {
                             vbo_data[fp_idx + 2] = -8.f;
                         } else if (displayFunnel && mask[idx]==0.0f) {
                             vbo_data[fp_idx + 2] = -4.f;
@@ -879,6 +877,8 @@ int main(int argc, char* argv[])
     // negative fractional ghost material into the solver mask.
     std::vector<float> h_ghostTarget(SIZE*SIZE,0.0f);
     std::vector<float> h_ghostCoverage(SIZE*SIZE,0.0f);
+    std::vector<float> h_candyTarget(SIZE*SIZE,0.0f);
+    std::vector<float> h_candyCoverage(SIZE*SIZE,0.0f);
     bool automaticPulse=true;
     bool phasedClick=true, worldTones=true;
     bool echoOnlyMonitor=false; // opt-in until on-hardware listening tests
@@ -1121,17 +1121,27 @@ int main(int argc, char* argv[])
             }
         }
         updateDynamicMask(h_mask,h_dynamic);
-        // Reflective shards remain hard materials, but spinning ghosts
-        // have fractional acoustic coverage smoothed over ~55ms. Unlike
-        // hard 0/2 masks, their pressure histories are never erased.
-        if(arcadeEnabled)arcade.stampShards(h_dynamic);
+        // Ghosts and smaller eight-sided candies spin through the SAME
+        // softened FDTD reflectivity algorithm, with separate material
+        // strength encoding in the existing single float mask:
+        // -coverage = ghost; -(1+coverage) = less rigid candy. Both can
+        // retain their pressure histories while turning or disappearing.
         std::fill(h_ghostTarget.begin(),h_ghostTarget.end(),0.0f);
-        if(arcadeEnabled)arcade.stampGhostCoverage(h_ghostTarget.data());
+        std::fill(h_candyTarget.begin(),h_candyTarget.end(),0.0f);
+        if(arcadeEnabled) {
+            arcade.stampGhostCoverage(h_ghostTarget.data());
+            arcade.stampCandyCoverage(h_candyTarget.data());
+        }
         for(size_t j=0;j<h_ghostCoverage.size();++j) {
             h_ghostCoverage[j]=echo::smoothGhostCoverage(
                 h_ghostCoverage[j],h_ghostTarget[j],dtFrame);
-            if(h_dynamic[j]==0.0f && h_ghostCoverage[j]>0.002f)
+            h_candyCoverage[j]=echo::smoothGhostCoverage(
+                h_candyCoverage[j],h_candyTarget[j],dtFrame);
+            if(h_dynamic[j]!=0.0f)continue; // never overwrite SVG walls
+            if(h_ghostCoverage[j]>0.002f)
                 h_dynamic[j]=-h_ghostCoverage[j];
+            else if(h_candyCoverage[j]>0.002f)
+                h_dynamic[j]=-(1.0f+h_candyCoverage[j]);
         }
         CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float),
                               cudaMemcpyHostToDevice));
@@ -1161,7 +1171,7 @@ int main(int argc, char* argv[])
                     if(proximity>0.01f)
                         echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
                             sh.x,sh.y,echo::kShardFirst+(int)(n%12),
-                            8.0f,proximity);
+                            echo::kCandyRadiusCm+1.2f,proximity);
                 }
                 const float exitGain=echo::localEmitterGain(
                     h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
@@ -1549,8 +1559,9 @@ int main(int argc, char* argv[])
                 }
                 for(const echo::Shard &shard:arcade.shards) {
                     if(shard.collected)continue;
-                    orbs.push_back(echo::VisualOrb{shard.x,shard.y,0.065f,0.85f,
-                        1.0f,0.78f,0.16f,1.1f,8});
+                    orbs.push_back(echo::VisualOrb{shard.x,shard.y,
+                        echo::kCandyRadiusCm*0.01f,0.85f,
+                        1.0f,0.84f,0.26f,1.15f,8,shard.spin});
                 }
                 if(lastDecoySimTime>=0 && simTime-lastDecoySimTime<1.2)
                     orbs.push_back(echo::VisualOrb{(float)decoyPulseX,
