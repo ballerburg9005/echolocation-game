@@ -783,7 +783,7 @@ int main(int argc, char* argv[])
                     case SDLK_7: g_waveVolumeScale -= 0.002f; recalcDerivedParams(); break;
                     case SDLK_8: g_waveVolumeScale += 0.002f; recalcDerivedParams(); break;
                     case SDLK_SPACE: showObjects = !showObjects; break;
-                    case SDLK_F2: if(has3D)show3D=!show3D; break;
+                    case SDLK_F2: if(has3D){show3D=!show3D;full3D=false;} break;
                     case SDLK_F3: if(has3D) {
                         show3D=true;full3D=!full3D;
                     } break;
@@ -1102,10 +1102,73 @@ int main(int argc, char* argv[])
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &gfx.cuda_vbo_resource, 0));
 
-        glClear(GL_COLOR_BUFFER_BIT);
-        glUseProgram(gfx.shader);
-        glBindVertexArray(gfx.vao);
-        glDrawArrays(GL_POINTS, 0, SIZE * SIZE * 2);
+        if(!full3D || !show3D) {
+            glViewport(0,0,WINDOW_WIDTH,WINDOW_HEIGHT);
+            glClearColor(0,0,0,1);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glDisable(GL_DEPTH_TEST);
+            glUseProgram(gfx.shader);
+            glBindVertexArray(gfx.vao);
+            glPointSize(1.0f);
+            glDrawArrays(GL_POINTS,0,SIZE*SIZE*2);
+
+            if(arcadeEnabled) {
+                mapGlyphs.clear();
+                // Glyphs live exclusively on the 2D map: none are added to
+                // the wave mask (unlike the actual reflecting ghosts).
+                auto addGlyph=[&](float x,float y,float code) {
+                    mapGlyphs.push_back((2*x/SIZE-1)*0.5f-0.5f);
+                    mapGlyphs.push_back(2*y/SIZE-1);
+                    mapGlyphs.push_back(code);
+                };
+                for(const echo::Enemy &en:arcade.enemies)
+                    if(!arcade.won&&!arcade.lost)addGlyph(en.x,en.y,-8.0f);
+                for(const echo::Shard &shard:arcade.shards)
+                    if(!shard.collected)addGlyph(shard.x,shard.y,-7.0f);
+                addGlyph(arcade.exitX,arcade.exitY,-6.0f);
+                glBindVertexArray(gfx.glyphVAO);
+                glBindBuffer(GL_ARRAY_BUFFER,gfx.glyphVBO);
+                glBufferData(GL_ARRAY_BUFFER,
+                    (GLsizeiptr)(mapGlyphs.size()*sizeof(float)),
+                    mapGlyphs.data(),GL_DYNAMIC_DRAW);
+                glPointSize(8.0f);
+                glDrawArrays(GL_POINTS,0,(GLsizei)(mapGlyphs.size()/3));
+                glPointSize(1.0f);
+            }
+        }
+
+        if(has3D && show3D) {
+            orbs.clear();
+            if(arcadeEnabled) {
+                for(const echo::Enemy &en:arcade.enemies) {
+                    if(arcade.lost||arcade.won)break;
+                    const bool alert=en.alert>0.0f;
+                    orbs.push_back(echo::VisualOrb{en.x,en.y,0.105f,1.12f,
+                        alert?1.0f:0.55f,alert?0.16f:0.26f,
+                        alert?0.25f:0.95f,alert?1.6f:0.8f});
+                }
+                for(const echo::Shard &shard:arcade.shards) {
+                    if(shard.collected)continue;
+                    orbs.push_back(echo::VisualOrb{shard.x,shard.y,0.065f,0.85f,
+                        1.0f,0.78f,0.16f,1.1f});
+                }
+                orbs.push_back(echo::VisualOrb{arcade.exitX,arcade.exitY,0.17f,1.12f,
+                    arcade.remaining==0?0.22f:0.62f,
+                    arcade.remaining==0?1.0f:0.32f,0.85f,1.7f});
+            }
+            for(const ToneMarker &tm:g_toneMarkers) {
+                if(tm.collected || (arcadeEnabled&&tm.type=='W'))continue;
+                const float r=tm.type=='W'?0.1f:0.06f;
+                orbs.push_back(echo::VisualOrb{tm.x,tm.y,r,0.95f,
+                    tm.type=='W'?0.2f:tm.type=='I'?1.0f:0.9f,
+                    tm.type=='W'?1.0f:tm.type=='I'?0.8f:0.3f,
+                    tm.type=='W'?0.9f:tm.type=='I'?0.1f:1.0f,0.75f});
+            }
+            echo::render3D(view3d,full3D?0:SIZE,0,
+                           full3D?WINDOW_WIDTH:SIZE,WINDOW_HEIGHT,
+                           g_player.pivot_x,g_player.pivot_y,
+                           g_player.angle,orbs);
+        }
         SDL_GL_SwapWindow(gfx.window);
     }
 
@@ -1124,6 +1187,9 @@ int main(int argc, char* argv[])
     free(h_dynamic);
     free(beepBuf);
 
+    echo::release3D(view3d);
+    glDeleteBuffers(1, &gfx.glyphVBO);
+    glDeleteVertexArrays(1, &gfx.glyphVAO);
     glDeleteBuffers(1, &gfx.vbo);
     glDeleteVertexArrays(1, &gfx.vao);
     glDeleteProgram(gfx.shader);
