@@ -14,6 +14,16 @@ int main(){
     assert(echo::proximityStrength(15,30)>0.24f);
     assert(echo::proximityStrength(2,30)>echo::proximityStrength(15,30));
     assert(echo::markerRadiusCm('O')<echo::markerRadiusCm('W'));
+    // FDTD-emitter *eligibility* must depend on nearby open passages.
+    // A 5m room may contain several walls between player and emitters:
+    // the old constant oscillator ignored them as an audio UX cue.
+    assert(echo::localEmitterGain(walls.data(),N,20,30,40,30,42)>0.20f);
+    assert(echo::localEmitterGain(walls.data(),N,20,30,80,30,100)==0.0f);
+    assert(echo::localEmitterGain(walls.data(),N,20,30,40,30,10)==0.0f);
+    assert(echo::localEmitterGain(walls.data(),N,20,30,25,30,42)>
+           echo::localEmitterGain(walls.data(),N,20,30,40,30,42));
+    assert(echo::localEmitterGain(walls.data(),N,20,30,45,30,42)>0.0f);
+    assert(echo::localEmitterGain(walls.data(),N,45,30,55,30,42)==0.0f);
     echo::ProximityGate g;
     assert(!g.shouldChime(100,30,1));
     assert(g.shouldChime(20,30,1));
