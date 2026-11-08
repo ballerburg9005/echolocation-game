@@ -71,3 +71,25 @@ synthetic 1-kHz tone. Tests can run without a CUDA card:
 
 Changes here aim at **internal numerical correctness and usability**.
 They do not establish perceptual fidelity.
+
+
+## Gameplay and 3D addendum
+
+The new first-person mode is a perspective rendering of walls extruded from
+the 2D SVG raster mask; the numerical acoustic solver stays 2D. Enemies and
+shards are stamped into the *dynamic* wave mask as special reflective cells.
+Enemy reflection (0.82) and shard reflection (0.62) are approximate local
+material boundary coefficients. Neither is a calibrated measurement.
+
+Enemy sound attraction, stereo threat heartbeat, item/exit guidance beacons,
+pickups and win jingles are game logic/audio cues. They are **not** modeled
+as pressure-field sources or 3D binaural recordings. The manual-click F and
+automatic-click T controls use the same physical timestep and are covered
+by pulse scheduler tests. A dedicated 3D mesh test checks that each wall
+surface originates from the actual mask and that solid adjacencies do not
+generate interior faces.
+
+Moving-mask artifacts, acoustic energy around moving objects, HRTF effects,
+and real-time performance on NVIDIA hardware remain unmeasured. Do not
+interpret success in the game as evidence of safe or effective physical
+echolocation.
