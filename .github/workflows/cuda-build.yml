@@ -1,0 +1,20 @@
+name: CUDA compilation smoke test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cuda-compile:
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.8.0-devel-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install application headers and host toolchain
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            g++ make libgl1-mesa-dev libglew-dev libsdl2-dev libtinyxml2-dev
+      - name: Compile CUDA/SDL2/OpenGL executable (no GPU needed for compile)
+        run: make build
