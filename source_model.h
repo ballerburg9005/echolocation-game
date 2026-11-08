@@ -39,7 +39,35 @@ inline ReceiverLayout shieldedReceivers(float x,float y,float heading) {
 struct PhasedSource {
     int frontX=0,frontY=0,backX=0,backY=0,backDelay=0;
     bool enabled=false;
+    // Continuously placed pressure emitters remove angle-dependent
+    // 1cm source jumps and quantized travel-delay changes when turning.
+    // Integers remain for bounds and older isolated source regressions.
+    float frontSubX=0,frontSubY=0,backSubX=0,backSubY=0;
+    float backDelaySub=0.0f;
+    bool continuous=false;
 };
+ECHO_SOURCE_HD inline float sourceWeight(float sourceX,float sourceY,
+                                        int gridX,int gridY) {
+    const float dx=fmaxf(0.0f,1.0f-fabsf((float)gridX-sourceX));
+    const float dy=fmaxf(0.0f,1.0f-fabsf((float)gridY-sourceY));
+    return dx*dy;
+}
+ECHO_SOURCE_HD inline float subcellClickSample(float step,int duration,
+                                               float dt) {
+    // Time interpolation of the *same* tapered pressure pulse, not a
+    // high-frequency reduction or a headphone post-filter.
+    const int first=(int)floorf(step);
+    const float fraction=step-(float)first;
+    return (1.0f-fraction)*clickSample(first,duration,dt)+
+           fraction*clickSample(first+1,duration,dt);
+}
+inline bool sourceFootprintClear(const float* walls,int size,float x,float y){
+    if(!walls||!std::isfinite(x)||!std::isfinite(y))return false;
+    const int ix=(int)std::floor(x),iy=(int)std::floor(y);
+    if(ix<=1||iy<=1||ix+1>=size-2||iy+1>=size-2)return false;
+    return walls[iy*size+ix]<=0&&walls[iy*size+ix+1]<=0&&
+           walls[(iy+1)*size+ix]<=0&&walls[(iy+1)*size+ix+1]<=0;
+}
 inline PhasedSource phasedSource(int side,const float* walls,
     float centerX,float centerY,float heading) {
     PhasedSource out;
@@ -87,35 +115,34 @@ inline BeamArray playerBeam(int side,const float* walls,
     const auto central=phasedSource(side,walls,x,y,heading);
     if(!central.enabled)return array; // leave the main CUDA click inactive
     array.elements[1]=central;
-    array.valid=true;
-    if(!narrow)return array; // B-key A/B: original single monopole
-    array.directional=true;
     const float forwardX=std::cos(heading),forwardY=std::sin(heading);
     const float sideX=-forwardY,sideY=forwardX;
+    const float delay=6.0f*kCellMetres/(kSpeedOfSound*kStepSeconds);
+    auto makeContinuous=[&](PhasedSource& e,float lateral){
+        e.frontSubX=x+6.0f*forwardX+lateral*sideX;
+        e.frontSubY=y+6.0f*forwardY+lateral*sideY;
+        e.backSubX=x+lateral*sideX;
+        e.backSubY=y+lateral*sideY;
+        e.frontX=(int)std::lround(e.frontSubX);
+        e.frontY=(int)std::lround(e.frontSubY);
+        e.backX=(int)std::lround(e.backSubX);
+        e.backY=(int)std::lround(e.backSubY);
+        e.backDelaySub=delay;
+        e.backDelay=(int)std::floor(delay);
+        e.continuous=true;
+        e.enabled=sourceFootprintClear(walls,side,e.frontSubX,e.frontSubY)&&
+                  sourceFootprintClear(walls,side,e.backSubX,e.backSubY);
+    };
+    makeContinuous(array.elements[1],0.0f);
+    if(!array.elements[1].enabled)return {};
+    array.valid=true;
+    if(!narrow)return array; // B: smooth single monopole
+    array.directional=true;
     PhasedSource sides[2];
-    bool allGood=true;
-    for(int k=0;k<2;++k){
-        const float offset=k==0?-8.0f:8.0f;
-        auto &p=sides[k];
-        p.frontX=(int)std::lround(x+6.0f*forwardX+offset*sideX);
-        p.frontY=(int)std::lround(y+6.0f*forwardY+offset*sideY);
-        p.backX=(int)std::lround(x+offset*sideX);
-        p.backY=(int)std::lround(y+offset*sideY);
-        auto freeCell=[&](int cx,int cy){
-            return cx>1&&cy>1&&cx<side-2&&cy<side-2&&
-                   walls[cy*side+cx]<=0.0f;
-        };
-        p.enabled=freeCell(p.frontX,p.frontY)&&freeCell(p.backX,p.backY);
-        if(p.enabled){
-            const float separation=std::hypot(
-                (float)(p.frontX-p.backX),(float)(p.frontY-p.backY));
-            p.backDelay=(int)std::lround(
-                separation*kCellMetres/(kSpeedOfSound*kStepSeconds));
-            p.enabled=p.backDelay>0;
-        }
-        allGood=allGood&&p.enabled;
-    }
-    if(!allGood)return array; // fallback: central endfire, no clipped array
+    makeContinuous(sides[0],-8.0f);
+    makeContinuous(sides[1],8.0f);
+    if(!sides[0].enabled||!sides[1].enabled)
+        return array; // safe central pair when a lateral footprint is blocked
     array.elements[0]=sides[0];
     array.elements[2]=sides[1];
     array.weights[0]=0.25f;array.weights[1]=0.50f;
