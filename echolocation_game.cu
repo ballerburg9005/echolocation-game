@@ -683,6 +683,8 @@ int main(int argc, char* argv[])
     std::vector<float> mapGlyphs;
     mapGlyphs.reserve(128*3);
     double lastArcadeMessage=0.0;
+    double lastThreatCue=0.0;
+    bool dangerAudio=true;
     std::printf("[ARCADE] %d ghosts, %d shards; reach the exit after collecting all.\n",
                 (int)arcade.enemies.size(),arcade.remaining);
 
@@ -744,7 +746,7 @@ int main(int argc, char* argv[])
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
     std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
     std::puts("[CONTROLS] F manually click | T toggle auto-click/stealth | 1/2 interval");
-    std::puts("[CONTROLS] 3/4 decay | 5/6 reflections | 7/8 volume");
+    std::puts("[CONTROLS] F5 toggle enemy danger heartbeat | 3/4 decay | 5/6 reflections | 7/8 volume");
 
     while (!quit) {
         SDL_Event e;
@@ -791,6 +793,7 @@ int main(int argc, char* argv[])
                         show3D=true;full3D=!full3D;
                     } break;
                     case SDLK_F4: arcadeEnabled=!arcadeEnabled; break;
+                    case SDLK_F5: dangerAudio=!dangerAudio; break;
                     case SDLK_t:
                         if(!e.key.repeat)automaticPulse=!automaticPulse;
                         break;
@@ -819,7 +822,7 @@ int main(int argc, char* argv[])
                         audioResampler=echo::StereoLinearResampler(g_DT,g_sampleRate);
                         SDL_ClearQueuedAudio(simDev);
                         SDL_ClearQueuedAudio(beepDev);
-                        lastBeep=0;lastSlideTime=0;wasSliding=false;
+                        lastBeep=0;lastSlideTime=0;lastThreatCue=0;wasSliding=false;
                         break;
                     case SDLK_ESCAPE: quit = true; break;
                 }
@@ -915,6 +918,41 @@ int main(int argc, char* argv[])
                 lastArcadeMessage=nowT;
             }
         }
+        // Extra nonphysical audio HUD: nearest approaching ghost produces
+        // a low stereo heartbeat that speeds up with proximity. F5 turns it
+        // off if the player wants to train with only wave reflections.
+        if(arcadeEnabled&&dangerAudio&&!arcade.won&&!arcade.lost) {
+            echo::ThreatCue nearest;
+            float bestDistance=1.0e9f;
+            for(const echo::Enemy &en:arcade.enemies) {
+                const float d=std::hypot(en.x-g_player.pivot_x,
+                                         en.y-g_player.pivot_y);
+                if(d<bestDistance) {
+                    bestDistance=d;
+                    nearest=echo::threatCue(g_player.pivot_x,
+                           g_player.pivot_y,g_player.angle,en.x,en.y,en.alert>0);
+                }
+            }
+            if(nearest.audible && nowT-lastThreatCue>=nearest.interval &&
+               SDL_GetQueuedAudioSize(beepDev) <
+                   (Uint32)(0.18*g_sampleRate*2*sizeof(float))) {
+                const int n=(int)(0.085*g_sampleRate);
+                std::vector<float> heartbeat(2*n);
+                for(int j=0;j<n;++j) {
+                    const float t=(float)j/g_sampleRate;
+                    const float env=sinf(PI*(float)j/(float)n);
+                    const float beat=(sinf(2.0f*PI*nearest.frequency*t) +
+                                      0.22f*sinf(4.0f*PI*nearest.frequency*t))*
+                                     env*env;
+                    heartbeat[2*j]=nearest.left*beat;
+                    heartbeat[2*j+1]=nearest.right*beat;
+                }
+                SDL_QueueAudio(beepDev,heartbeat.data(),
+                               (Uint32)(heartbeat.size()*sizeof(float)));
+                lastThreatCue=nowT;
+            }
+        }
+
         if (!wasSliding && collided && nowT - lastBeep > beepGap) {
             float pan = sinf(collisionAngle);
             float lv = 0.5f + 0.5f * pan;
