@@ -4,6 +4,41 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 # Echolocation Game
 
+## Listening and camera corrections (following real-player feedback)
+
+The latest iteration addresses issues observed on hardware in an earlier
+version. These fixes are intentionally conservative and still need another
+real-world listening check:
+
+- **Moving/turning rattle:** the moving funnel outline is no longer stamped
+  as a hard reflective wall into the FDTD grid; it is shown as a 2D visual
+  overlay only. Receiver positions now interpolate over each audio batch,
+  avoiding frame-sized jumps in sampling the pressure field. The original
+  funnel's *acoustic* directivity is not currently reproduced: this is a
+  source approximation, not a validated model of a human click and mouth.
+- **3D mirror:** grid +Y now maps to GL -Z in mesh, camera and actors;
+  A/left turning and D/right turning have consistent handedness.
+- **3D circles/pillars:** ceiling and object tops no longer overlap at
+  exactly the same depth (previously causing z-fighting lines); rounded
+  actors use higher-detail spheres, smoother material shading and MSAA
+  where supported.
+- **Wall contact:** instead of repeated, identical 440/330Hz tones, find
+  the actual wall cell touched along the collision circle. One short
+  synthetic tap uses near/far-ear distance attenuation, relative ear delay,
+  and a distinct rear sound. No periodic tone while holding into a wall.
+  This is *HRTF-lite gameplay feedback*, not human binaural simulation.
+- **No mysterious continuous beacon:** SVG O/I/W markers are chimes only
+  within **24/30/35cm** respectively (and only with a clear geometric path).
+  They announce first proximity, with at most a gentle reminder after
+  4.5 seconds while still nearby. The optional F5 enemy heartbeat and F6
+  target aid are **off by default**; F6 only operates near the target
+  (within 35cm) instead of playing throughout the level.
+
+If you want to isolate the FDTD sounds, toggle off the arcade with **F4**
+and leave F5/F6 off. Start headphone volume low. The project still needs
+actual NVIDIA hardware A/B listening tests; compile/test success cannot
+prove that the rattle is gone or the contact cues perceptually localize.
+
 ## Experimental improvements in this branch
 
 This upgrade retains the original 2D CUDA FDTD concept and SVG levels, but
@@ -22,8 +57,9 @@ fixes important correctness and usability issues.
   microphones use bilinear sampling and audio has a soft limiter.
 - **Navigation:** substepped, test-covered wall sliding and collision
   prevents tunneling on slow frames.
-- **Blind-play cues:** obstacle, item and goal markers have different
-  spatial rhythms; item pickups and the goal play unique melodies.
+- **Blind-play cues:** close-only obstacle/item/goal discoveries chime
+  briefly without broadcasting across the level; item pickups and the goal
+  play unique melodies.
 - **SVG:** native circles, ellipses and rectangles, Inkscape elliptical
   arcs, basic fill/stroke handling and clipped rasterization.
 
@@ -37,8 +73,8 @@ There is now an actual sound-driven arcade game: three wandering enemies
 that chase nearby pings and act as dynamic CUDA wave reflectors, up to twelve
 golden shards that also reflect waves, three lives, scoring, an unlockable
 exit, collisions and victory sounds. The optional high-pitched target beacon
-and low-pitched ghost heartbeat help blind players navigate; turn them off
-for an echo-only challenge. A new sample maze, **Ghost Circuit**, lives at
+and low-pitched ghost heartbeat can be enabled to help blind players
+navigate nearby targets; **both are off by default**. A new sample maze, **Ghost Circuit**, lives at
 [echo_arena.svg](echo_arena.svg).
 
 Launch the new level with:
@@ -87,7 +123,9 @@ License: GPL v3 (https://www.gnu.org/licenses/gpl-3.0)
 
 Experimental prototype for a 2D FDTD echolocation simulation game using CUDA, SDL2, OpenGL, and GLEW. 
 
-Navigate the room without eyes just by sound clicks. Featuring a dual view (static and first-person), sliding collisions, and a virtual cane (cane was bugged and is currently removed).
+Navigate the room by clicks, with a dual static/first-person view, sliding
+collisions and a C-key three-ray virtual cane aid (the historical
+mouse-driven cane remains removed).
 
 The sound wave simulation algorithm employs a Finite-difference time-domain (FDTD) to solve the 2D wave equation on a grid, leveraging CUDA to parallelize pressure updates and reflections, simulating wave propagation at 343 m/s with a spatial resolution of 0.01 meters and a 48 kHz audio capture rate.
 
@@ -125,7 +163,8 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 - G projects a sound decoy into a legal point ahead; C emits stereo left/center/right virtual cane taps.
 - H spends a collected overdrive charge to freeze and catch ghosts for five seconds.
 - F2 toggles right viewport 2D/3D; F3 toggles full-window first-person 3D.
-- F4 toggles Ghost Circuit game mode; F5 enemy heartbeat, F6 target beacons.
+- F4 toggles Ghost Circuit game mode; F5 nearby enemy heartbeat,
+  F6 nearby target beacon. F5/F6 are OFF initially.
 - R restarts all lives, shards, enemies, acoustic state and item pickups.
 - Keys **1/2**: pulse interval; **3/4**: per-step wave decay;
   **5/6**: wall reflection; **7/8**: echolocation playback gain.
@@ -153,7 +192,8 @@ arbitrary paths, transforms, CSS inheritance and complex viewBox scaling
 remain unsupported. A warning is logged for transforms.
 
 A text element containing exactly O, I or W becomes a directional audible
-landmark. It is heard within approximately 85 cm; approaching to
+landmark. Short unobstructed-range chimes activate within 24 cm (O),
+30 cm (I), or 35 cm (W), with no constant global beeping. Approaching to
 approximately 13 cm collects an item or activates the goal.
 
 Load an example level:
