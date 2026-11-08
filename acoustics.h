@@ -75,6 +75,24 @@ ECHO_HD inline float clickSample(int index, int duration, float dt) {
     return envelope * sinf(2.0f * kPi * kClickFrequencyHz * index * dt);
 }
 
+// The visible sound funnel is an overlay, not a moving solid obstacle.
+// Rotating/translating a binary funnel mask each frame abruptly changes
+// boundary conditions and creates spurious rattling in a wave solver.
+ECHO_HD inline bool visualFunnelPixel(float x,float y,
+    float wedgeX,float wedgeY,float pulseX,float pulseY,
+    float playerX,float playerY) {
+    const float heading=atan2f(pulseY-playerY,pulseX-playerX);
+    const float dx=x-wedgeX,dy=y-wedgeY;
+    const float aperture=38.0f*kPi/180.0f;
+    for(int branch=-1;branch<=1;branch+=2) {
+        const float angle=heading+branch*aperture;
+        const float forward=dx*cosf(angle)+dy*sinf(angle);
+        const float off=dx*sinf(angle)-dy*cosf(angle);
+        if(forward>=0.0f&&forward<=10.0f&&fabsf(off)<=0.65f)return true;
+    }
+    return false;
+}
+
 // Bilinear receiver sampling prevents 1-cell jumps in virtual microphone
 // position from introducing artificial broadband clicks.
 ECHO_HD inline float bilinearSample(const float* p, int size, float x, float y) {
