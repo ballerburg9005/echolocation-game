@@ -58,10 +58,17 @@ int main(){
     for(const auto& s:game.shards)
         assert(!echo::circleGridContact(mask.data(),N,s.x,s.y,11).hit);
     std::vector<float> dynamic=mask;
-    game.stampEnemies(dynamic.data());
-    int reflectors=0;
-    for(float value:dynamic)if(value==2.0f)++reflectors;
-    assert(reflectors>0);
+    std::vector<float> ghostCoverage(N*N,0.0f);
+    game.stampGhostCoverage(ghostCoverage.data());
+    int reflectors=0,partial=0;
+    for(float value:ghostCoverage) {
+        assert(value>=0.0f && value<=1.0f);
+        if(value>0.0f)++reflectors;
+        if(value>0.0f && value<1.0f)++partial;
+    }
+    // A sub-cell rotating ghost is an acoustic impedance, not a hard
+    // occupancy that erases p_next when its edge moves every frame.
+    assert(reflectors>0 && partial>0);
     game.stampShards(dynamic.data());
     int shardReflectors=0;
     for(float value:dynamic)if(value==3.0f)++shardReflectors;
