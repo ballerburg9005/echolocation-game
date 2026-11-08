@@ -44,7 +44,11 @@ inline std::vector<VisualVertex> extrudeMask(const float* mask,int size,
     // Dark floor, lighter ceiling. No automatic floor-wall quads at
     // arbitrary room positions, so the maze remains grounded in SVG cells.
     quad(out,0,0,0,L,0,0,L,0,L,0,0,L,0,1,0,0.09f,0.13f,0.18f);
-    quad(out,0,H,0,0,H,L,L,H,L,L,H,0,0,-1,0,0.13f,0.17f,0.22f);
+    // Ceiling cannot be coplanar with wall and pillar roofs. It caused
+    // z-fighting: dark/brilliant stripes across the tops of round objects.
+    const float ceiling=H+0.025f;
+    quad(out,0,ceiling,0,0,ceiling,L,L,ceiling,L,L,ceiling,0,
+         0,-1,0,0.13f,0.17f,0.22f);
     auto occupied=[&](int x,int y) {
         return x>=0&&y>=0&&x<size&&y<size && mask[y*size+x]>0.0f;
     };
