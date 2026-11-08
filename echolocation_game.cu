@@ -328,12 +328,18 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
     const int adjacentWalls = (int)wallL + (int)wallR + (int)wallD + (int)wallU;
     // Ghosts are moving pressure-reflecting boundaries with a distinct local
     // coefficient; the static SVG wall coefficient remains player-adjustable.
+    const bool touchesShard=(wallL && mask[idx-1]>2.5f) ||
+                            (wallR && mask[idx+1]>2.5f) ||
+                            (wallD && mask[idx-size]>2.5f) ||
+                            (wallU && mask[idx+size]>2.5f);
     const bool touchesGhost=(wallL && mask[idx-1]>1.5f) ||
                             (wallR && mask[idx+1]>1.5f) ||
                             (wallD && mask[idx-size]>1.5f) ||
                             (wallU && mask[idx+size]>1.5f);
-    const float damping = echo::wallDamping(
-        touchesGhost ? 0.82f : reflection, sqrtf(c2), adjacentWalls);
+    const float localReflection=touchesShard?0.62f:
+                                touchesGhost?0.82f:reflection;
+    const float damping = echo::wallDamping(localReflection,
+                                             sqrtf(c2),adjacentWalls);
     float next = echo::impedanceWaveStep(center, previous, left, right,
                                         down, up, c2, damping);
 
@@ -410,7 +416,9 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 1.5f) {
+                        if (showObj && mask[idx] > 2.5f) {
+                            vbo_data[vbo_idx + 2] = -7.f;
+                        } else if (showObj && mask[idx] > 1.5f) {
                             vbo_data[vbo_idx + 2] = -8.f;
                         } else if (showObj && mask[idx] > 0.f) {
                             vbo_data[vbo_idx + 2] = -1.f;
@@ -455,7 +463,9 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 1.5f) {
+                        if (showObj && mask[idx] > 2.5f) {
+                            vbo_data[fp_idx + 2] = -7.f;
+                        } else if (showObj && mask[idx] > 1.5f) {
                             vbo_data[fp_idx + 2] = -8.f;
                         } else if (showObj && mask[idx] > 0.f) {
                             vbo_data[fp_idx + 2] = -1.f;
@@ -898,7 +908,10 @@ int main(int argc, char* argv[])
                           g_player.pivot_x, g_player.pivot_y);
         // Moving enemies really alter the *CUDA wave boundary*, not merely
         // the visuals. Static maze remains unchanged for CPU collisions.
-        if(arcadeEnabled) arcade.stampEnemies(h_dynamic);
+        if(arcadeEnabled) {
+            arcade.stampEnemies(h_dynamic);
+            arcade.stampShards(h_dynamic);
+        }
         CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float),
                               cudaMemcpyHostToDevice));
 
