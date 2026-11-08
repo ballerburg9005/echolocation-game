@@ -73,10 +73,18 @@ int main(){
     assert(game.enemies[0].lastHeardX==soundX);
     assert(game.enemies[0].lastHeardY==soundY);
     assert(!game.enemies[0].pursuitDistances.empty());
+    // Short hearing memory: a click should not initiate a 3-6s chase.
+    // Ghosts should wander again within one second without fresh clicks.
+    assert(game.enemies[0].alert<=0.80f);
     // Moving the player must not magically update enemy hearing memory.
     game.update(0.016f,23,25);
     assert(game.enemies[0].lastHeardX==soundX);
     assert(game.enemies[0].lastHeardY==soundY);
+    const float angleBefore=game.enemies[0].visualSpin;
+    for(int i=0;i<20;++i)game.update(0.05f,23,25);
+    assert(game.enemies[0].alert==0.0f);
+    assert(std::fabs(game.enemies[0].visualSpin-angleBefore)>1.0f);
+    assert(game.enemies[0].wanderTimer<=0.55f);
     // A thick, fully sealed wall blocks arcade sound alerts even when
     // the geometric distance is close. This is a passability heuristic.
     std::vector<float> sealed=mask;
