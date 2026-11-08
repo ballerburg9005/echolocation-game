@@ -274,28 +274,11 @@ static bool loadSVG(const char* filename, float* h_mask)
     return true;
 }
 
-static void updateDynamicMask(const float* h_static, float* h_dynamic, float wedge_x, float wedge_y, float pivot_x, float pivot_y) {
-    memcpy(h_dynamic, h_static, SIZE * SIZE * sizeof(float));
-    float fwd_angle = atan2f(g_pulse_y - pivot_y, g_pulse_x - pivot_x);
-    float wedge_half = 38.0f * PI / 180.0f;
-    int wedge_length = 10;
-
-    for (int i = 0; i <= wedge_length; i++) {
-        float cell1_x = wedge_x + i * cosf(fwd_angle - wedge_half);
-        float cell1_y = wedge_y + i * sinf(fwd_angle - wedge_half);
-        float cell2_x = wedge_x + i * cosf(fwd_angle + wedge_half);
-        float cell2_y = wedge_y + i * sinf(fwd_angle + wedge_half);
-
-        int ix1 = (int)roundf(cell1_x);
-        int iy1 = (int)roundf(cell1_y);
-        int ix2 = (int)roundf(cell2_x);
-        int iy2 = (int)roundf(cell2_y);
-
-        if (ix1 >= 0 && ix1 < SIZE && iy1 >= 0 && iy1 < SIZE)
-            h_dynamic[iy1 * SIZE + ix1] = 1.0f;
-        if (ix2 >= 0 && ix2 < SIZE && iy2 >= 0 && iy2 < SIZE)
-            h_dynamic[iy2 * SIZE + ix2] = 1.0f;
-    }
+// No moving player-funnel solids in the FDTD boundary field. The changing
+// geometry was causing pressure discontinuities audible as movement rattles.
+// Render the funnel as a visual overlay instead.
+static void updateDynamicMask(const float* staticMask,float* dynamicMask) {
+    memcpy(dynamicMask,staticMask,SIZE*SIZE*sizeof(float));
 }
 
 // Fused pressure / source / damping kernel. 2 launches rather than 4 per
@@ -397,6 +380,8 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
     float pxOut_fp = (rx * ZOOM_FACTOR) / (size / 2.0f);
     float pyOut_fp = (ry * ZOOM_FACTOR) / (size / 2.0f);
     float fp_x = pxOut_fp * 0.5f + 0.5f;
+    const bool displayFunnel=echo::visualFunnelPixel((float)x,(float)y,
+        wx,wy,px,py,player_x,player_y);
 
     if (vbo_data[vbo_idx] < 0.f) {
         float wave = (t < 1000) ? 0.f : p[idx];
@@ -426,7 +411,9 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 2.5f) {
+                        if (displayFunnel) {
+                            vbo_data[vbo_idx + 2] = -1.f;
+                        } else if (showObj && mask[idx] > 2.5f) {
                             vbo_data[vbo_idx + 2] = -7.f;
                         } else if (showObj && mask[idx] > 1.5f) {
                             vbo_data[vbo_idx + 2] = -8.f;
@@ -473,7 +460,9 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 2.5f) {
+                        if (displayFunnel) {
+                            vbo_data[fp_idx + 2] = -1.f;
+                        } else if (showObj && mask[idx] > 2.5f) {
                             vbo_data[fp_idx + 2] = -7.f;
                         } else if (showObj && mask[idx] > 1.5f) {
                             vbo_data[fp_idx + 2] = -8.f;
@@ -1012,8 +1001,7 @@ int main(int argc, char* argv[])
                 gameWon=true;
             }
         }
-        updateDynamicMask(h_mask, h_dynamic, g_wedge_x, g_wedge_y,
-                          g_player.pivot_x, g_player.pivot_y);
+        updateDynamicMask(h_mask,h_dynamic);
         // Moving enemies really alter the *CUDA wave boundary*, not merely
         // the visuals. Static maze remains unchanged for CPU collisions.
         if(arcadeEnabled) {
