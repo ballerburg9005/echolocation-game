@@ -12,6 +12,7 @@
 #include <vector>
 #include <algorithm>
 #include "acoustics.h"
+#include "collision.h"
 
 #ifndef PI
 #define PI 3.14159265358979323846f
@@ -422,57 +423,6 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
     }
 }
 
-static bool checkPlayerCollision(float px, float py, const float* h_mask, float& collisionAngle, float playerAngle)
-{
-    int base = (int)ceilf(sqrtf(6.f * 6.f + 5.5f * 5.5f));
-    int radius = base + 10 - 5;
-    int ixmin = (int)fmaxf(0, floorf(px - radius));
-    int ixmax = (int)fminf(SIZE - 1, ceilf(px + radius));
-    int iymin = (int)fmaxf(0, floorf(py - radius));
-    int iymax = (int)fminf(SIZE - 1, ceilf(py + radius));
-    int r2 = radius * radius;
-
-    bool collided = false;
-    const int nS = 360, nR = 5;
-    float best = -1.f, bestAngle = 0.f;
-
-    for (int i = 0; i < nS; i++) {
-        float a = -PI + i * (2.f * PI / nS);
-        float sc = 0.f;
-        for (int j = 0; j < nR; j++) {
-            float rr = (radius - 5) + j * (5.f / (nR - 1));
-            float gx = px + rr * cosf(a);
-            float gy = py + rr * sinf(a);
-            int ix = (int)roundf(gx), iy = (int)roundf(gy);
-            if (ix >= 0 && ix < SIZE && iy >= 0 && iy < SIZE) {
-                if (h_mask[iy * SIZE + ix] > 0.f) {
-                    sc += 1.f;
-                }
-            }
-        }
-        if (sc > best) {
-            best = sc;
-            bestAngle = a;
-        }
-    }
-
-    collisionAngle = bestAngle - playerAngle + PI / 2.f;
-    if (collisionAngle < -PI) collisionAngle += 2.f * PI;
-    if (collisionAngle > PI) collisionAngle -= 2.f * PI;
-
-    for (int y = iymin; y <= iymax; y++) {
-        for (int x = ixmin; x <= ixmax; x++) {
-            float dx = x - px, dy = y - py;
-            if (dx * dx + dy * dy <= r2 && h_mask[y * SIZE + x] > 0.f) {
-                collided = true;
-                break;
-            }
-        }
-    }
-
-    return collided;
-}
-
 struct GraphicsContext {
     SDL_Window* window;
     SDL_GLContext gl_context;
@@ -723,6 +673,7 @@ int main(int argc, char* argv[])
                     case SDLK_7: g_waveVolumeScale -= 0.002f; recalcDerivedParams(); break;
                     case SDLK_8: g_waveVolumeScale += 0.002f; recalcDerivedParams(); break;
                     case SDLK_SPACE: showObjects = !showObjects; break;
+                    case SDLK_ESCAPE: quit = true; break;
                 }
             }
         }
@@ -768,80 +719,22 @@ int main(int argc, char* argv[])
             dy -= strafeSpeed * dtFrame * sy;
         }
 
-        float moveMag = sqrtf(dx * dx + dy * dy);
-        float maxStep = 13.5f;
-        if (moveMag > maxStep) {
-            dx = dx * maxStep / moveMag;
-            dy = dy * maxStep / moveMag;
-            moveMag = maxStep;
-        }
+        // Conservative 13 cm player radius, substepped motion and tangent/
+        // per-axis fallbacks. This replaces the 360-ray heuristic, which
+        // sometimes pushed the player through obstacles or stopped sliding.
+        const echo::SlideResult motion = echo::slideCircle(
+            h_mask, SIZE, g_player.pivot_x, g_player.pivot_y,
+            dx, dy, 13.0f);
+        newP.pivot_x = motion.x;
+        newP.pivot_y = motion.y;
+        const bool collided = motion.collided;
+        sliding = motion.slid;
+        // Bearing to obstacle in the same heading convention as the funnel.
+        const float heading = newP.angle - PI / 4.0f;
+        const float collisionAngle = atan2f(motion.wallY, motion.wallX) - heading;
 
-        float collisionAngle = 0.f;
-        newP.pivot_x += dx;
-        newP.pivot_y += dy;
-        bool collided = checkPlayerCollision(newP.pivot_x, newP.pivot_y, h_mask, collisionAngle, newP.angle);
-
-        if (collided) {
-            float normalAngle = collisionAngle + newP.angle - PI / 2.f;
-            float normalX = cosf(normalAngle);
-            float normalY = sinf(normalAngle);
-            float dot = dx * normalX + dy * normalY;
-
-            float tangentAngle = normalAngle + PI / 2.f;
-            float tangentX = cosf(tangentAngle);
-            float tangentY = sinf(tangentAngle);
-            float slideDot = dx * tangentX + dy * tangentY;
-            if (fabsf(slideDot) > maxStep) slideDot = (slideDot > 0 ? maxStep : -maxStep);
-
-            float newX = g_player.pivot_x + slideDot * tangentX;
-            float newY = g_player.pivot_y + slideDot * tangentY;
-            float tempAngle;
-
-            if (!checkPlayerCollision(newX, newY, h_mask, tempAngle, newP.angle)) {
-                newP.pivot_x = newX;
-                newP.pivot_y = newY;
-                collisionAngle = tempAngle;
-                sliding = (fabsf(slideDot) > 0.01f);
-            } else {
-                tangentAngle = normalAngle - PI / 2.f;
-                tangentX = cosf(tangentAngle);
-                tangentY = sinf(tangentAngle);
-                slideDot = dx * tangentX + dy * tangentY;
-                if (fabsf(slideDot) > maxStep) slideDot = (slideDot > 0 ? maxStep : -maxStep);
-
-                newX = g_player.pivot_x + slideDot * tangentX;
-                newY = g_player.pivot_y + slideDot * tangentY;
-
-                if (!checkPlayerCollision(newX, newY, h_mask, tempAngle, newP.angle)) {
-                    newP.pivot_x = newX;
-                    newP.pivot_y = newY;
-                    collisionAngle = tempAngle;
-                    sliding = (fabsf(slideDot) > 0.01f);
-                } else {
-                    float pushX = g_player.pivot_x;
-                    float pushY = g_player.pivot_y;
-                    float stepSize = 1.0f;
-                    int maxSteps = 10;
-                    for (int i = 0; i < maxSteps && checkPlayerCollision(pushX, pushY, h_mask, tempAngle, newP.angle); i++) {
-                        pushX -= normalX * stepSize;
-                        pushY -= normalY * stepSize;
-                    }
-                    newP.pivot_x = pushX;
-                    newP.pivot_y = pushY;
-                    sliding = false;
-                }
-            }
-
-            newP.pivot_x = g_player.pivot_x * 0.2f + newP.pivot_x * 0.8f;
-            newP.pivot_y = g_player.pivot_y * 0.2f + newP.pivot_y * 0.8f;
-        } else {
-            sliding = false;
-        }
-
-        updatePlayerComponents(newP);
         g_player = newP;
         updatePlayerComponents(g_player);
-        // The previous version rasterized the funnel from the previous frame.
         updateDynamicMask(h_mask, h_dynamic, g_wedge_x, g_wedge_y,
                           g_player.pivot_x, g_player.pivot_y);
         CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float),
