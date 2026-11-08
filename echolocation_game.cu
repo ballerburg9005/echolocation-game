@@ -534,7 +534,7 @@ void main(){
         // Display-only logarithmic exposure restores a broad gradation of
         // visible wave strengths. The old tanh clipped most large pulses
         // to identical saturated red/blue, causing hard contour bands.
-        float v=clamp(abs(pressure),0.0,1.0);
+        float v=clamp(abs(pressure)/0.45,0.0,1.0);
         float middle=0.13*sqrt(v);
         color=pressure>=0.0 ?
             vec3(v,middle,0.055*v) :
