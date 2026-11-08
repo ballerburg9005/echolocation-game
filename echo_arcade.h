@@ -264,7 +264,11 @@ public:
                 // Rapid spin is shared by the visual mesh and FDTD soft
                 // octagonal impedance; collection remains generous at 15cm
                 // so shrinking acoustic candy does not frustrate blind play.
-                const float speed=10.5f+0.62f*(float)(index%4);
+                // Roughly ghost-speed angular motion. An octagon has 8
+                // equivalent edges per revolution, so the previous
+                // 10.5–12.4 rad/s was acoustically blurred by the
+                // 55ms subcell smoother and looked like a static pill.
+                const float speed=5.2f+0.3f*(float)(index%4);
                 s.spin=std::fmod(s.spin+dt*speed,2.0f*kPi);
             }
             if(!s.collected && std::hypot(s.x-x,s.y-y)<15.0f){
