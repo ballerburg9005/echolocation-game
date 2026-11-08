@@ -69,9 +69,10 @@ inline bool insideNgon(float dx,float dy,float radius,int edges,
     const float angle=std::atan2(dy,dx)-rotation;
     const float sector=2.0f*kPi/(float)edges;
     // Angle relative to closest polygon vertex, in [-sector/2,+sector/2].
-    const float difference=std::remainder(angle,sector);
+    const float difference=std::fabs(std::remainder(angle,sector));
+    const float angleFromEdgeNormal=0.5f*sector-difference;
     const float maximum=radius*std::cos(kPi/(float)edges)/
-                        std::cos(difference);
+                        std::cos(angleFromEdgeNormal);
     return dx*dx+dy*dy <= maximum*maximum;
 }
 
@@ -102,13 +103,17 @@ ECHO_SOURCE_HD inline float fdtdWorldTone(float encoded,
     const float weight=(encoded-(float)id)/0.9f;
     if(weight<=0.0f)return 0.0f;
     const float frequency=toneFrequency(id);
-    const float t=(float)(step%480000ULL)*dt;
-    const float phrase=0.5f-0.5f*cosf(2.0f*kPi*1.2f*t+
+    // Double-precision phase avoids a discontinuity every ten seconds:
+    // resetting a sine's phase was another potential source of whips.
+    const double t=(double)step*(double)dt;
+    const double phase=fmod(t*(double)frequency,1.0);
+    const double lfo=fmod(t*1.2,1.0);
+    const float phrase=0.5f-0.5f*cosf(2.0f*kPi*(float)lfo+
                                      (float)id*0.35f);
     // Quiet source (~0.12 pressure units vs 750 for a player click);
     // physical propagation/occlusion comes from the FDTD solver.
     const float a=0.12f*weight*(0.22f+0.78f*phrase);
-    return a*sinf(2.0f*kPi*frequency*t);
+    return a*sinf(2.0f*kPi*(float)phase);
 }
 
 // Place one emitter using bilinear weights in the nearest *fluid* cells.
@@ -129,10 +134,10 @@ inline bool placeWorldEmitter(std::vector<float>& encoded,
     bool found=false;
     for(int ring=0;ring<9 && !found;++ring) {
         const float r=radiusCm+(float)ring*2.0f+2.0f;
-        const int dirs=radiusCm>0?12:1;
+        const int dirs=(radiusCm>0||ring>0)?12:1;
         for(int d=0;d<dirs;++d) {
-            const float sx=radiusCm>0?x+directions[d][0]*r:x;
-            const float sy=radiusCm>0?y+directions[d][1]*r:y;
+            const float sx=(radiusCm>0||ring>0)?x+directions[d][0]*r:x;
+            const float sy=(radiusCm>0||ring>0)?y+directions[d][1]*r:y;
             const int px=(int)std::floor(sx),py=(int)std::floor(sy);
             if(px<=1||py<=1||px>=side-2||py>=side-2)continue;
             if(mask[py*side+px]>0 ||
