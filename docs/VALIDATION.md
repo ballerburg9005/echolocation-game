@@ -122,14 +122,17 @@ fixes awaiting renewed listening evaluation**, not proven cures:
    turns left. Roof faces are separated slightly from the coplanar ceiling,
    avoiding depth-buffer z-fighting; sphere subdivision is increased and
    orb shading avoids per-pixel discontinuous procedural texture stripes.
-3. **Contact feedback:** the contact point is chosen from an obstructing
-   cell near the collision ring, instead of the old averaged collision normal.
-   Synthetic stereo taps use 9cm ear separation, 6.5cm behind the pivot to derive ear-specific
-   distance/gain and arrival-time differences. Rear contacts have a muted,
-   lower-frequency spectral cue because simple stereo level/time cannot
-   distinguish exact front from exact back. This is **not an HRTF**. Short
-   event-triggered taps replace continuous 100ms 440Hz/330Hz collision and
-   sliding tones that could sound everywhere.
+3. **Contact feedback:** the contact point is selected from an obstructing
+   cell near the 13cm collision circle; **the decorative wedge does not
+   collide**. The same fundamental 820Hz short beep is used for all
+   360 degrees. Ear gains and arrival times use 9cm interaural separation,
+   6.5cm behind the pivot. A mild *continuous* spectral variation by
+   cos(relative bearing) helps with the otherwise ambiguous front/back
+   pair; there is no separate forward "wedge pang". World-space
+   wall-bearing gating prevents new taps merely from turning at a
+   stationary collision. This is **not an HRTF**. Tests check the
+   entire 16-bearing compass, front/rear pitch consistency, and
+   wedge geometry entirely within the 13cm circle.
 4. **Close discovery:** the artificial O/I/W stereo chirps were removed,
    replaced by *FDTD-emitted* 85ms tapered notes with a hard eligibility
    condition based on close distance and static-wall line-of-sight.
@@ -199,12 +202,21 @@ delay frames, hence J is deliberately OFF by default.
 
 Game acoustic models now use clearly visible **hexagonal 10cm-radius
 ghosts** and **octagonal 7cm-radius shards**, with matching 3D models.
-Ghosts now spin visually at about 4.8–6.2 radians/sec and choose
-a new wandering heading every 0.20–0.55s. Alert lasts only 0.65–0.8s
-following a nearby click, not 3–6s. Their FDTD mask retains a fixed
-rotational orientation to avoid rapid, discontinuous moving-wall
-pressure changes; 2D has a small spinning ornament inside the
-reflective hexagon while 3D spins the actual rendered mesh.
+Ghosts spin at about 4.8–6.2 radians/sec and choose a new
+wandering heading every 0.20–0.55s. Alert lasts only 0.65–0.8s
+following a nearby click. Their REAL FDTD reflector polygons
+now rotate at the same rate as the visuals. Instead of writing a
+binary wall-id 2 then zeroing every newly solid cell's pressure,
+a separate 2×2 subcell coverage map records 0..1 material fraction
+and an exponential ~55ms filter limits how much each cell changes
+per display frame. The fractional reflectivity is stored as
+NEGATIVE mask coverage while SVG walls and candy remain positive
+hard materials. The CUDA pressure stencil blends fluid-neighbor
+coupling toward the 98% reflecting, zero-gradient condition
+continuously. The field retains pressure history even *inside*
+the ghost. This is NOT a fully physical moving rigid-boundary
+solver: time-dependent impedance may still alter energy, so
+listen for transients and benchmark numerical stability.
 The 2D renderer previously drew an additional 8px square GL_POINT on
 top of each reflector, making coins appear misshapen. Those duplicate
 squares are removed. Ghost hits now cause an at-most-1.5cm bump and a
@@ -247,3 +259,26 @@ diagnostic alone diagnoses a rare whipping noise, but comparing B/N/F4/J
 modes while capturing this line can narrow it down. All new numerical
 checks are still CPU/compilation tests; no live NVIDIA listening result
 is available from the automated runner.
+
+
+## Rotating reflective ghosts and continuous 360-degree wall cue
+
+The actual FDTD ghost reflector map now rotates with each ghost's visual
+hexagon. A four-subcell coverage raster is filtered with a 55ms
+exponential response, encoded as negative mask values, and represented
+by symmetric fractional zero-gradient edge coupling in the wave stencil.
+The player's collision circle and the SVG wall boundaries still use
+hard blocking geometry; they are NEVER inferred from the cyan wedge.
+This is preferable to rotating hard cell masks, which previously erased
+pressure fields during movement, but still requires stability and
+perceptual profiling on real GPU hardware. Unit tests demonstrate that
+rotating the hexagon changes the resulting FDTD field and that the
+fractional interface does not zero pressure in place.
+
+The collision cue has a consistent 820Hz tone throughout 360 degrees.
+Left/right source cues reflect each virtual ear's distance and arrival
+time, while a subtle treble shelf varies *continuously* with azimuth
+frontness. There is no loud forward-only pang. A full 16-point compass
+regression tests contact localization, front/back pitch consistency,
+and sound gating by world contact direction. This is not pinna/HRTF
+rendering; ambiguous front/back localization may remain.
