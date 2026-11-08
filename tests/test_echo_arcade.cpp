@@ -60,5 +60,21 @@ int main(){
     assert(game.won);
     game.reset();
     assert(!game.won && game.lives==3 && game.remaining>0);
+    // Three contacts exhaust lives; invulnerability prevents multiple
+    // penalties during the same sustained overlap.
+    for(int collision=0;collision<3;++collision) {
+        game.enemies[0].x=23;
+        game.enemies[0].y=25;
+        game.invulnerability=0;
+        auto hit=game.update(0,23,25);
+        assert(hit.hit);
+        assert(game.lives==2-collision);
+        assert(hit.gameOver==(collision==2));
+        auto repeat=game.update(0,23,25);
+        assert(!repeat.hit);
+    }
+    assert(game.lost);
+    game.reset();
+    assert(!game.lost && game.lives==3);
     std::puts("echo arcade tests passed: deterministic reachable spawns, audio attraction, pickups, exit, reset and reflectors");
 }
