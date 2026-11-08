@@ -181,9 +181,10 @@ static void parseSVGElement(tinyxml2::XMLElement* elem, float* h_mask)
                    strcmp(name, "path") == 0) {
             const bool nativeCircle = strcmp(name, "circle") == 0;
             const bool nativeEllipse = strcmp(name, "ellipse") == 0;
+            const char* sodipodiType = elem->Attribute("sodipodi:type");
             const bool inkscapeArc = strcmp(name, "path") == 0 &&
-                elem->Attribute("sodipodi:type") &&
-                strcmp(elem->Attribute("sodipodi:type"), "arc") == 0;
+                sodipodiType && (strcmp(sodipodiType, "arc") == 0 ||
+                                 strcmp(sodipodiType, "circle") == 0);
             if (nativeCircle || nativeEllipse || inkscapeArc) {
                 float cx = 0.0f, cy = 0.0f, rx = 0.0f, ry = 0.0f;
                 if (inkscapeArc) {
@@ -936,7 +937,7 @@ int main(int argc, char* argv[])
             // A soft limiter prevents a numerical transient from delivering
             // arbitrary full-scale peaks to headphones.
             for (float &sample : h_audioOut) {
-                sample = 0.8f * tanhf(sample);
+                sample = isfinite(sample) ? 0.8f * tanhf(sample) : 0.0f;
             }
             if (!h_audioOut.empty() &&
                 SDL_QueueAudio(simDev, h_audioOut.data(),
