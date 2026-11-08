@@ -121,7 +121,7 @@ if enabled, F6 is silent beyond 35cm and around walls, and F5 beyond
 
 **Wall contact:** collision taps are computed from the solid cell touched
 on the player's 13cm collision circle, not a single averaged obstacle
-bearing. Approximate 16cm ear spacing causes different arrival delays
+bearing. Approximate 9cm ear spacing (6.5cm behind the pivot) causes different arrival delays
 and intensity at each ear, while a darker rear tap distinguishes front
 and rear centre. Holding forward into a wall no longer repeats the beep;
 there is no continuous sliding tone. These are short synthetic cues, not
