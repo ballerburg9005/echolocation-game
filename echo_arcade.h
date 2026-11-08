@@ -76,6 +76,7 @@ struct Enemy {
     unsigned direction=0;
     // Arcade archetypes: 0 tracker, 1 sprinter, 2 sentinel.
     unsigned archetype=0;
+    bool eaten=false;
     float lastHeardX=0,lastHeardY=0;
     std::vector<int> pursuitDistances; // shortest paths to last audible click
 };
@@ -113,6 +114,8 @@ struct Shard {
 struct GuidanceTarget { float x=0,y=0; bool exit=false,available=false; };
 struct ArcadeEvent {
     int pickups=0;
+    int chargesGained=0;
+    int ghostsCaught=0;
     bool hit=false;
     bool gameOver=false;
     bool cleared=false;
@@ -124,12 +127,15 @@ public:
     explicit EchoArcade(const float* mask, int side,
                         float startX, float startY, uint32_t seed=0xEC401202)
         : grid_(mask), side_(side), homeX_(startX), homeY_(startY),
-          rng_(seed), navSide_((side + kNavStep-1)/kNavStep),
+          rng_(seed ? seed : 0xEC401202u), seed_(seed ? seed : 0xEC401202u),
+          navSide_((side + kNavStep-1)/kNavStep),
           walkable_(navSide_*navSide_,0), distances_(walkable_.size(),-1) {
         reset();
     }
     void reset() {
-        score=0; lives=3; won=false; lost=false; invulnerability=1.0f;
+        rng_=seed_;
+        score=0; lives=3; charges=0; shardsCollected=0; combo=0;
+        overdrive=0.0f; won=false; lost=false; invulnerability=1.0f;
         playerX=homeX_; playerY=homeY_; enemies.clear(); shards.clear();
         for(int y=0;y<navSide_;++y)for(int x=0;x<navSide_;++x){
             walkable_[y*navSide_+x] = !circleGridContact(
@@ -203,11 +209,34 @@ public:
         }
     }
 
+    // Earn one charge for every four shards. An overdrive pulse is an
+    // optional arcade power-up: enemy stun / capture are *game mechanics*,
+    // while the caller also emits a normal physical FDTD click.
+    bool activateOverdrive() {
+        if(won||lost||charges<=0)return false;
+        --charges;
+        overdrive=5.0f;
+        combo=0;
+        for(Enemy &e:enemies) {
+            e.alert=0.0f;
+            e.pursuitDistances.clear();
+        }
+        return true;
+    }
+
     ArcadeEvent update(float dt,float x,float y) {
         ArcadeEvent result;
         if(won||lost) return result;
         dt=std::max(0.0f,std::min(dt,0.05f));
         playerX=x;playerY=y;
+        const float previousOverdrive=overdrive;
+        overdrive=std::max(0.0f,overdrive-dt);
+        if(previousOverdrive>0 && overdrive==0.0f) {
+            for(Enemy &e:enemies) {
+                if(e.eaten) {e.x=e.spawnX;e.y=e.spawnY;}
+                e.eaten=false;
+            }
+        }
         invulnerability=std::max(0.0f,invulnerability-dt);
         // Refresh player-directed BFS at 2 Hz, not once per frame.
         navTimer_-=dt;
@@ -218,9 +247,25 @@ public:
         for(Shard &s:shards) {
             if(!s.collected && std::hypot(s.x-x,s.y-y)<15.0f){
                 s.collected=true; result.pickups++; remaining--; score+=100;
+                ++shardsCollected;
+                if(shardsCollected%4==0 && charges<3) {
+                    ++charges; ++result.chargesGained;
+                }
             }
         }
         for(Enemy &e:enemies) {
+            if(e.eaten)continue;
+            if(overdrive>0.0f) {
+                // Catching a ghost earns a Pac-Man-style increasing combo,
+                // instead of taking damage. It disappears until overdrive ends.
+                if(std::hypot(e.x-x,e.y-y)<24.0f) {
+                    e.eaten=true;
+                    ++result.ghostsCaught;
+                    score+=200*(1<<std::min(combo,3));
+                    ++combo;
+                }
+                continue;
+            }
             if(e.alert>0) {
                 e.alert=std::max(0.0f,e.alert-dt);
                 result.enemyAlert=true;
@@ -335,6 +380,7 @@ public:
     void stampEnemies(float* dynamicMask) const {
         if(lost||won) return;
         for(const Enemy&e:enemies){
+            if(e.eaten)continue;
             const int minX=std::max(1,(int)std::floor(e.x-8));
             const int maxX=std::min(side_-2,(int)std::ceil(e.x+8));
             const int minY=std::max(1,(int)std::floor(e.y-8));
@@ -346,7 +392,8 @@ public:
             }
         }
     }
-    int score=0,lives=3,remaining=0;
+    int score=0,lives=3,remaining=0,charges=0,shardsCollected=0,combo=0;
+    float overdrive=0.0f;
     bool won=false,lost=false;
     float invulnerability=0;
     float playerX=0,playerY=0,exitX=0,exitY=0;
@@ -359,7 +406,7 @@ private:
     const float* grid_;
     int side_;
     float homeX_,homeY_;
-    uint32_t rng_;
+    uint32_t rng_,seed_;
     int navSide_;
     std::vector<uint8_t> walkable_;
     std::vector<int> distances_;
