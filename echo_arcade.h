@@ -216,6 +216,26 @@ public:
         }
         return false;
     }
+    // Shards are small reflecting targets in addition to their distinct
+    // gameplay tones. Their material id 3 is a marker in the FDTD mask:
+    // the CUDA boundary kernel decides the coefficient for that interface.
+    // These are collectible (not movement-blocking) to preserve reachability.
+    void stampShards(float* dynamicMask) const {
+        if(lost||won)return;
+        for(const Shard &s:shards){
+            if(s.collected)continue;
+            const int minX=std::max(1,(int)std::floor(s.x-5.0f));
+            const int maxX=std::min(side_-2,(int)std::ceil(s.x+5.0f));
+            const int minY=std::max(1,(int)std::floor(s.y-5.0f));
+            const int maxY=std::min(side_-2,(int)std::ceil(s.y+5.0f));
+            for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x){
+                float dx=(x+0.5f)-s.x,dy=(y+0.5f)-s.y;
+                if(dx*dx+dy*dy<=25.0f&&grid_[y*side_+x]<=0 &&
+                    dynamicMask[y*side_+x]<1.5f)
+                    dynamicMask[y*side_+x]=3.0f;
+            }
+        }
+    }
     void stampEnemies(float* dynamicMask) const {
         if(lost||won) return;
         for(const Enemy&e:enemies){
