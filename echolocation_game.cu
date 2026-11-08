@@ -446,7 +446,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         } else if (showObj && mask[idx] > 0.f) {
                             vbo_data[vbo_idx + 2] = -1.f;
                         } else {
-                            vbo_data[vbo_idx + 2] = wave * visualScale;
+                            vbo_data[vbo_idx + 2] = echo::displayPressure(wave, visualScale);
                         }
                     }
                 }
@@ -495,7 +495,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         } else if (showObj && mask[idx] > 0.f) {
                             vbo_data[fp_idx + 2] = -1.f;
                         } else {
-                            vbo_data[fp_idx + 2] = wave * visualScale;
+                            vbo_data[fp_idx + 2] = echo::displayPressure(wave, visualScale);
                         }
                     }
                 }
@@ -534,7 +534,7 @@ void main(){
         // Display-only logarithmic exposure restores a broad gradation of
         // visible wave strengths. The old tanh clipped most large pulses
         // to identical saturated red/blue, causing hard contour bands.
-        float v=clamp(log(1.0+5.0*abs(pressure))/log(51.0),0.0,1.0);
+        float v=clamp(abs(pressure),0.0,1.0);
         float middle=0.13*sqrt(v);
         color=pressure>=0.0 ?
             vec3(v,middle,0.055*v) :
