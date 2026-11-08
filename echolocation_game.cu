@@ -1293,8 +1293,13 @@ int main(int argc, char* argv[])
         // new contact direction. Explicit ear-to-hit distances generate
         // level asymmetry and sub-millisecond interaural delay, while rear
         // contacts have softer spectral content. No recurring sliding beeps.
+        // Use the WORLD-space collision bearing to gate a fresh
+        // hit. Simply turning in place against the same wall must not
+        // manufacture another tap or a false "wedge collision".
+        const float worldContactBearing=atan2f(
+            contact.y-g_player.pivot_y,contact.x-g_player.pivot_x);
         if(wallTouch.shouldPlay(collided && contact.valid,
-                 hypotf(dx,dy),contact.relative,nowT) &&
+                 hypotf(dx,dy),worldContactBearing,nowT) &&
            SDL_GetQueuedAudioSize(beepDev) <
                (Uint32)(0.12f*g_sampleRate*2*sizeof(float))) {
             const auto ears=echo::contactEars(contact.relative,
