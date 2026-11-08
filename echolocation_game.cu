@@ -351,22 +351,36 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
             const float weight=beam.weights[k];
             if(weight<=0.0f)continue;
             const echo::PhasedSource& e=beam.elements[k];
-            if(x==e.frontX && y==e.frontY) {
+            // Bilinear source footprint and fractional phase delay prevent
+            // a turning ear from seeing a point source hop between whole
+            // grid cells. The room pressure update remains unchanged.
+            const float frontWeight=e.continuous?
+                echo::sourceWeight(e.frontSubX,e.frontSubY,x,y):
+                (x==e.frontX&&y==e.frontY?1.0f:0.0f);
+            if(frontWeight>0.0f) {
                 const int pulseStep=echo::pulseIndex(
                     step,interval,duration,automaticPulse,manualPulseStart);
                 if(pulseStep>=0)
-                    next+=weight*amplitude*
+                    next+=weight*frontWeight*amplitude*
                           echo::clickSample(pulseStep,duration,dt);
             }
-            if(beam.directional && e.enabled && e.backDelay>0 &&
-               x==e.backX && y==e.backY &&
-               step>=(uint64_t)e.backDelay) {
+            const float rearWeight=e.continuous?
+                echo::sourceWeight(e.backSubX,e.backSubY,x,y):
+                (x==e.backX&&y==e.backY?1.0f:0.0f);
+            const int backLag=e.continuous?
+                (int)floorf(e.backDelaySub):e.backDelay;
+            if(beam.directional && e.enabled && backLag>0 &&
+               rearWeight>0.0f && step>=(uint64_t)backLag) {
                 const int backStep=echo::pulseIndex(
-                    step-(uint64_t)e.backDelay,interval,duration,
+                    step-(uint64_t)backLag,interval,duration,
                     automaticPulse,manualPulseStart);
-                if(backStep>=0)
-                    next-=weight*amplitude*
-                          echo::clickSample(backStep,duration,dt);
+                if(backStep>=0) {
+                    const float click=e.continuous?
+                        echo::subcellClickSample((float)backStep-
+                            (e.backDelaySub-(float)backLag),duration,dt):
+                        echo::clickSample(backStep,duration,dt);
+                    next-=weight*rearWeight*amplitude*click;
+                }
             }
         }
     }
