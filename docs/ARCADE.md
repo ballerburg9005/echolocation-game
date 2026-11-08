@@ -39,9 +39,12 @@ The room measures 5×5 metres (500×500 cells at 1 cm per cell).
 - Ghosts wander with rapid changes of heading (every 0.20–0.55 seconds)
   until a nearby click alerts them. After **0.65–0.8 seconds**
   without another local click, they abandon pursuit and resume wandering.
-  Their visual bodies spin rapidly (up to about 355° per second);
-  the hard FDTD mask remains fixed in orientation to avoid whipping.
-  A contact gently displaces the player at most
+  Their hexagons rotate rapidly (up to about 355° per second) in both
+  the visuals AND the FDTD wave model. Every ghost has a rotating
+  2×2-supersampled polygon impedance map, smoothed over ~55ms so
+  turning never instantaneously creates hard zero-pressure cells.
+  This is approximated moving acoustic reflectivity, not a measured
+  rigid-body boundary condition. A contact gently displaces the player at most
   1.5cm and triggers one subdued cue with 0.9s cooldown. It does not
   deduct score/lives, end gameplay, freeze AI or disable pickups.
   Reflectors never teleport away as a penalty.
@@ -119,13 +122,17 @@ chirps are in the pressure field instead. F5 and F6 are OFF by default;
 if enabled, F6 is silent beyond 35cm and around walls, and F5 beyond
 55cm. A regular nonphysical whole-level beacon is not played.
 
-**Wall contact:** collision taps are computed from the solid cell touched
-on the player's 13cm collision circle, not a single averaged obstacle
-bearing. Approximate 9cm ear spacing (6.5cm behind the pivot) causes different arrival delays
-and intensity at each ear, while a darker rear tap distinguishes front
-and rear centre. Holding forward into a wall no longer repeats the beep;
-there is no continuous sliding tone. These are short synthetic cues, not
-a measured binaural or material-contact impulse response.
+**Wall contact:** a single short, gentle **820Hz beep** is used for every
+wall touch around the full 360° of the player's *13cm collision circle*.
+The actual contact-cell bearing drives left/right relative intensity
+and sub-millisecond ear delay using the correct 9cm ear spacing,
+6.5cm behind the pivot. A tiny continuous high-frequency shading
+variation helps distinguish front from rear while preserving the SAME
+basic beep—no separate special forward wedge "pang" sound.
+Contacts are gated by the actual world-space wall direction, so holding
+against a wall while turning cannot trigger fake new collisions.
+These are game accessibility cues, not a measured HRTF; exact front/back
+localization on stereo headphones remains approximate.
 
 **Direct sound, head shielding, and echo-only monitoring:** the old
 visual player wedge was a crude soundproof baffle intended to keep the
@@ -216,9 +223,13 @@ application; it cannot exercise real GPU audio playback.
 
 - Real-time throughput and actual audio-device latency need profiling on
   representative NVIDIA hardware.
-- Moving solid enemy/shard 6/8-gon masks can still create pressure
-  artifacts at interfaces; proper moving-boundary momentum treatment
-  is future work. The old moving wedge mask has been removed.
+- Ghosts now use rotating six-sided **fractional impedance** rather than
+  abrupt moving hard solids in the FDTD stencil; their sub-cell
+  coverage is exponentially smoothed across frames. This reduces
+  nonphysical pressure resets but still does not reproduce rigid-body
+  scattering or moving-boundary fluid momentum. The old moving wedge
+  mask remains absent. Moving hard candy/shard mask changes can
+  still generate pressure artifacts when collected or moved.
 - The optional J incident-field reference uses CPU time per click. Under
   load it could cause audio underruns; A/B test with J off and on before
   considering a default-on echo-only mode.
