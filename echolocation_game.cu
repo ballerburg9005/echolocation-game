@@ -457,7 +457,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         if(mask[idx] > 0.f) {
                             vbo_data[vbo_idx + 2] = showObj?-1.f:0.f;
                         } else if(showObj && mask[idx] < -1.20f) {
-                            vbo_data[vbo_idx + 2] = -7.f;
+                            vbo_data[vbo_idx + 2] = -8.8f; // LIME candy, not yellow wall
                         } else if(showObj && mask[idx] < -0.32f &&
                                   mask[idx]>=-1.0f) {
                             vbo_data[vbo_idx + 2] = -8.f;
@@ -507,7 +507,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         if(mask[idx] > 0.f) {
                             vbo_data[fp_idx + 2] = showObj?-1.f:0.f;
                         } else if(showObj && mask[idx] < -1.20f) {
-                            vbo_data[fp_idx + 2] = -7.f;
+                            vbo_data[fp_idx + 2] = -8.8f; // LIME candy
                         } else if(showObj && mask[idx] < -0.32f &&
                                   mask[idx]>=-1.0f) {
                             vbo_data[fp_idx + 2] = -8.f;
@@ -540,7 +540,9 @@ layout(location=1) in float pressure;
 out vec3 color;
 void main(){
     gl_Position = vec4(pos, 0, 1);
-    if (pressure < -9.0)      color = vec3(0, 0, 0);       // Black (invisible)
+    if (pressure < -9.5)      color = vec3(0, 0, 0);       // Invisible background
+    else if (pressure < -9.0) color = vec3(1, 1, 1);       // Tiny rotating candy glint
+    else if (pressure < -8.5) color = vec3(0.53, 1, 0.12); // NEON LIME candy octagon
     else if (pressure < -7.5) color = vec3(1, 0.18, 0.42); // Ghost reflector
     else if (pressure < -6.5) color = vec3(1, 1, 0);       // Gold for 'I'
     else if (pressure < -5.5) color = vec3(0, 1, 1);       // Cyan for 'W'
@@ -1516,16 +1518,34 @@ int main(int argc, char* argv[])
                     mapGlyphs.data(),GL_DYNAMIC_DRAW);
                 glPointSize(8.0f);
                 glDrawArrays(GL_POINTS,0,(GLsizei)(mapGlyphs.size()/3));
-                // A tiny revolving gold dot INSIDE each 20cm hexagon
-                // makes its fast spin visible in 2D, while the actual
-                // polygon outline remains the exact stable FDTD mask.
-                // In particular, do not reintroduce square overlays onto
-                // coins or spin solid FDTD cells every render frame.
+                // One tiny contrasting orientation speck INSIDE each
+                // spinning polygon. Unlike the old oversized GL_POINT
+                // squares, it cannot stick out of the 11cm candy octagon
+                // or replace the rotating true FDTD reflector contour.
                 mapGlyphs.clear();
                 for(const auto& en:arcade.enemies) {
                     if(en.eaten)continue;
                     addGlyph(en.x+5.0f*cosf(en.visualSpin),
                              en.y+5.0f*sinf(en.visualSpin),-7.0f);
+                }
+                for(const auto& sh:arcade.shards) {
+                    if(sh.collected)continue;
+                    const float mx=sh.x+2.5f*cosf(sh.spin);
+                    const float my=sh.y+2.5f*sinf(sh.spin);
+                    addGlyph(mx,my,-9.2f); // white glint, lime FDTD candy
+                    // Matching marker in the rotated right-hand 2D panel.
+                    // Keep its position inside the exact same octagon.
+                    const float dx=mx-g_player.pivot_x;
+                    const float dy=my-g_player.pivot_y;
+                    const float a=-g_player.angle-PI/4.0f+PI;
+                    const float rx=dx*cosf(a)-dy*sinf(a);
+                    const float ry=dx*sinf(a)+dy*cosf(a);
+                    const float fpX=0.5f+0.5f*rx*4.0f/(SIZE/2.0f);
+                    if(fpX>=0.0f && fpX<=1.0f) {
+                        mapGlyphs.push_back(fpX);
+                        mapGlyphs.push_back(ry*4.0f/(SIZE/2.0f));
+                        mapGlyphs.push_back(-9.2f);
+                    }
                 }
                 if(!mapGlyphs.empty()) {
                     glBufferData(GL_ARRAY_BUFFER,
@@ -1561,7 +1581,15 @@ int main(int argc, char* argv[])
                     if(shard.collected)continue;
                     orbs.push_back(echo::VisualOrb{shard.x,shard.y,
                         echo::kCandyRadiusCm*0.01f,0.85f,
-                        1.0f,0.84f,0.26f,1.15f,8,shard.spin});
+                        0.48f,1.0f,0.12f,1.5f,8,shard.spin});
+                    // A white speck at the TOP of the surface visibly
+                    // orbits with the otherwise eight-fold symmetric
+                    // facets. It has NO acoustic material of its own.
+                    orbs.push_back(echo::VisualOrb{
+                        shard.x+2.8f*cosf(shard.spin),
+                        shard.y+2.8f*sinf(shard.spin),
+                        0.012f,0.85f+0.035f,
+                        1.0f,1.0f,0.93f,2.0f,0});
                 }
                 if(lastDecoySimTime>=0 && simTime-lastDecoySimTime<1.2)
                     orbs.push_back(echo::VisualOrb{(float)decoyPulseX,
