@@ -60,8 +60,9 @@ int main() {
     const float high=echo::displayPressure(100.0f,0.018f);
     assert(low>0 && high>low && high<0.99f);
     assert(near(echo::displayPressure(-10,0.018f),-low));
-    assert(echo::displayPressure(-1000000,0.018f)>-1.0f);
-    assert(echo::displayPressure(1000000,0.018f)<1.0f);
+    assert(echo::displayPressure(-1000000,0.018f)>-0.5f);
+    assert(echo::displayPressure(1000000,0.018f)<0.5f);
+    assert(echo::displayPressure(-50000,0.018f)>-0.5f);
     // Funnel is only a visual outline, not a moving binary acoustic wall:
     // exact ray points render as edges; the back/side of the cone do not.
     assert(echo::visualFunnelPixel(5,5,0,0,10,0,0,0)==false);
