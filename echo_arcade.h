@@ -14,6 +14,29 @@
 
 namespace echo {
 
+// Decoy emitter placement: a sound source projected along the player's
+// facing direction, blocked by actual SVG geometry (no teleport through walls).
+// This is used for a *real* second FDTD source in the main CUDA kernel.
+struct DecoyPlacement { float x=0,y=0; bool valid=false; };
+inline DecoyPlacement projectDecoy(const float* walls,int size,float startX,
+                                   float startY,float dirX,float dirY,
+                                   float maxRangeCm=85.0f) {
+    DecoyPlacement result;
+    if(!walls||size<3||maxRangeCm<12.0f)return result;
+    const float norm=std::hypot(dirX,dirY);
+    if(norm<0.00001f)return result;
+    dirX/=norm;dirY/=norm;
+    // Sampling every 2cm with a 3cm clearance keeps the click emitter off
+    // blocked cells and prevents jumping across a thin wall.
+    for(float distance=10.0f;distance<=maxRangeCm;distance+=2.0f) {
+        const float x=startX+dirX*distance;
+        const float y=startY+dirY*distance;
+        if(circleGridContact(walls,size,x,y,3.0f).hit)break;
+        result={x,y,true};
+    }
+    return result;
+}
+
 struct Enemy {
     float x=0, y=0;
     float spawnX=0, spawnY=0;
