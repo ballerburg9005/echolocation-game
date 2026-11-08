@@ -1084,11 +1084,10 @@ int main(int argc, char* argv[])
                 g_player.pivot_x=arcadeEvent.recoilX;
                 g_player.pivot_y=arcadeEvent.recoilY;
                 updatePlayerComponents(g_player);
-                // Recoil is a discrete game event, not ordinary continuous
-                // movement; reset the interpolation anchor rather than
-                // dragging microphones through a 16cm wall in one batch.
-                previousMicLX=g_mic_l_x;previousMicLY=g_mic_l_y;
-                previousMicRX=g_mic_r_x;previousMicRY=g_mic_r_y;
+                // Ghost contact is now at most a 1.5cm correction, NOT a
+                // 16cm teleport. Keep the old microphone interpolation
+                // anchor, so the pressure receiver does not jump at once
+                // and make the same whipping noise we are investigating.
             }
             if(arcade.reachExit(g_player.pivot_x,g_player.pivot_y)) {
                 arcadeEvent.cleared=true;
