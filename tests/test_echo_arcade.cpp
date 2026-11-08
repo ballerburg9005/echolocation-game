@@ -24,6 +24,9 @@ int main(){
     echo::EchoArcade game(mask.data(),N,23,25,128);
     assert(!game.enemies.empty());
     assert(!game.shards.empty());
+    auto initialGuide=game.guidanceTarget();
+    assert(initialGuide.available && !initialGuide.exit);
+
     assert(game.remaining==(int)game.shards.size());
     for(const auto& e:game.enemies)
         assert(!echo::circleGridContact(mask.data(),N,e.x,e.y,11).hit);
@@ -50,6 +53,9 @@ int main(){
     assert(!game.reachExit(game.exitX,game.exitY));
     for(const auto& shard:game.shards)game.update(0,shard.x,shard.y);
     assert(game.remaining==0);
+    auto exitGuide=game.guidanceTarget();
+    assert(exitGuide.available && exitGuide.exit);
+    assert(std::hypot(exitGuide.x-game.exitX,exitGuide.y-game.exitY)<0.01f);
     assert(game.reachExit(game.exitX,game.exitY));
     assert(game.won);
     game.reset();
