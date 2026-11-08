@@ -93,3 +93,48 @@ Moving-mask artifacts, acoustic energy around moving objects, HRTF effects,
 and real-time performance on NVIDIA hardware remain unmeasured. Do not
 interpret success in the game as evidence of safe or effective physical
 echolocation.
+
+
+## Player-reported regressions: corrective changes and remaining uncertainty
+
+Feedback from real hardware testing identified movement-related rattles, a
+mirrored 3D heading, geometry lines, nonlocal wall-contact cues and persistent
+synthetic marker beeps. The changes below are **hypotheses and numerical/UI
+fixes awaiting renewed listening evaluation**, not proven cures:
+
+1. **Moving pressure boundaries:** the prior implementation inserted the
+   player's moving visual funnel into a hard 0/1 wall mask every frame.
+   The wave solver set those newly blocked pressure cells to zero abruptly,
+   generating nonphysical boundary discontinuities as the player moved.
+   The funnel is now a visual overlay; the acoustic grid contains only the
+   SVG walls and explicitly modeled moving arcade objects. Left/right
+   microphone positions are interpolated over each GPU audio batch.
+   **Trade-off:** removing the artificial funnel also removes its baffle
+   directivity. The current source is approximately isotropic in the plane.
+   A physically justified moving *directional source* or baffle deserves a
+   separate numerical validation effort.
+2. **3D presentation:** flip grid Y into world negative Z throughout the
+   static mesh, camera and moving entities. Positive A/left rotation now
+   turns left. Roof faces are separated slightly from the coplanar ceiling,
+   avoiding depth-buffer z-fighting; sphere subdivision is increased and
+   orb shading avoids per-pixel discontinuous procedural texture stripes.
+3. **Contact feedback:** the contact point is chosen from an obstructing
+   cell near the collision ring, instead of the old averaged collision normal.
+   Synthetic stereo taps use ~16cm ear separation to derive ear-specific
+   distance/gain and arrival-time differences. Rear contacts have a muted,
+   lower-frequency spectral cue because simple stereo level/time cannot
+   distinguish exact front from exact back. This is **not an HRTF**. Short
+   event-triggered taps replace continuous 100ms 440Hz/330Hz collision and
+   sliding tones that could sound everywhere.
+4. **Close discovery:** O/I/W hints are gated to 24/30/35cm, straight-line
+   unoccluded proximity, hysteresis on leaving and 4.5-second reminders.
+   The opt-in F5/F6 UI beacons are off by default and constrained to close
+   targets. Direct feedback remains game audio, not wave-simulated sound.
+
+CPU regression tests exercise contact-point angle, left/right ear-level
+difference, sample delays, rear distinctiveness, repeated collision gating,
+short-range and occluded discovery, 3D handedness and ceiling separation.
+**CUDA compilation alone cannot verify perceptual accuracy, acoustic
+transient suppression or an audible difference.** Compare with previous
+recordings and listen while moving and turning on a physical GPU before
+accepting these changes.
