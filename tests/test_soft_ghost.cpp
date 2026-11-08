@@ -120,8 +120,8 @@ int main(){
         candyArea+=candy0[idx];shiftedArea+=candy1[idx];
         edgeChange+=std::fabs(candy0[idx]-candy1[idx]);
     }
-    assert(echo::kCandyRadiusCm==4.0f);
-    assert(candyArea>20.0f && candyArea<55.0f);
+    assert(echo::kCandyRadiusCm==5.5f);
+    assert(candyArea>60.0f && candyArea<120.0f);
     assert(std::fabs(candyArea-shiftedArea)<candyArea*0.12f);
     assert(edgeChange>1.0f);
     assert(echo::rotatingCandyCoverage(5,0,0)==0.0f);
@@ -131,10 +131,10 @@ int main(){
         assert(std::fabs(echo::rotatingCandyCoverage((float)x,(float)y,0)-
                 echo::rotatingCandyCoverage((float)x,(float)y,echo::kPi/4))
                 <1e-5f);
-    // The 0.84 effective coverage scale is the same as the CUDA
-    // candy material tag, with ~82% rather than 98% reflection.
-    const auto coinPressure0=waveAfterPulse(candy0,0.84f);
-    const auto coinPressure1=waveAfterPulse(candy1,0.84f);
+    // Candy uses the SAME reflecting FDTD impedance as rotating ghosts.
+    // Only its geometry and distinct lower voice differ.
+    const auto coinPressure0=waveAfterPulse(candy0,1.0f);
+    const auto coinPressure1=waveAfterPulse(candy1,1.0f);
     float propagatedDifference=0.0f;
     for(size_t i=0;i<coinPressure0.size();++i)
         propagatedDifference+=std::fabs(coinPressure0[i]-coinPressure1[i]);
@@ -142,10 +142,10 @@ int main(){
     // Material decoding reuses one float per cell and the existing
     // FDTD stencil. Smaller candy is gently reflective, not ghost-strong.
     assert(echo::effectiveSoftCoverage(-0.75f)==0.75f);
-    assert(std::fabs(echo::effectiveSoftCoverage(-1.75f)-0.63f)<1e-5f);
+    assert(std::fabs(echo::effectiveSoftCoverage(-1.75f)-0.75f)<1e-5f);
     assert(echo::effectiveSoftCoverage(0)==0.0f);
     assert(echo::effectiveSoftCoverage(2.0f)==0.0f);
-    assert(echo::effectiveSoftCoverage(-1.75f)<
+    assert(echo::effectiveSoftCoverage(-1.75f)==
            echo::effectiveSoftCoverage(-0.75f));
     std::printf("rotating candy FDTD wave difference %.4f, 8-gon area %.2f cells\\n",
                 propagatedDifference,candyArea);
