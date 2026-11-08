@@ -37,6 +37,13 @@ The maze has three enemies, three lives, and up to twelve echo shards.
   respawns enemies at their starting positions.
 - Shards award 100 points each. An unlocked exit awards 500 and plays
   a victory sound. Press R to restart.
+- Every four collected shards earn one **sonic overdrive charge** (up to
+  three held). Press H to spend one. A normal physical FDTD ping is emitted,
+  and ghosts become immobile and harmless for five seconds. Touch a frozen
+  ghost to capture it for 200, then 400, then 800, then 1600 points within
+  the same overdrive; a captured ghost temporarily disappears from the sound
+  reflector mask and respawns when the effect ends. This is a game power-up,
+  not a predicted consequence of sound exposure.
 
 ## Controls
 
@@ -49,6 +56,7 @@ The maze has three enemies, three lives, and up to twelve echo shards.
 | T | Toggle automatic clicks; off means stealth/manual only |
 | G | Throw a remote physical echo decoy, up to 85 cm ahead (9s cooldown) |
 | C | Sweep a synthetic left/center/right stereo cane (100 cm range) |
+| H | Spend one sonic overdrive charge to freeze and catch ghosts for five seconds |
 | F2 | Toggle right 2D/3D viewport |
 | F3 | Toggle immersive full-window 3D |
 | F4 | Arcade on/off, preserving pure FDTD navigation mode |
@@ -80,6 +88,12 @@ wall. A nearby enemy follows a path toward the last source it heard,
 making diversion possible. This hearing check uses a coarse 5-cm
 walkable-path approximation: it is a gameplay heuristic, not a validated
 sound-pressure or diffraction calculation.
+
+**Sonic overdrive:** the H-key activation ping uses the same FDTD player
+source as an ordinary click. Ghost freezing, invulnerability, score combos
+and respawning are explicitly game-only mechanics. Enemies are still
+reflective while frozen, but captured enemies vanish from the wave mask
+until overdrive ends.
 
 **Cane:** the C-key probe measures exact collision-mask distances along
 three rays (left, forward, right), then generates three successive synthetic
