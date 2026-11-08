@@ -305,7 +305,8 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
                                int sourceX, int sourceY, float amplitude,
                                unsigned long long step, int interval,
                                int duration, float dt, float decay,
-                               bool automaticPulse, uint64_t manualPulseStart)
+                               bool automaticPulse, uint64_t manualPulseStart,
+                               int decoyX, int decoyY, uint64_t decoyStart)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -348,6 +349,14 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
             step,interval,duration,automaticPulse,manualPulseStart);
         if(pulseStep>=0)
             next+=amplitude*echo::clickSample(pulseStep,duration,dt);
+    }
+    // An actual remote source in the *same* FDTD solver: the decoy is
+    // not merely a stereo UI chirp or visually painted distraction.
+    if(x==decoyX && y==decoyY &&
+       decoyStart!=UINT64_MAX && step>=decoyStart &&
+       step-decoyStart<(uint64_t)duration) {
+        const int decoyStep=(int)(step-decoyStart);
+        next+=amplitude*0.95f*echo::clickSample(decoyStep,duration,dt);
     }
     p_next[idx] = next * decay;
 }
@@ -752,11 +761,16 @@ int main(int argc, char* argv[])
     double lastDebugTime = 0.0;
     unsigned long long simStep2=0;
     uint64_t manualPulseAt=UINT64_MAX;
+    uint64_t decoyPulseAt=UINT64_MAX;
+    int decoyPulseX=0,decoyPulseY=0;
+    double lastDecoySimTime=-100.0;
+    constexpr double decoyCooldownSeconds=9.0;
     bool automaticPulse=true;
 
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
     std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
-    std::puts("[CONTROLS] F manually click | T toggle auto-click/stealth | 1/2 interval");
+    std::puts("[CONTROLS] F click | T auto-pings/stealth | G throw wall-blocked decoy (9s cooldown)");
+    std::puts("[CONTROLS] 1/2 pulse interval");
     std::puts("[CONTROLS] F5 enemy heartbeat | F6 target beacon | 3/4 decay | 5/6 reflections | 7/8 volume");
 
     while (!quit) {
@@ -815,13 +829,32 @@ int main(int argc, char* argv[])
                             if(arcadeEnabled)arcade.hearClick(g_pulse_x,g_pulse_y);
                         }
                         break;
+                    case SDLK_g:
+                        if(!e.key.repeat && arcadeEnabled && !arcade.won &&
+                           !arcade.lost &&
+                           simTime-lastDecoySimTime>=decoyCooldownSeconds) {
+                            const echo::DecoyPlacement d=echo::projectDecoy(
+                                h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                                g_pulse_x-g_player.pivot_x,
+                                g_pulse_y-g_player.pivot_y);
+                            if(d.valid) {
+                                decoyPulseX=(int)lroundf(d.x);
+                                decoyPulseY=(int)lroundf(d.y);
+                                decoyPulseAt=simStep2;
+                                lastDecoySimTime=simTime;
+                                arcade.hearClick(d.x,d.y);
+                                playArcadeFeedback(beepDev,g_sampleRate,4);
+                            }
+                        }
+                        break;
                     case SDLK_r:
                         arcade.reset();
                         for(const ToneMarker& tm:g_toneMarkers)if(tm.type=='W'){
                             arcade.setExit(tm.x,tm.y);break;
                         }
                         gameWon=false;collectedItems=0;simStep2=0;simTime=0;
-                        manualPulseAt=UINT64_MAX;automaticPulse=true;
+                        manualPulseAt=UINT64_MAX;decoyPulseAt=UINT64_MAX;
+                        lastDecoySimTime=-100;automaticPulse=true;
                         g_player=Player{50.0f,150.0f,-PI/4.0f};
                         updatePlayerComponents(g_player);
                         for(ToneMarker &tm:g_toneMarkers)tm.collected=false;
@@ -1153,7 +1186,8 @@ int main(int argc, char* argv[])
                                          sourceX, sourceY, PULSE_AMPLITUDE,
                                          simStep2, g_pulseIntervalSteps,
                                          g_pulseDurationSteps, g_DT, g_decayFactor,
-                                         automaticPulse,manualPulseAt);
+                                         automaticPulse,manualPulseAt,
+                                         decoyPulseX,decoyPulseY,decoyPulseAt);
             CUDA_CHECK(cudaGetLastError());
 
             captureAndReduce<<<1, 1>>>(d_p_next, g_mic_l_x, g_mic_l_y,
@@ -1174,6 +1208,9 @@ int main(int argc, char* argv[])
         if(manualPulseAt!=UINT64_MAX &&
            simStep2>=manualPulseAt+(uint64_t)g_pulseDurationSteps)
             manualPulseAt=UINT64_MAX;
+        if(decoyPulseAt!=UINT64_MAX &&
+           simStep2>=decoyPulseAt+(uint64_t)g_pulseDurationSteps)
+            decoyPulseAt=UINT64_MAX;
 
         if (audioBatchIndex > 0) {
             CUDA_CHECK(cudaMemcpy(h_audioL.data(), d_audioL,
