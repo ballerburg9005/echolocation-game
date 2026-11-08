@@ -27,6 +27,30 @@ fixes important correctness and usability issues.
 - **SVG:** native circles, ellipses and rectangles, Inkscape elliptical
   arcs, basic fill/stroke handling and clipped rasterization.
 
+## New: Ghost Circuit (experimental arcade mode)
+
+The old experimental branch already contained a separate 3D rendering idea.
+This branch recovers and modernizes the concept as a lightweight OpenGL
+**first-person 2.5D view built from the same acoustically reflective grid**.
+
+There is now an actual sound-driven arcade game: three wandering enemies
+that chase nearby pings and act as dynamic CUDA wave reflectors, up to twelve
+golden shards that also reflect waves, three lives, scoring, an unlockable
+exit, collisions and victory sounds. The optional high-pitched target beacon
+and low-pitched ghost heartbeat help blind players navigate; turn them off
+for an echo-only challenge. A new sample maze, **Ghost Circuit**, lives at
+[echo_arena.svg](echo_arena.svg).
+
+Launch the new level with:
+
+    ./build/echolocation_game echo_arena.svg
+
+Important new controls: **F** manual ping, **T** toggle automatic pulses
+(stealth), **F2** swap 2D/3D view, **F3** immersive 3D, **F4** arcade on/off,
+**F5** ghost heartbeat on/off, **F6** guidance beacon on/off, **R** restart.
+The original WASD/arrows/QE movement, Space visibility and numeric wave
+parameter controls are retained. See [arcade guide](docs/ARCADE.md).
+
 These improvements are **not proof of real-world echolocation fidelity**.
 The 2D model has no HRTF, realistic 3D acoustics or external validation.
 See [physics and validation](docs/VALIDATION.md). Begin at a low
@@ -80,11 +104,18 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
   ./echolocation_game drawing.svg.
 - W/S or Up/Down: move. A/D or Left/Right: rotate. Q/E: strafe.
 - Space: toggle visualization of reflective objects. Escape: quit.
+- F manually generates a click; T enables/disables automatic pulses (stealth).
+- F2 toggles right viewport 2D/3D; F3 toggles full-window first-person 3D.
+- F4 toggles Ghost Circuit game mode; F5 enemy heartbeat, F6 target beacons.
+- R restarts all lives, shards, enemies, acoustic state and item pickups.
 - Keys **1/2**: pulse interval; **3/4**: per-step wave decay;
   **5/6**: wall reflection; **7/8**: echolocation playback gain.
   Adjustable values are clamped.
 - O markers: one low beep; I markers: two medium-pitched beeps (item);
   W markers: three high-pitched beeps (goal).
+- Ghosts and shards are distinguishable in 3D, in 2D, and acoustically.
+- Generated shard/exit guidance and threat heartbeats are nonphysical game
+  audio cues and are optional. They are not part of the 2D wave simulation.
 - The virtual cane remains unimplemented. There is no speech tutorial,
   key remapping, or true 3D binaural HRTF rendering.
 - Real-time output requires a sufficiently fast CUDA GPU. If a GPU cannot
