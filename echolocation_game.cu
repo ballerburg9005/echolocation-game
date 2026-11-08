@@ -16,6 +16,7 @@
 #include "svg_raster.h"
 #include "echo_arcade.h"
 #include "virtual_cane.h"
+#include "contact_audio.h"
 #include "view3d.h"
 #include <climits>
 #include <ctype.h>
@@ -794,13 +795,7 @@ int main(int argc, char* argv[])
     int showObjects = 1;
     int audioBatchIndex = 0;
 
-    const int beepSamples = (int)(0.1f * g_sampleRate);
-    float* beepBuf = (float*)malloc(beepSamples * 2 * sizeof(float));
-    double lastBeep = 0.0;
-    double beepGap = 0.4;
-    double lastSlideTime = 0.0;
-    bool sliding = false;
-    bool wasSliding = false;
+    echo::ContactTrigger wallTouch;
     bool gameWon = false;
     int collectedItems = 0;
     double lastDebugTime = 0.0;
@@ -927,8 +922,8 @@ int main(int argc, char* argv[])
                         audioResampler=echo::StereoLinearResampler(g_DT,g_sampleRate);
                         SDL_ClearQueuedAudio(simDev);
                         SDL_ClearQueuedAudio(beepDev);
-                        lastBeep=0;lastSlideTime=0;lastThreatCue=0;
-                        lastGuidanceCue=0;wasSliding=false;
+                        wallTouch=echo::ContactTrigger{};
+                        lastThreatCue=0;lastGuidanceCue=0;
                         lastCount=SDL_GetPerformanceCounter();
                         break;
                     case SDLK_ESCAPE: quit = true; break;
@@ -986,10 +981,13 @@ int main(int argc, char* argv[])
         newP.pivot_x = motion.x;
         newP.pivot_y = motion.y;
         const bool collided = motion.collided;
-        sliding = motion.slid;
-        // Bearing to obstacle in the same heading convention as the funnel.
         const float heading = newP.angle - PI / 4.0f;
-        const float collisionAngle = atan2f(motion.wallY, motion.wallX) - heading;
+        // Use the collision's actual nearest obstructing wall cell. Previous
+        // code relied on a smeared aggregate normal and only panned a 440Hz
+        // tone, which was directionally ambiguous (front sounded like back).
+        const echo::WallContact contact=echo::findWallContact(
+            h_mask,SIZE,newP.pivot_x,newP.pivot_y,heading,
+            motion.wallX,motion.wallY,13.0f);
 
         g_player = newP;
         updatePlayerComponents(g_player);
@@ -1108,35 +1106,20 @@ int main(int argc, char* argv[])
             }
         }
 
-        if (!wasSliding && collided && nowT - lastBeep > beepGap) {
-            float pan = sinf(collisionAngle);
-            float lv = 0.5f + 0.5f * pan;
-            float rv = 0.5f - 0.5f * pan;
-            for (int i = 0; i < beepSamples; i++) {
-                float t = (float)i / (float)g_sampleRate;
-                float s = sinf(2.f * PI * 440.f * t) * 0.2f; // 32-bit float
-                beepBuf[2 * i] = s * lv;
-                beepBuf[2 * i + 1] = s * rv;
-            }
-            SDL_QueueAudio(beepDev, beepBuf, beepSamples * 2 * sizeof(float));
-            lastBeep = nowT;
-        }
-
-        if (sliding && nowT - lastSlideTime > 0.1) {
-            float pan = sinf(collisionAngle);
-            float lv = 0.5f + 0.5f * pan;
-            float rv = 0.5f - 0.5f * pan;
-            int slideSamples = beepSamples;
-            for (int i = 0; i < slideSamples; i++) {
-                float t = (float)i / (float)g_sampleRate;
-                float s = sinf(2.f * PI * 330.f * t) * 0.05f; // 32-bit float
-                beepBuf[2 * i] = s * lv;
-                beepBuf[2 * i + 1] = s * rv;
-            }
-            if (SDL_GetQueuedAudioSize(beepDev) <
-                (Uint32)(0.15 * g_sampleRate * 2 * sizeof(float)))
-                SDL_QueueAudio(beepDev, beepBuf, slideSamples * 2 * sizeof(float));
-            lastSlideTime = nowT;
+        // A short single contact tap, only on collision onset or a genuinely
+        // new contact direction. Explicit ear-to-hit distances generate
+        // level asymmetry and sub-millisecond interaural delay, while rear
+        // contacts have softer spectral content. No recurring sliding beeps.
+        if(wallTouch.shouldPlay(collided && contact.valid,
+                 hypotf(dx,dy),contact.relative,nowT) &&
+           SDL_GetQueuedAudioSize(beepDev) <
+               (Uint32)(0.12f*g_sampleRate*2*sizeof(float))) {
+            const auto ears=echo::contactEars(contact.relative,
+                                             contact.distanceCm,g_sampleRate);
+            auto tap=echo::renderContactTap(ears,g_sampleRate);
+            if(!tap.empty())
+                SDL_QueueAudio(beepDev,tap.data(),
+                               (Uint32)(tap.size()*sizeof(float)));
         }
 
         // Continuous, directional rhythms distinguish obstacle/collectible/goal
@@ -1227,7 +1210,6 @@ int main(int argc, char* argv[])
                            (Uint32)(markerMix.size() * sizeof(float)));
         }
 
-        wasSliding = sliding;
 
         // SDL's output clock, not render-frame delta or an arbitrary fudge
         // factor, determines how many real physical FDTD steps are needed.
@@ -1416,7 +1398,6 @@ int main(int argc, char* argv[])
     CUDA_CHECK(cudaFree(d_audioR));
     free(h_mask);
     free(h_dynamic);
-    free(beepBuf);
 
     echo::release3D(view3d);
     glDeleteBuffers(1, &gfx.glyphVBO);
