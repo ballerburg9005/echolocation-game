@@ -61,10 +61,9 @@ real-world listening check:
 
 - **Moving/turning rattle:** the moving funnel outline is no longer stamped
   as a hard reflective wall into the FDTD grid; it is shown as a 2D visual
-  overlay only. Receiver positions now interpolate over each audio batch,
-  avoiding frame-sized jumps in sampling the pressure field. The original
-  funnel's *acoustic* directivity is not currently reproduced: this is a
-  source approximation, not a validated model of a human click and mouth.
+  overlay only. Receiver positions now interpolate over each audio batch.
+  A new FDTD phased emitter attempts front/back directional emission, but
+  the ear geometry and head scattering remain unvalidated.
 - **3D mirror:** grid +Y now maps to GL -Z in mesh, camera and actors;
   A/left turning and D/right turning have consistent handedness.
 - **3D circles/pillars:** ceiling and object tops no longer overlap at
@@ -76,12 +75,11 @@ real-world listening check:
   synthetic tap uses near/far-ear distance attenuation, relative ear delay,
   and a distinct rear sound. No periodic tone while holding into a wall.
   This is *HRTF-lite gameplay feedback*, not human binaural simulation.
-- **No mysterious continuous beacon:** SVG O/I/W markers are chimes only
-  within **24/30/35cm** respectively (and only with a clear geometric path).
-  They announce first proximity, with at most a gentle reminder after
-  4.5 seconds while still nearby. The optional F5 enemy heartbeat and F6
-  target aid are **off by default**; F6 only operates near the target
-  (within 35cm) instead of playing throughout the level.
+- **No mysterious artificial whole-level beacon:** the older artificial
+  O/I/W chimes have now been removed entirely. Instead the markers emit
+  quiet FDTD tones, subject to numerical propagation and reflections
+  (they can still be audible from far away). The optional direct F5/F6
+  aids are OFF by default; F6 only operates within 35cm.
 
 If you want to isolate the FDTD sounds, toggle off the arcade with **F4**
 and leave F5/F6 off. Start headphone volume low. The project still needs
