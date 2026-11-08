@@ -386,13 +386,16 @@ public:
         // A finished round stops AI/movement, not the acoustic scenery.
         for(const Shard &s:shards){
             if(s.collected)continue;
-            const int minX=std::max(1,(int)std::floor(s.x-5.0f));
-            const int maxX=std::min(side_-2,(int)std::ceil(s.x+5.0f));
-            const int minY=std::max(1,(int)std::floor(s.y-5.0f));
-            const int maxY=std::min(side_-2,(int)std::ceil(s.y+5.0f));
+            // A single centred 14cm octagon, with no separate square
+            // glyph painted on top. Bigger than the old 10cm item, so
+            // its facets remain visible on a one-centimetre grid.
+            const int minX=std::max(1,(int)std::floor(s.x-7.0f));
+            const int maxX=std::min(side_-2,(int)std::ceil(s.x+7.0f));
+            const int minY=std::max(1,(int)std::floor(s.y-7.0f));
+            const int maxY=std::min(side_-2,(int)std::ceil(s.y+7.0f));
             for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x){
                 float dx=(x+0.5f)-s.x,dy=(y+0.5f)-s.y;
-                if(insideNgon(dx,dy,5.0f,8,0.3926990817f)&&
+                if(insideNgon(dx,dy,7.0f,8,0.3926990817f)&&
                    grid_[y*side_+x]<=0 &&
                     dynamicMask[y*side_+x]<1.5f)
                     dynamicMask[y*side_+x]=3.0f;
@@ -403,14 +406,16 @@ public:
         // Ghost reflectors must not disappear when the last life is lost.
         for(const Enemy&e:enemies){
             if(e.eaten)continue;
-            const int minX=std::max(1,(int)std::floor(e.x-8));
-            const int maxX=std::min(side_-2,(int)std::ceil(e.x+8));
-            const int minY=std::max(1,(int)std::floor(e.y-8));
-            const int maxY=std::min(side_-2,(int)std::ceil(e.y+8));
+            // At 8cm radius/16 edges the grid raster looked like a
+            // circle. Use a plainly faceted 20cm hexagonal reflector.
+            const int minX=std::max(1,(int)std::floor(e.x-10));
+            const int maxX=std::min(side_-2,(int)std::ceil(e.x+10));
+            const int minY=std::max(1,(int)std::floor(e.y-10));
+            const int maxY=std::min(side_-2,(int)std::ceil(e.y+10));
             for(int yy=minY; yy<=maxY;++yy)for(int xx=minX;xx<=maxX;++xx){
                 const float dx=(xx+0.5f)-e.x,dy=(yy+0.5f)-e.y;
-                if(insideNgon(dx,dy,8.0f,16,
-                     (float)e.archetype*0.1963495408f) &&
+                if(insideNgon(dx,dy,10.0f,6,
+                     (float)e.archetype*0.5235987756f) &&
                      grid_[yy*side_+xx]<=0)
                     dynamicMask[yy*side_+xx]=2.0f;
             }
