@@ -85,15 +85,15 @@ enum : int {
     kSvgGoal=17,kSvgItem=18,kSvgObstacle=19
 };
 ECHO_SOURCE_HD inline float toneFrequency(int id) {
-    if(id==kGhostTracker)return 395.0f;
-    if(id==kGhostSprinter)return 490.0f;
-    if(id==kGhostSentinel)return 315.0f;
+    if(id==kGhostTracker)return 660.0f;
+    if(id==kGhostSprinter)return 840.0f;
+    if(id==kGhostSentinel)return 530.0f;
     if(id>=kShardFirst && id<=kShardLast)
-        return 625.0f+(id-kShardFirst)*16.0f;
-    if(id==kArcadeExit)return 970.0f;
-    if(id==kSvgGoal)return 930.0f;
-    if(id==kSvgItem)return 755.0f;
-    if(id==kSvgObstacle)return 355.0f;
+        return 1020.0f+(id-kShardFirst)*14.0f;
+    if(id==kArcadeExit)return 1240.0f;
+    if(id==kSvgGoal)return 1180.0f;
+    if(id==kSvgItem)return 990.0f;
+    if(id==kSvgObstacle)return 720.0f;
     return 0.0f;
 }
 ECHO_SOURCE_HD inline float fdtdWorldTone(float encoded,
@@ -103,17 +103,19 @@ ECHO_SOURCE_HD inline float fdtdWorldTone(float encoded,
     const float weight=(encoded-(float)id)/0.9f;
     if(weight<=0.0f)return 0.0f;
     const float frequency=toneFrequency(id);
-    // Double-precision phase avoids a discontinuity every ten seconds:
-    // resetting a sine's phase was another potential source of whips.
+    // Brief, fully tapered pulses rather than perpetually driven resonant
+    // sine waves (the reported 'spaceship engine' spanning a 5m level).
+    // Every object has a different phase so its ping is distinguishable.
+    // Energy is injected INTO FDTD; the location gate is applied on the CPU.
     const double t=(double)step*(double)dt;
+    const double cycle=fmod(t+0.157*(double)id,2.15);
+    constexpr float duration=0.085f;
+    if(cycle>=(double)duration)return 0.0f;
+    const float envelope=0.5f-0.5f*cosf(
+        2.0f*kPi*(float)cycle/duration);
     const double phase=fmod(t*(double)frequency,1.0);
-    const double lfo=fmod(t*1.2,1.0);
-    const float phrase=0.5f-0.5f*cosf(2.0f*kPi*(float)lfo+
-                                     (float)id*0.35f);
-    // Quiet source (~0.12 pressure units vs 750 for a player click);
-    // physical propagation/occlusion comes from the FDTD solver.
-    const float a=0.12f*weight*(0.22f+0.78f*phrase);
-    return a*sinf(2.0f*kPi*(float)phase);
+    const float amplitude=0.15f*weight*envelope;
+    return amplitude*sinf(2.0f*kPi*(float)phase);
 }
 
 // Place one emitter using bilinear weights in the nearest *fluid* cells.
@@ -121,9 +123,12 @@ ECHO_SOURCE_HD inline float fdtdWorldTone(float encoded,
 // Move no harder wall cells in order to make an audible target.
 inline bool placeWorldEmitter(std::vector<float>& encoded,
                                const float* mask,int side,
-                               float x,float y,int id,float radiusCm=0) {
+                               float x,float y,int id,float radiusCm=0,
+                               float strength=1.0f) {
     if(id<1||id>kSvgObstacle||!mask||side<4||
+       strength<=0.0f||!std::isfinite(strength)||
        encoded.size()!=(size_t)side*side)return false;
+    strength=std::min(1.0f,strength);
     const float directions[12][2]={
         {1,0},{0,1},{-1,0},{0,-1},{.70710678f,.70710678f},
         {-.70710678f,.70710678f},{-.70710678f,-.70710678f},
@@ -151,7 +156,7 @@ inline bool placeWorldEmitter(std::vector<float>& encoded,
     const int ix=(int)std::floor(sourceX),iy=(int)std::floor(sourceY);
     const float fx=sourceX-ix,fy=sourceY-iy;
     for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx) {
-        const float w=(dx?fx:1-fx)*(dy?fy:1-fy);
+        const float w=(dx?fx:1-fx)*(dy?fy:1-fy)*strength;
         if(w<0.001f)continue;
         const int index=(iy+dy)*side+(ix+dx);
         const float prior=encoded[index];
