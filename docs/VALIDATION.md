@@ -112,10 +112,11 @@ fixes awaiting renewed listening evaluation**, not proven cures:
    The funnel is now a visual overlay; the acoustic grid contains only the
    SVG walls and explicitly modeled moving arcade objects. Left/right
    microphone positions are interpolated over each GPU audio batch.
-   **Trade-off:** removing the artificial funnel also removes its baffle
-   directivity. The current source is approximately isotropic in the plane.
-   A physically justified moving *directional source* or baffle deserves a
-   separate numerical validation effort.
+   **Trade-off:** removing the artificial funnel removes its hard-wall
+   scattering. A phased two-point FDTD source creates forward directivity
+   instead, but it is NOT a substitute for a rigorously simulated head
+   with recessed, acoustically shielded microphones. The cyan wedge is
+   now explicitly a non-solid aim indicator.
 2. **3D presentation:** flip grid Y into world negative Z throughout the
    static mesh, camera and moving entities. Positive A/left rotation now
    turns left. Roof faces are separated slightly from the coplanar ceiling,
@@ -129,10 +130,12 @@ fixes awaiting renewed listening evaluation**, not proven cures:
    distinguish exact front from exact back. This is **not an HRTF**. Short
    event-triggered taps replace continuous 100ms 440Hz/330Hz collision and
    sliding tones that could sound everywhere.
-4. **Close discovery:** O/I/W hints are gated to 24/30/35cm, straight-line
-   unoccluded proximity, hysteresis on leaving and 4.5-second reminders.
-   The opt-in F5/F6 UI beacons are off by default and constrained to close
-   targets. Direct feedback remains game audio, not wave-simulated sound.
+4. **Close discovery:** the artificial O/I/W stereo chirps were removed,
+   replaced by *FDTD-emitted* 85ms tapered notes with a hard eligibility
+   condition based on close distance and static-wall line-of-sight.
+   This gate is game logic, not predicted physical diffraction. The
+   optional direct F5/F6 assists remain off by default. Outside of
+   touch/score confirmations, the object's audio uses the wave field.
 
 CPU regression tests exercise contact-point angle, left/right ear-level
 difference, sample delays, rear distinctiveness, repeated collision gating,
@@ -162,6 +165,17 @@ Forward energy was approximately 0.9405 in the paired case. These values
 apply only to that particular geometry, timeline and numerical setup;
 especially close ears and room reverberation require independent listening.
 
+The earlier microphones were lateral to this array: with the pair active,
+direct pressure *increased* at those positions in a small free-field
+benchmark. The revised 13cm collision-ring receiver model places both
+ears 8cm behind the pivot and 6cm to either side. At those actual
+locations, the same CPU FDTD stencil measured a paired/monopole
+direct-energy ratio of **0.0775**, i.e. ~92.25% lower direct energy.
+The previous far-field 98% result is NOT representative of the former
+ear positions. There is still no physically impenetrable wedge or
+head-scattering calculation: a true moving head would need accurate
+subcell boundary handling to avoid repeating the observed rattles.
+
 The optional **J** mode implements linear incident/scattered pressure
 decomposition at the *receivers*. For each player pulse, it computes the
 homogeneous free-field wave on a separate small CPU grid with the same
@@ -175,26 +189,47 @@ moving obstacles and GPU/CPU precision differences may leave direct
 signal artifacts. Computing the reference on CPU at a pulse start may
 delay frames, hence J is deliberately OFF by default.
 
-Game acoustic models now use 16-gon ghost masks and eight-sided shard
-masks, with corresponding 3D faceted presentation. They remain present
-after loss/win instead of abruptly disappearing. Ghost hits recoil the
-player and do not teleport the ghost wave-mask objects to their spawns.
+Game acoustic models now use clearly visible **hexagonal 10cm-radius
+ghosts** and **octagonal 7cm-radius shards**, with matching 3D models.
+The 2D renderer previously drew an additional 8px square GL_POINT on
+top of each reflector, making coins appear misshapen. Those duplicate
+squares are removed. Ghost hits now cause an at-most-1.5cm bump and a
+tiny contact signal, with neither death nor score loss. The game
+cannot lose lives or freeze its AI from repeated ghost contact.
 Moving binary reflectors CAN STILL introduce pressure discontinuities
 as their boundaries cross grid cells. Numerical moving-medium treatment,
 subcell geometry/impedance interpolation and real hardware artifact
 tests remain future work.
 
-Quiet room-object tones are added in the same pressure update as
-the clicks. A single sparse emission map encodes ghost, individual
-shard, exit and SVG O/I/W source identities and fractional source
-weights. World tones are not postprocessed stereo panning; they can
-scatter and reflect within the physical 2D grid. The amplitude is a
-deliberately small, uncalibrated game design choice; resonances and
-relative loudness must be tested on headphones. Toggle **N** to isolate
-the pulse/scattering sound. Direct UI feedback and wall-contact taps
-remain synthetic (the latter intentionally so).
+The previous **continuous oscillating sources** were a design regression:
+with 2D geometric spreading and bounded-room resonances, they could
+create a whole-level spaceship hum that barely changed through walls.
+Quiet 85ms chirps now enter the SAME FDTD pressure update through a
+sparse source map, but CPU gating permits their emission only within
+48cm for ghosts, 42cm for shards, 50cm for the exit, and 35–50cm for
+SVG marker types. A clear line of sight through the **static** wall
+geometry is also required. Their amplitude ramps quadratically to
+zero near the maximum distance. Physical 2D propagation, echoes
+and occlusion still apply *after* these game-logic choices. This is
+not an approximation of natural 3D attenuation and it will not model
+diffraction around hidden corners correctly. Press N to A/B source
+audio against echo-only exploration (game-play mode F4 remains
+independent). Direct event feedback and wall-contact taps remain synthetic.
 
 The 2D visualization uses bounded logarithmic exposure between
 -0.45 and +0.45 so pressure values cannot overlap negative-coded
 map object markers. Keys 9/0 adjust visualization only, not the
 physical pressure state. Tests verify numeric bounds and monotonicity.
+
+
+## Audio artifact diagnostics
+
+Every five seconds the program logs `[AUDIO-DIAG]` with raw pre-limiter
+headphone peak, sample count exceeding 0.95, and the number of rendered
+frames where the SDL audio queue fell below 2ms. A large raw peak
+with a healthy queue suggests pressure-grid artifacts; low-queue warnings
+without pressure spikes suggest GPU/CPU scheduling and underruns. Neither
+diagnostic alone diagnoses a rare whipping noise, but comparing B/N/F4/J
+modes while capturing this line can narrow it down. All new numerical
+checks are still CPU/compilation tests; no live NVIDIA listening result
+is available from the automated runner.
