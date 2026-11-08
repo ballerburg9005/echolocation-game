@@ -87,7 +87,8 @@ struct ThreatCue {
     bool audible=false;
 };
 inline ThreatCue threatCue(float px,float py,float angle,
-                           float ex,float ey,bool alerted) {
+                           float ex,float ey,bool alerted,
+                           unsigned archetype=0) {
     const float distance=std::hypot(ex-px,ey-py);
     if(distance>=105.0f)return {};
     const float closeness=1.0f-std::max(0.0f,distance)/105.0f;
@@ -97,7 +98,9 @@ inline ThreatCue threatCue(float px,float py,float angle,
     ThreatCue t;
     t.left=amplitude*std::sqrt(0.5f*(1.0f+pan));
     t.right=amplitude*std::sqrt(0.5f*(1.0f-pan));
-    t.frequency=200.0f+120.0f*closeness+(alerted?65.0f:0.0f);
+    // Distinct pitches: tracker middle, sprinter high, sentinel low.
+    const float voice=archetype==1?105.0f:archetype==2?-65.0f:0.0f;
+    t.frequency=235.0f+voice+120.0f*closeness+(alerted?65.0f:0.0f);
     t.interval=std::max(0.17f,(0.9f-0.65f*closeness)*(alerted?0.8f:1.0f));
     t.audible=true;
     return t;
