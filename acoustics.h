@@ -81,7 +81,9 @@ ECHO_HD inline float clickSample(int index, int duration, float dt) {
 ECHO_HD inline float displayPressure(float pressure,float exposure) {
     const float magnitude=fabsf(pressure)*fmaxf(0.000001f,exposure);
     const float mapped=log1pf(5.0f*magnitude)/logf(51.0f);
-    const float limit=fminf(0.98f,mapped);
+    // Wave values must remain within (-0.5,+0.5): -1 through -10
+    // are glyph IDs, and the GPU marker shader tests pressure<-0.5.
+    const float limit=0.45f*fminf(1.0f,mapped);
     return copysignf(limit,pressure);
 }
 
