@@ -19,10 +19,12 @@ generated exit if its location is walkable.
 
 The maze has three enemies, three lives, and up to twelve echo shards.
 
-- Find all shards. Their 5 cm radius masks reflect wave energy in the FDTD
-  simulation, and optional guidance is available.
-- Avoid enemies. Their 8 cm radius bodies change the wave mask and move through
-  accessible paths. Each enemy has an approximate reflection coefficient.
+- Find all shards. Their 5cm **eight-sided** masks reflect wave energy in
+  the FDTD simulation and emit distinct low-level pressure-field tones.
+  Optional direct guidance remains disabled initially.
+- Avoid enemies. Their 8cm radius **16-sided** reflective bodies change
+  the wave mask, move through accessible paths and radiate distinct quiet
+  FDTD tones. These are moving numerical boundaries, not measured materials.
 - Ghosts have distinct roles: a medium-speed violet **tracker**, a fast
   orange **sprinter**, and a slower blue **sentinel** with longer hearing
   range. Hearing follows reachable corridors rather than a direct radius
@@ -33,8 +35,10 @@ The maze has three enemies, three lives, and up to twelve echo shards.
   the player. It stops at static maze walls; the cooldown is 9 seconds.
 - Ghosts wander until a nearby click alerts them, then pursue via a 5 cm
   navigation-grid shortest-path field. An encounter removes one life,
-  deducts up to 150 points, allows two seconds of invulnerability, and
-  respawns enemies at their starting positions.
+  deducts up to 150 points and pushes the player away with three seconds
+  of invulnerability. It no longer teleports every enemy reflector (which
+  could create an acoustic pressure artifact). After losing the last life,
+  ghosts and remaining candy stay visible and acoustic; press R to reset.
 - Shards award 100 points each. An unlocked exit awards 500 and plays
   a victory sound. Press R to restart.
 - Every four collected shards earn one **sonic overdrive charge** (up to
@@ -62,6 +66,10 @@ The maze has three enemies, three lives, and up to twelve echo shards.
 | F4 | Arcade on/off, preserving pure FDTD navigation mode |
 | F5 | Opt into nearby directional enemy heartbeat (off initially) |
 | F6 | Opt into nearby, unobstructed target discovery chime (off initially) |
+| B | Toggle player FDTD click: forward phased pair (default) / isotropic monopole |
+| N | Toggle quiet object/landmark tones **inside FDTD** (on by default) |
+| J | Toggle experimental echo-only receiver subtraction (off by default) |
+| 9/0 | Lower/raise 2D wave-display exposure (does not alter physics) |
 | R | Restart level and clear acoustic state |
 | Space | Toggle object visibility in original 2D view |
 | 1/2 | Pulse interval |
@@ -72,18 +80,30 @@ The maze has three enemies, three lives, and up to twelve echo shards.
 
 ### Sound types
 
-**Physics-based:** the 1.8 kHz tapered source excites the 2D FDTD field.
-Static SVG walls, moving enemies and uncollected shards have real occupancy
-in this simulation; two virtual microphones sample the resulting pressure.
+**Physics-based:** the player's 1.8kHz tapered click excites the 2D FDTD
+field. With B in its default forward mode, two pressure sources separated
+by about 6cm emit equal and opposite pulses, with the rear negative
+source delayed by the physical transit time. Far-field radiation behind
+the player is consequently reduced by destructive interference, without
+moving the wedge's hard binary boundary. This is NOT a perfect bat beam or
+an impenetrable head. Both virtual microphones sample the FDTD pressure.
 
-**Game-only synthetic audio:** nearby SVG O/I/W chimes, item/damage/victory
-jingles, enemy heartbeat (F5), target discovery (F6), and wall-contact
-taps do not enter the FDTD field. They use stereo rendering rather than
-wall reverberation or measured HRTFs. O/I/W now chime only on first
-discovery inside 24/30/35 cm respectively, and only with an unobstructed
-straight path; reminders are delayed at least 4.5 seconds. **F5 and F6
-are OFF by default.** If enabled, F6 is silent beyond 35 cm and around
-walls, and F5 is silent beyond 55 cm. Neither is a whole-level beacon.
+The ghost tracker/sprinter/sentinel and candy have different *actual
+pressure field emitters*, placed in fluid cells just outside their
+reflective polygon outlines, with quiet modulated tones. The generated
+exit and SVG O/I/W markers use distinct FDTD frequencies too. N disables
+these sources for echo-only experiments. The player can hear them through
+the simulated wave field, including occlusion and reflection; they are
+not merely global stereo panning or artificially triggered 85cm beeps.
+Static walls and 16/8-sided moving objects are also genuine mask materials.
+
+**Game-only synthetic audio:** brief score/pickup/damage/victory event
+confirmations, optional F5/F6 UI assistance, C-key navigation cane, and
+short directional wall-contact taps still bypass FDTD. O/I/W landmarks
+NO LONGER generate separate proximity chimes: their quiet continuous
+sounds are in the pressure field instead. F5 and F6 are OFF by default;
+if enabled, F6 is silent beyond 35cm and around walls, and F5 beyond
+55cm. A regular nonphysical whole-level beacon is not played.
 
 **Wall contact:** collision taps are computed from the solid cell touched
 on the player's 13cm collision circle, not a single averaged obstacle
@@ -93,13 +113,26 @@ and rear centre. Holding forward into a wall no longer repeats the beep;
 there is no continuous sliding tone. These are short synthetic cues, not
 a measured binaural or material-contact impulse response.
 
-**FDTD movement artifact mitigation:** the visual player funnel is no
-longer itself a moving, instantaneously appearing hard wall in the
-pressure simulation. Its display is retained on the two-panel map, but
-its former role as a physical directional baffle is not modeled. We
-interpolate the ear sampling positions across audio batches. This
-reduces abrupt pressure and receiver jumps but makes acoustic
-directivity and natural movement cues an open validation issue.
+**Direct sound, head shielding, and echo-only monitoring:** the old
+visual player wedge was a crude soundproof baffle intended to keep the
+ears behind the outbound pulse. Its rotating hard mask generated abrupt
+acoustic boundary changes (audible whipping/rattling), so it is no
+longer stamped into the FDTD solver. Its visible 2D outline remains.
+Instead B selects a directional phased source or simple monopole. In
+a separate CPU 2D FDTD benchmark, backward receiver energy fell from
+0.216 to 0.0043 while forward energy was 0.94 (simulation units),
+approximately 98% lower backward energy than the monopole. This is
+NOT a measured ear impulse response nor a guarantee of silent ears.
+
+J enables *experimental scattered-field monitoring*: a small free-field
+CPU FDTD computes the identical incident pulse and subtracts it from
+microphone samples on the numerical time grid before resampling. The
+real world solver still evolves total pressure, so scattering from every
+wall and object persists. Subtraction is only approximate if the player
+moves, source quantization differs, or reference calculation stalls GPU
+audio playback; keep J OFF unless evaluating it. This is mathematically
+more coherent than simply suppressing all sound for the first 3ms, since
+nearby reflections occur during that window.
 
 **Stealth and decoys:** T disables automatic player pulses, not
 numerical timekeeping. F triggers a player click on demand; G sends a
@@ -133,10 +166,15 @@ This version restores the idea with a new smaller and testable mesh pipeline.
   and acoustic propagation. Walls therefore occupy the same planar cells.
 - OpenGL 3.3 draws a right-handed perspective camera, directional
   lighting, subtle procedural materials and glowing 3D entities.
+  Ghost meshes use 16-sided contours and candy eight-sided contours,
+  matching their planar reflector mask facets.
   Grid +Y maps to GL -Z, so player turns match the 2D view. The
   ceiling is separated from obstacle roofs to prevent coplanar
   z-fighting stripes on round shapes; curved orbs use smoother shading.
 - The original two-panel 2D diagnostic view remains available.
+  Its signed wave colors now use bounded log exposure to avoid hard
+  tanh saturation or collisions with negative glyph sentinel codes;
+  9/0 only adjusts visualization, not pressure.
 - This is **2.5D graphical extrusion, not 3D wave simulation**. No sound
   elevation, ear pinna filtering, head scattering or HRTFs are modeled.
 
@@ -152,10 +190,12 @@ application; it cannot exercise real GPU audio playback.
 
 - Real-time throughput and actual audio-device latency need profiling on
   representative NVIDIA hardware.
-- Moving solid enemies/shards can still produce pressure artifacts at
-  interfaces and should be checked against a moving-boundary reference
-  solver. The player's moving acoustic funnel mask was removed specifically
-  to avoid a demonstrated source of rattle during navigation.
+- Moving solid enemy/shard 8/16-gon masks can still create pressure
+  artifacts at interfaces; proper moving-boundary momentum treatment
+  is future work. The old moving wedge mask has been removed.
+- The optional J incident-field reference uses CPU time per click. Under
+  load it could cause audio underruns; A/B test with J off and on before
+  considering a default-on echo-only mode.
 - Ghost sound detection and 5 cm grid pathfinding are heuristics, not
   perceptually or scientifically validated acoustics.
 - Decoy clicks run through the numerical solver, but decoy targeting and
