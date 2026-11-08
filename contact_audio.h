@@ -2,8 +2,10 @@
 // Non-FDTD wall-contact *game cue*. Determines the actual solid cell touched
 // around the player's collision circle, then produces ear-specific arrival
 // times and near-ear level differences. Unlike simple sine-wave panning, a
-// front or rear contact changes spectral content. This is a headphone cue,
-// NOT a calibrated human HRTF or measured physical sound rendering.
+// front/back have a small continuous spectral difference, not a sudden
+// second "wedge pang" sound. The contact comes from the player's 360-degree
+// collision circle and the wedge NEVER participates in wall detection.
+// This is a headphone cue, NOT a calibrated human HRTF.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -56,7 +58,8 @@ struct EarContact {
     float leftDistanceCm=0,rightDistanceCm=0;
     float leftGain=0,rightGain=0;
     int leftDelaySamples=0,rightDelaySamples=0;
-    bool behind=false;
+    float frontness=0.0f;  // cos(relative): continuous [-1,1]
+    bool behind=false;    // descriptive only, not a separate sound
 };
 inline EarContact contactEars(float relative,float distanceCm,
                               int sampleRate,float earHalfSpacingCm=4.5f,
@@ -85,27 +88,32 @@ inline EarContact contactEars(float relative,float distanceCm,
         ((out.leftDistanceCm-nearDistance)/34300.0f)*sampleRate);
     out.rightDelaySamples=(int)std::lround(
         ((out.rightDistanceCm-nearDistance)/34300.0f)*sampleRate);
-    out.behind=std::cos(relative)<0.0f;
+    out.frontness=std::cos(relative);
+    out.behind=out.frontness<0.0f;
     return out;
 }
-// Fully deterministic, tightly faded tap. Rear is duller/longer so sounds
-// exactly in front and behind don't collapse to the same phantom center.
+// The SAME gentle 820Hz contact beep everywhere around the 360-degree
+// collision ring. ILD and ITD place left/right/diagonal hits; a subtle
+// continuous treble change encodes front versus rear without swapping to
+// a totally different pitched "pang" when facing a wall. Stereo-only cues
+// cannot fully reconstruct an HRTF, so no guaranteed precise 3D perception.
 inline std::vector<float> renderContactTap(const EarContact& ears,
                                             int sampleRate) {
     if(sampleRate<=0)return {};
     const int count=(int)std::ceil(sampleRate*0.065);
     std::vector<float> output(2*count,0.0f);
-    const float pitch=ears.behind?535.0f:1100.0f;
-    const float harmonic=ears.behind?0.08f:0.35f;
+    const float pitch=820.0f;
+    const float treble=0.18f+0.08f*ears.frontness;
     for(int channel=0;channel<2;++channel) {
         const int delay=channel==0?ears.leftDelaySamples:ears.rightDelaySamples;
         const float gain=channel==0?ears.leftGain:ears.rightGain;
         for(int i=delay;i<count;++i) {
             const float t=(float)(i-delay)/sampleRate;
             const float onset=1.0f-std::exp(-t/0.0017f);
-            const float decay=std::exp(-t/(ears.behind?0.019f:0.013f));
+            const float decay=std::exp(-t/0.016f);
             const float wave=std::sin(2.0f*kContactPi*pitch*t)+
-                             harmonic*std::sin(2.0f*kContactPi*2.1f*pitch*t);
+                             0.14f*std::sin(2.0f*kContactPi*1.61f*pitch*t)+
+                             treble*std::sin(2.0f*kContactPi*3.0f*pitch*t);
             output[i*2+channel]=gain*onset*decay*wave;
         }
     }
