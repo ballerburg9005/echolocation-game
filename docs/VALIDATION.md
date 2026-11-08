@@ -124,7 +124,7 @@ fixes awaiting renewed listening evaluation**, not proven cures:
    orb shading avoids per-pixel discontinuous procedural texture stripes.
 3. **Contact feedback:** the contact point is chosen from an obstructing
    cell near the collision ring, instead of the old averaged collision normal.
-   Synthetic stereo taps use ~16cm ear separation to derive ear-specific
+   Synthetic stereo taps use 9cm ear separation, 6.5cm behind the pivot to derive ear-specific
    distance/gain and arrival-time differences. Rear contacts have a muted,
    lower-frequency spectral cue because simple stereo level/time cannot
    distinguish exact front from exact back. This is **not an HRTF**. Short
