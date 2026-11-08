@@ -191,6 +191,17 @@ int main(){
     assert(echo::fdtdWorldTone(0,100,echo::kStepSeconds)==0);
     assert(std::isfinite(echo::fdtdWorldTone(
         echo::kGhostTracker+0.5f,100,echo::kStepSeconds)));
+    // Light, friendly upper-register bell cues stay in the accurate
+    // 1cm-grid acoustic band (~3.4kHz at >=10 cells/wavelength).
+    const float ghostTone=echo::toneFrequency(echo::kGhostTracker);
+    float lowestCandy=1e6f,highestCandy=0.0f;
+    for(int id=echo::kShardFirst;id<=echo::kShardLast;++id) {
+        const float f=echo::toneFrequency(id);
+        assert(f>ghostTone*2.0f && f<3300.0f);
+        lowestCandy=std::min(lowestCandy,f);
+        highestCandy=std::max(highestCandy,f);
+    }
+    assert(lowestCandy>=1760.0f && highestCandy<=2960.0f);
     // Atmospheric spaceship drones were caused by persistent unmodulated
     // in-field oscillators. Only short, tapered pings may radiate now.
     int audible=0,silent=0;
