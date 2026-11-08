@@ -269,13 +269,16 @@ static bool loadSVG(const char* filename, float* h_mask)
     for (int y = 0; y < SIZE; y++) {
         for (int x = 0; x < SIZE; x++) {
             if (x < w || x >= SIZE - w || y < w || y >= SIZE - w) {
-                h_mask[y * SIZE + x] = 1.f;
+                h_mask[y * SIZE + x] = echo::kOuterBoundaryMaterial;
             }
         }
     }
     printf("[SVG] Added boundaries\n");
 
     parseSVGElement(svg->FirstChildElement(), h_mask);
+    // Reassert the two-centimetre outside perimeter even when
+    // an authored SVG primitive overlaps its cells.
+    echo::stampOuterBoundary(h_mask,SIZE);
 
     printf("[SVG] Loaded %d rects, %d circles, %d tone markers\n", 
            (int)g_rects.size(), (int)g_circles.size(), (int)g_toneMarkers.size());
@@ -329,12 +332,12 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
         center,p[idx-size],softHere,echo::effectiveSoftCoverage(mask[idx-size]));
     const float up=wallU?center:echo::softGhostNeighbour(
         center,p[idx+size],softHere,echo::effectiveSoftCoverage(mask[idx+size]));
-    const int adjacentWalls = (int)wallL + (int)wallR + (int)wallD + (int)wallU;
-    // Static SVG walls remain hard. Both rotating ghosts and the smaller
-    // spinning candies reflect via subcell smooth edge couplings.
-    const float localReflection=reflection;
-    const float damping = echo::wallDamping(localReflection,
-                                             sqrtf(c2),adjacentWalls);
+    // Interior hard SVG walls keep adjustable reflection. The *outer*
+    // 2cm collision boundary is a physically separate, lossy impedance,
+    // so it returns a softer tail than an interior divider.
+    const float damping=echo::mixedWallDamping(
+        mask[idx-1],mask[idx+1],mask[idx-size],mask[idx+size],
+        reflection,sqrtf(c2));
     float next = echo::impedanceWaveStep(center, previous, left, right,
                                         down, up, c2, damping);
 
@@ -736,7 +739,7 @@ int main(int argc, char* argv[])
         for (int y = 0; y < SIZE; y++) {
             for (int x = 0; x < SIZE; x++) {
                 if (x < w || x >= SIZE - w || y < w || y >= SIZE - w) {
-                    h_mask[y * SIZE + x] = 1.f;
+                    h_mask[y * SIZE + x] = echo::kOuterBoundaryMaterial;
                 }
             }
         }
