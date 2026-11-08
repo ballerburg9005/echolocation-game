@@ -31,6 +31,9 @@ int main(){
     assert(freeDecoy.valid && freeDecoy.x<23);
     // A source about to hit a wall must not be assigned inside the wall.
     assert(!echo::projectDecoy(mask.data(),N,4,25,-1,0).valid);
+    std::vector<float> nearWall(N*N,0.0f);
+    for(int row=0;row<N;++row)nearWall[row*N+29]=1.0f;
+    assert(!echo::projectDecoy(nearWall.data(),N,23,25,1,0,65).valid);
     // Facing east at +45° input angle: an enemy north must sound left.
     auto left=echo::threatCue(50,50,0.7853981634f,50,90,true);
     auto right=echo::threatCue(50,50,0.7853981634f,50,10,true);
