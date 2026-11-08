@@ -593,6 +593,30 @@ static void initGraphics(GraphicsContext &gfx)
     glBindVertexArray(0);
 }
 
+// Event jingles are deliberately distinct from the wave-simulated clicks.
+// They indicate game rules; they should not be interpreted as 3D acoustics.
+static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
+{
+    const float duration=kind==2?0.66f:kind==3?0.60f:kind==1?0.34f:0.20f;
+    const int count=(int)(duration*sampleRate);
+    std::vector<float> samples(count*2,0.0f);
+    for(int i=0;i<count;++i) {
+        const float t=(float)i/sampleRate;
+        const int note=kind==2?(int)(t/0.22f):
+                       kind==3?(int)(t/0.20f):
+                       kind==1?(int)(t/0.17f):0;
+        const float frequency=kind==2?(note==0?620.0f:note==1?830.0f:1240.0f):
+                              kind==3?(note==0?490.0f:note==1?350.0f:210.0f):
+                              kind==1?(note==0?350.0f:230.0f):1050.0f;
+        const float noteLength=kind==2?0.22f:kind==3?0.20f:kind==1?0.17f:duration;
+        const float phase=fmodf(t,noteLength)/noteLength;
+        const float envelope=sinf(PI*phase);
+        const float v=0.18f*envelope*envelope*sinf(2.0f*PI*frequency*t);
+        samples[2*i]=v;samples[2*i+1]=v;
+    }
+    SDL_QueueAudio(device,samples.data(),(Uint32)(samples.size()*sizeof(float)));
+}
+
 int main(int argc, char* argv[])
 {
     const char* svgFile = (argc >= 2) ? argv[1] : "drawing.svg";
@@ -863,6 +887,21 @@ int main(int argc, char* argv[])
                               cudaMemcpyHostToDevice));
 
         double nowT = now / (double)perfFreq;
+        if(arcadeEnabled) {
+            if(arcadeEvent.pickups>0)playArcadeFeedback(beepDev,g_sampleRate,0);
+            if(arcadeEvent.hit)playArcadeFeedback(beepDev,g_sampleRate,
+                                                   arcadeEvent.gameOver?3:1);
+            if(arcadeEvent.cleared)playArcadeFeedback(beepDev,g_sampleRate,2);
+            if(nowT-lastArcadeMessage>0.35) {
+                char title[256];
+                std::snprintf(title,sizeof(title),
+                    "ECHO ARCADE | %s | Score %d | Lives %d | Shards %d | F2 view F3 immersive R restart",
+                    arcade.won?"LEVEL CLEAR":arcade.lost?"GAME OVER":"HUNT THE ECHO",
+                    arcade.score,arcade.lives,arcade.remaining);
+                SDL_SetWindowTitle(gfx.window,title);
+                lastArcadeMessage=nowT;
+            }
+        }
         if (!wasSliding && collided && nowT - lastBeep > beepGap) {
             float pan = sinf(collisionAngle);
             float lv = 0.5f + 0.5f * pan;
