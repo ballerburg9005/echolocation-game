@@ -2,7 +2,16 @@ name: CUDA compilation smoke test
 
 on:
   pull_request:
+    paths:
+      - '**/*.cu'
+      - '**/*.h'
+      - 'Makefile'
+      - '.github/workflows/cuda-build.yml'
   workflow_dispatch:
+
+concurrency:
+  group: cuda-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cuda-compile:
