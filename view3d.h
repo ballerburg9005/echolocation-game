@@ -20,6 +20,7 @@ struct VisualOrb {
     float r=1,g=1,b=1;
     float glow=0.7f;
     int sides=0; // 0 smooth, 8-sided candy, 6-sided ghost
+    float spin=0.0f; // visible yaw, not a new moving FDTD wall mask
 };
 struct View3D {
     GLuint program=0;
@@ -27,7 +28,7 @@ struct View3D {
     GLuint sphereVAO=0,sphereVBO=0;
     GLuint facet6VAO=0,facet6VBO=0,facet8VAO=0,facet8VBO=0;
     GLsizei wallVertices=0,sphereVertices=0,facet6Vertices=0,facet8Vertices=0;
-    GLint uVP=-1,uOffset=-1,uScale=-1,uTint=-1,uGlow=-1,uEye=-1,uOrb=-1;
+    GLint uVP=-1,uOffset=-1,uScale=-1,uTint=-1,uGlow=-1,uEye=-1,uOrb=-1,uSpin=-1;
     bool ready=false;
 };
 
@@ -39,13 +40,20 @@ layout(location=2) in vec3 aColor;
 uniform mat4 uViewProjection;
 uniform vec3 uOffset;
 uniform float uScale;
+uniform float uSpin;
 uniform vec3 uTint;
 out vec3 vWorld;
 out vec3 vNormal;
 out vec3 vColor;
 void main() {
-    vWorld = aPos*uScale + uOffset;
-    vNormal = normalize(aNormal);
+    // Rotate faceted ghosts visually about vertical, without snapping
+    // solid cells in the acoustical wave solver every rendered frame.
+    const float c=cos(uSpin),s=sin(uSpin);
+    vec3 local=vec3(c*aPos.x+s*aPos.z,aPos.y,
+                    -s*aPos.x+c*aPos.z);
+    vWorld=local*uScale+uOffset;
+    vNormal=normalize(vec3(c*aNormal.x+s*aNormal.z,
+                           aNormal.y,-s*aNormal.x+c*aNormal.z));
     vColor = aColor*uTint;
     gl_Position = uViewProjection*vec4(vWorld,1.0);
 }
@@ -164,6 +172,7 @@ inline bool init3D(View3D& out,const float* mask,int size){
     out.uVP=glGetUniformLocation(out.program,"uViewProjection");
     out.uOffset=glGetUniformLocation(out.program,"uOffset");
     out.uScale=glGetUniformLocation(out.program,"uScale");
+    out.uSpin=glGetUniformLocation(out.program,"uSpin");
     out.uTint=glGetUniformLocation(out.program,"uTint");
     out.uGlow=glGetUniformLocation(out.program,"uGlow");
     out.uEye=glGetUniformLocation(out.program,"uEye");
@@ -212,6 +221,7 @@ inline void render3D(const View3D& view,int viewportX,int viewportY,
     glUniform3fv(view.uEye,1,glm::value_ptr(camera));
     glUniform3f(view.uOffset,0,0,0);
     glUniform1f(view.uScale,1.0f);
+    glUniform1f(view.uSpin,0.0f);
     glUniform3f(view.uTint,1,1,1);
     glUniform1f(view.uGlow,0);
     glUniform1i(view.uOrb,0);
@@ -227,6 +237,7 @@ inline void render3D(const View3D& view,int viewportX,int viewportY,
         glBindVertexArray(vao);
         glUniform3f(view.uOffset,orb.x*.01f,orb.height,visualZFromGridY(orb.y));
         glUniform1f(view.uScale,orb.radius);
+        glUniform1f(view.uSpin,orb.spin);
         glUniform3f(view.uTint,orb.r,orb.g,orb.b);
         glUniform1f(view.uGlow,orb.glow);
         glDrawArrays(GL_TRIANGLES,0,count);
