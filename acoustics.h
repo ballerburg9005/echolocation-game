@@ -95,12 +95,15 @@ ECHO_HD inline bool visualFunnelPixel(float x,float y,
     float playerX,float playerY) {
     const float heading=atan2f(pulseY-playerY,pulseX-playerX);
     const float dx=x-wedgeX,dy=y-wedgeY;
-    const float aperture=38.0f*kPi/180.0f;
+    // Half-angle: 16 degrees (32 degrees full), formerly 38 degrees
+    // (76 degrees full). The true FDTD beam is steered by phased sources,
+    // not by this visual outline.
+    const float aperture=16.0f*kPi/180.0f;
     for(int branch=-1;branch<=1;branch+=2) {
         const float angle=heading+branch*aperture;
         const float forward=dx*cosf(angle)+dy*sinf(angle);
         const float off=dx*sinf(angle)-dy*cosf(angle);
-        if(forward>=0.0f&&forward<=10.0f&&fabsf(off)<=0.65f)return true;
+        if(forward>=0.0f&&forward<=11.5f&&fabsf(off)<=0.65f)return true;
     }
     return false;
 }
