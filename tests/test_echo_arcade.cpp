@@ -81,9 +81,12 @@ int main(){
     assert(game.enemies[0].lastHeardX==soundX);
     assert(game.enemies[0].lastHeardY==soundY);
     const float angleBefore=game.enemies[0].visualSpin;
-    for(int i=0;i<20;++i)game.update(0.05f,23,25);
-    assert(game.enemies[0].alert==0.0f);
+    for(int i=0;i<5;++i)game.update(0.05f,23,25);
+    // Check rotation BEFORE a complete 2*pi revolution; a fast-spinning
+    // symmetrical shape naturally returns close to its original angle.
     assert(std::fabs(game.enemies[0].visualSpin-angleBefore)>1.0f);
+    for(int i=5;i<20;++i)game.update(0.05f,23,25);
+    assert(game.enemies[0].alert==0.0f);
     assert(game.enemies[0].wanderTimer<=0.55f);
     // A thick, fully sealed wall blocks arcade sound alerts even when
     // the geometric distance is close. This is a passability heuristic.
