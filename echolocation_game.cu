@@ -439,7 +439,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                     }
                     if (!toneMarker) {
                         if (displayFunnel) {
-                            vbo_data[vbo_idx + 2] = -1.f;
+                            vbo_data[vbo_idx + 2] = -4.f;
                         } else if (showObj && mask[idx] > 2.5f) {
                             vbo_data[vbo_idx + 2] = -7.f;
                         } else if (showObj && mask[idx] > 1.5f) {
@@ -488,7 +488,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                     }
                     if (!toneMarker) {
                         if (displayFunnel) {
-                            vbo_data[fp_idx + 2] = -1.f;
+                            vbo_data[fp_idx + 2] = -4.f;
                         } else if (showObj && mask[idx] > 2.5f) {
                             vbo_data[fp_idx + 2] = -7.f;
                         } else if (showObj && mask[idx] > 1.5f) {
@@ -527,7 +527,7 @@ void main(){
     else if (pressure < -6.5) color = vec3(1, 1, 0);       // Gold for 'I'
     else if (pressure < -5.5) color = vec3(0, 1, 1);       // Cyan for 'W'
     else if (pressure < -4.5) color = vec3(1, 0, 1);       // Purple for 'O'
-    else if (pressure < -3.5) color = vec3(0.5, 0, 0.5);   // Dark purple (unused)
+    else if (pressure < -3.5) color = vec3(0.15, 0.42, 0.48); // Non-solid aiming guide, NOT an FDTD wall
     else if (pressure < -2.5) color = vec3(1, 0, 0);       // Red (pulse)
     else if (pressure < -1.5) color = vec3(0, 1, 0);       // Green (mic)
     else if (pressure < -0.5) color = vec3(1, 1, 0);       // Yellow (objects)
