@@ -112,6 +112,47 @@ int main(){
     }
     assert(narrow.elements[0].frontY<narrow.elements[1].frontY);
     assert(narrow.elements[2].frontY>narrow.elements[1].frontY);
+    // A real source shouldn't teleport its pressure injection by 1cm as
+    // the user holds Q/E and turns through a rounding threshold.
+    // Test all 360 degrees in 1-degree increments: 6 physical sources
+    // stay continuous, with unit-sum bilinear footprint and constant
+    // acoustic transit delay. The old integer centre can snap but is
+    // only used for cheap proximity checks, not the source waveform.
+    echo::BeamArray preceding;
+    for(int angle=0;angle<=360;++angle) {
+        const float heading=(float)angle*echo::kPi/180.0f;
+        const auto aimed=echo::playerBeam(
+            N,mask.data(),90.0f,90.0f,heading,true);
+        assert(aimed.valid && aimed.directional);
+        for(int j=0;j<3;++j) {
+            const auto& e=aimed.elements[j];
+            assert(e.continuous && e.enabled);
+            assert(std::fabs(e.backDelaySub-
+                6.0f*echo::kCellMetres/
+                (echo::kSpeedOfSound*echo::kStepSeconds))<0.001f);
+            const int ix=(int)std::floor(e.frontSubX);
+            const int iy=(int)std::floor(e.frontSubY);
+            float sum=0;
+            for(int y=0;y<2;++y)for(int x=0;x<2;++x)
+                sum+=echo::sourceWeight(
+                    e.frontSubX,e.frontSubY,ix+x,iy+y);
+            assert(std::fabs(sum-1.0f)<0.0001f);
+            if(angle>0) {
+                const auto& old=preceding.elements[j];
+                assert(std::hypot(e.frontSubX-old.frontSubX,
+                                  e.frontSubY-old.frontSubY)<0.19f);
+                assert(std::hypot(e.backSubX-old.backSubX,
+                                  e.backSubY-old.backSubY)<0.16f);
+            }
+        }
+        preceding=aimed;
+    }
+    assert(echo::sourceWeight(10.5f,20.5f,10,20)==0.25f);
+    assert(echo::sourceWeight(10.5f,20.5f,11,21)==0.25f);
+    assert(std::fabs(echo::subcellClickSample(12.5f,100,
+        echo::kStepSeconds)-
+        0.5f*(echo::clickSample(12,100,echo::kStepSeconds)+
+              echo::clickSample(13,100,echo::kStepSeconds)))<1e-6f);
     auto twoElement=narrow;
     twoElement.weights[0]=twoElement.weights[2]=0.0f;
     twoElement.weights[1]=1.0f;
