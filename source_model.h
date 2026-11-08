@@ -2,8 +2,9 @@
 // Portable geometry and signals for FDTD emitters. No SDL, OpenGL or CUDA
 // dependency in CPU tests; functions used by kernels compile host/device.
 //
-// Player sound: a two-point phase-shifted array. A rear NEGATIVE click is
-// delayed by the acoustic transit time across the sources. This cancels the
+// Player sound: a three-column, six-element phase-shifted array.
+// Each negative rear click is delayed by its physical transit time.
+// Both source coordinates and delays are sub-cell continuous during turns. This cancels the
 // outward wave BEHIND the player in free field, not the reflected wave from
 // arbitrary objects. It is directional FDTD, not an occluding head/wedge,
 // ray tracer, HRTF, direct-path subtraction or perfect echo isolation.
