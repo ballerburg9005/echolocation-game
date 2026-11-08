@@ -6,6 +6,7 @@
 // not a physical acoustic sensing calculation.
 #include "collision.h"
 #include "source_model.h"
+#include "soft_ghost.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -418,23 +419,28 @@ public:
             }
         }
     }
-    void stampEnemies(float* dynamicMask) const {
-        // Ghost reflectors must not disappear when the last life is lost.
-        for(const Enemy&e:enemies){
+    // Actual acoustic geometry rotates with visualSpin, as requested.
+    // Values are fractional COVERAGE (0..1) on a separate temporary
+    // field; the caller fades them between frames and encodes them as
+    // NEGATIVE values in the CUDA mask. This avoids the old hard-cell
+    // reset of pressure when a ghost turns or translates.
+    void stampGhostCoverage(float* coverage) const {
+        if(!coverage)return;
+        for(const Enemy &e:enemies) {
             if(e.eaten)continue;
-            // At 8cm radius/16 edges the grid raster looked like a
-            // circle. Use a plainly faceted 20cm hexagonal reflector.
-            const int minX=std::max(1,(int)std::floor(e.x-10));
-            const int maxX=std::min(side_-2,(int)std::ceil(e.x+10));
-            const int minY=std::max(1,(int)std::floor(e.y-10));
-            const int maxY=std::min(side_-2,(int)std::ceil(e.y+10));
-            for(int yy=minY; yy<=maxY;++yy)for(int xx=minX;xx<=maxX;++xx){
-                const float dx=(xx+0.5f)-e.x,dy=(yy+0.5f)-e.y;
-                if(insideNgon(dx,dy,10.0f,6,
-                     (float)e.archetype*0.5235987756f) &&
-                     grid_[yy*side_+xx]<=0)
-                    dynamicMask[yy*side_+xx]=2.0f;
-            }
+            const int minX=std::max(1,(int)std::floor(e.x-11.0f));
+            const int maxX=std::min(side_-2,(int)std::ceil(e.x+11.0f));
+            const int minY=std::max(1,(int)std::floor(e.y-11.0f));
+            const int maxY=std::min(side_-2,(int)std::ceil(e.y+11.0f));
+            for(int y=minY;y<=maxY;++y)
+                for(int x=minX;x<=maxX;++x) {
+                    const int index=y*side_+x;
+                    // The static SVG wall stays completely solid.
+                    if(grid_[index]>0.0f)continue;
+                    const float amount=rotatingGhostCoverage(
+                        (x+0.5f)-e.x,(y+0.5f)-e.y,e.visualSpin);
+                    coverage[index]=std::max(coverage[index],amount);
+                }
         }
     }
     // lives and lost are retained only for backwards-compatible callers;
