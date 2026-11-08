@@ -10,6 +10,20 @@
 #include <math.h>
 #include <string.h>
 #include <vector>
+#include <algorithm>
+#include "acoustics.h"
+#include "collision.h"
+#include "svg_raster.h"
+#include "echo_arcade.h"
+#include "source_model.h"
+#include "soft_ghost.h"
+#include "direct_reference.h"
+#include "virtual_cane.h"
+#include "contact_audio.h"
+#include "proximity_audio.h"
+#include "view3d.h"
+#include <climits>
+#include <ctype.h>
 
 #ifndef PI
 #define PI 3.14159265358979323846f
@@ -23,21 +37,21 @@
     } \
 }
 
-static float g_DX              = 0.01f;
-static float g_DT;
+static const float g_DX = echo::kCellMetres;
+static const float g_DT = echo::kStepSeconds;
 static float g_pulseIntervalSec= 1.0f;
 static float g_decayFactor     = 0.9995f;
 static float g_reflectionCoeff = 0.9f;
-static float g_timeFudgeFactor = 0.985f;
 
 static int   g_sampleRate      = 48000;
 static float g_c2;
 static int   g_pulseIntervalSteps;
 static int   g_pulseDurationSteps;
 
-static float g_waveVolumeScale = 0.05f;
+static float g_waveVolumeScale = 0.01f; // start quietly with headphones
+static float g_visualScale=0.018f; // shader only, never pressure physics
 
-static const float SPEED_OF_SOUND = 343.0f;
+static const float SPEED_OF_SOUND = echo::kSpeedOfSound;
 static const int   SIZE = 500;
 static const int   WINDOW_WIDTH = SIZE * 2;
 static const int   WINDOW_HEIGHT = SIZE;
@@ -52,6 +66,7 @@ struct ToneMarker {
     float x, y; 
     char type; // 'O' for obstacle, 'W' for win, 'I' for item
     bool isPlaying; // Playback state
+    bool collected; // Item markers are one-shot
 };
 
 static std::vector<Rect> g_rects;
@@ -62,14 +77,13 @@ static int g_numToneMarkers = 0;
 
 static void recalcDerivedParams()
 {
-    g_DT = g_DX / (SPEED_OF_SOUND * 1.41421356237f);
     g_c2 = (SPEED_OF_SOUND * g_DT / g_DX) * (SPEED_OF_SOUND * g_DT / g_DX);
 
     if (g_pulseIntervalSec < 0.1f) g_pulseIntervalSec = 0.1f;
     if (g_pulseIntervalSec > 5.f)  g_pulseIntervalSec = 5.f;
-    g_pulseIntervalSteps = (int)(g_pulseIntervalSec / g_DT);
+    g_pulseIntervalSteps = std::max(1, (int)lroundf(g_pulseIntervalSec / g_DT));
 
-    g_pulseDurationSteps = (int)(0.0005f / g_DT);
+    g_pulseDurationSteps = (int)lroundf(echo::kClickDurationSeconds / g_DT);
     if (g_pulseDurationSteps < 1) g_pulseDurationSteps = 1;
 
     if (g_reflectionCoeff < 0.f) g_reflectionCoeff = 0.f;
@@ -78,11 +92,9 @@ static void recalcDerivedParams()
     if (g_decayFactor < 0.f) g_decayFactor = 0.f;
     if (g_decayFactor > 1.f) g_decayFactor = 1.f;
 
-    if (g_timeFudgeFactor < 0.9f) g_timeFudgeFactor = 0.9f;
-    if (g_timeFudgeFactor > 1.0f) g_timeFudgeFactor = 1.0f;
-
-    printf("[PARAMS] Pulse=%.2fs  Decay=%.6f  Reflect=%.3f  Fudge=%.4f\n",
-           g_pulseIntervalSec, g_decayFactor, g_reflectionCoeff, g_timeFudgeFactor);
+    g_waveVolumeScale = fmaxf(0.001f, fminf(0.08f, g_waveVolumeScale));
+    printf("[PARAMS] Pulse=%.2fs  Decay/step=%.6f  Wall reflection=%.3f  Volume=%.4f\n",
+           g_pulseIntervalSec, g_decayFactor, g_reflectionCoeff, g_waveVolumeScale);
 }
 
 struct Player {
@@ -99,102 +111,138 @@ static float g_pulse_x, g_pulse_y;
 
 static void updatePlayerComponents(Player &p)
 {
-    float c = cosf(p.angle), s = sinf(p.angle);
-    float lx = 6.f, ly = 5.5f, rx = -6.f, ry = -5.5f, wx = -1.f, wy = 1.f, px = 4.f, py = -4.f;
+    const float heading=p.angle-PI/4.0f;
+    const float c=cosf(heading),s=sinf(heading);
+    // The microphones used to sit transverse to the phased click,
+    // amplifying its near-field impulse. Move them behind the emitters.
+    // Both remain <13cm from pivot and safe from hard SVG walls.
+    const auto ears=echo::shieldedReceivers(
+        p.pivot_x,p.pivot_y,p.angle-PI/4.0f);
+    g_mic_l_x=ears.leftX;g_mic_l_y=ears.leftY;
+    g_mic_r_x=ears.rightX;g_mic_r_y=ears.rightY;
 
-    g_mic_l_x = p.pivot_x + lx * c - ly * s;
-    g_mic_l_y = p.pivot_y + lx * s + ly * c;
+    // 4.5cm-behind-pivot wedge apex is only 2cm in front of the
+    // tighter rear microphones. Central emitted pressure is 6cm ahead.
+    g_wedge_x=p.pivot_x-4.5f*c;
+    g_wedge_y=p.pivot_y-4.5f*s;
+    g_pulse_x=p.pivot_x+6.0f*c;
+    g_pulse_y=p.pivot_y+6.0f*s;
+}
 
-    g_mic_r_x = p.pivot_x + rx * c - ry * s;
-    g_mic_r_y = p.pivot_y + rx * s + ry * c;
+// SVG stroke/fill parsing for basic shapes. Full cascading CSS, inheritance,
+// transforms and path tessellation are deliberately not emulated here.
+static bool svgFilled(const tinyxml2::XMLElement* elem) {
+    const char* fill = elem->Attribute("fill");
+    bool filled = !fill || strcmp(fill, "none") != 0;
+    const char* style = elem->Attribute("style");
+    if (style) {
+        const char* v = strstr(style, "fill:");
+        if (v) filled = strncmp(v + 5, "none", 4) != 0;
+    }
+    return filled;
+}
 
-    g_wedge_x = p.pivot_x + wx * c - wy * s;
-    g_wedge_y = p.pivot_y + wx * s + wy * c;
-
-    g_pulse_x = p.pivot_x + px * c - py * s;
-    g_pulse_y = p.pivot_y + px * s + py * c;
+static float svgStrokeWidth(const tinyxml2::XMLElement* elem) {
+    const char* stroke = elem->Attribute("stroke");
+    bool stroked = stroke && strcmp(stroke, "none") != 0;
+    const char* style = elem->Attribute("style");
+    if (style) {
+        const char* v = strstr(style, "stroke:");
+        if (v) stroked = strncmp(v + 7, "none", 4) != 0;
+    }
+    if (!stroked) return 0.0f;
+    float width = 1.0f;
+    elem->QueryFloatAttribute("stroke-width", &width);
+    if (style) {
+        const char* v = strstr(style, "stroke-width:");
+        if (v) width = strtof(v + 13, nullptr);
+    }
+    return fmaxf(0.0f, fminf(50.0f, width));
 }
 
 static void parseSVGElement(tinyxml2::XMLElement* elem, float* h_mask)
 {
     using namespace tinyxml2;
+    static bool warnedTransforms = false;
     while (elem) {
         const char* name = elem->Name();
+        // Definitions are not objects in the drawing.
+        if (strcmp(name, "defs") == 0 || strcmp(name, "metadata") == 0) {
+            elem = elem->NextSiblingElement();
+            continue;
+        }
+        if (elem->Attribute("transform") && !warnedTransforms) {
+            fprintf(stderr, "[SVG] WARNING: transforms are unsupported and ignored\n");
+            warnedTransforms = true;
+        }
         if (strcmp(name, "rect") == 0) {
-            Rect r;
+            Rect r{};
             elem->QueryFloatAttribute("x", &r.x);
             elem->QueryFloatAttribute("y", &r.y);
             elem->QueryFloatAttribute("width", &r.width);
             elem->QueryFloatAttribute("height", &r.height);
-            
-            float y_top = SIZE - (r.y + r.height);
-            float y_bottom = SIZE - r.y;
-            
-            int x0 = (int)floorf(r.x);
-            int y0 = (int)floorf(y_top);
-            int x1 = (int)ceilf(r.x + r.width);
-            int y1 = (int)ceilf(y_bottom);
-
-            printf("[SVG] Rect: x=%.1f, y=%.1f, w=%.1f, h=%.1f (grid: %d,%d to %d,%d)\n",
-                   r.x, r.y, r.width, r.height, x0, y0, x1, y1);
-
-            for (int y = y0; y <= y1; y++) {
-                for (int x = x0; x <= x1; x++) {
-                    if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
-                        h_mask[y * SIZE + x] = 1.f;
+            const int count = echo::rasterRect(h_mask, SIZE, r.x, r.y,
+                r.width, r.height, svgStrokeWidth(elem), svgFilled(elem));
+            if (count > 0) {
+                printf("[SVG] Rect x=%.2f y=%.2f w=%.2f h=%.2f (%d cells)\n",
+                       r.x, r.y, r.width, r.height, count);
+                r.y = SIZE - (r.y + r.height);
+                g_rects.push_back(r);
+            }
+        } else if (strcmp(name, "circle") == 0 || strcmp(name, "ellipse") == 0 ||
+                   strcmp(name, "path") == 0) {
+            const bool nativeCircle = strcmp(name, "circle") == 0;
+            const bool nativeEllipse = strcmp(name, "ellipse") == 0;
+            const char* sodipodiType = elem->Attribute("sodipodi:type");
+            const bool inkscapeArc = strcmp(name, "path") == 0 &&
+                sodipodiType && (strcmp(sodipodiType, "arc") == 0 ||
+                                 strcmp(sodipodiType, "circle") == 0);
+            if (nativeCircle || nativeEllipse || inkscapeArc) {
+                float cx = 0.0f, cy = 0.0f, rx = 0.0f, ry = 0.0f;
+                if (inkscapeArc) {
+                    elem->QueryFloatAttribute("sodipodi:cx", &cx);
+                    elem->QueryFloatAttribute("sodipodi:cy", &cy);
+                    elem->QueryFloatAttribute("sodipodi:rx", &rx);
+                    elem->QueryFloatAttribute("sodipodi:ry", &ry);
+                } else {
+                    elem->QueryFloatAttribute("cx", &cx);
+                    elem->QueryFloatAttribute("cy", &cy);
+                    if (nativeCircle) {
+                        elem->QueryFloatAttribute("r", &rx);
+                        ry = rx;
+                    } else {
+                        elem->QueryFloatAttribute("rx", &rx);
+                        elem->QueryFloatAttribute("ry", &ry);
                     }
                 }
-            }
-            r.y = y_top;
-            g_rects.push_back(r);
-        }
-        else if (strcmp(name, "path") == 0) {
-            const char* type = elem->Attribute("sodipodi:type");
-            if (type && (strcmp(type, "arc") == 0 || strcmp(type, "circle") == 0)) {
-                Circle c;
-                elem->QueryFloatAttribute("sodipodi:cx", &c.cx);
-                elem->QueryFloatAttribute("sodipodi:cy", &c.cy);
-                elem->QueryFloatAttribute("sodipodi:rx", &c.r);
-                
-                c.cy = SIZE - c.cy;
-                
-                int cx = (int)roundf(c.cx);
-                int cy = (int)roundf(c.cy);
-                int r = (int)ceilf(c.r);
-                
-                printf("[SVG] Circle: cx=%.1f, cy=%.1f, r=%.1f\n", c.cx, c.cy, c.r);
-
-                for (int y = cy - r; y <= cy + r; y++) {
-                    for (int x = cx - r; x <= cx + r; x++) {
-                        float dx = x - c.cx;
-                        float dy = y - c.cy;
-                        if (dx * dx + dy * dy <= c.r * c.r) {
-                            if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
-                                h_mask[y * SIZE + x] = 1.f;
-                            }
-                        }
-                    }
+                if (inkscapeArc && ry <= 0.0f) ry = rx;
+                const int count = echo::rasterEllipse(h_mask, SIZE, cx, cy,
+                    rx, ry, svgStrokeWidth(elem), svgFilled(elem));
+                if (count > 0) {
+                    g_circles.push_back(Circle{cx, SIZE - cy, fmaxf(rx, ry)});
+                    printf("[SVG] Ellipse cx=%.2f cy=%.2f rx=%.2f ry=%.2f (%d cells)\n",
+                           cx, cy, rx, ry, count);
                 }
-                g_circles.push_back(c);
             }
-        }
-        else if (strcmp(name, "text") == 0) {
+        } else if (strcmp(name, "text") == 0) {
             XMLElement* tspan = elem->FirstChildElement("tspan");
-            const char* text = tspan ? tspan->GetText() : elem->GetText();
-            if (text && (strstr(text, "O") || strstr(text, "W") || strstr(text, "I"))) {
-                ToneMarker tm;
-                elem->QueryFloatAttribute("x", &tm.x);
-                elem->QueryFloatAttribute("y", &tm.y);
-                tm.y = SIZE - tm.y;
-                if (strstr(text, "O")) tm.type = 'O';
-                else if (strstr(text, "W")) tm.type = 'W';
-                else if (strstr(text, "I")) tm.type = 'I';
-                tm.isPlaying = false;
-                printf("[SVG] Tone Marker (%c): x=%.1f, y=%.1f\n", tm.type, tm.x, tm.y);
-                g_toneMarkers.push_back(tm);
+            const char* t = tspan ? tspan->GetText() : elem->GetText();
+            if (t) {
+                while (*t && isspace((unsigned char)*t)) ++t;
+                const char type = *t;
+                // Text is a marker only when its content is a single code.
+                if ((type == 'O' || type == 'I' || type == 'W') &&
+                    (t[1] == '\0' || isspace((unsigned char)t[1]))) {
+                    ToneMarker tm{};
+                    elem->QueryFloatAttribute("x", &tm.x);
+                    elem->QueryFloatAttribute("y", &tm.y);
+                    tm.y = SIZE - tm.y;
+                    tm.type = type;
+                    g_toneMarkers.push_back(tm);
+                    printf("[SVG] %c marker x=%.1f y=%.1f\n", tm.type, tm.x, tm.y);
+                }
             }
         }
-
         parseSVGElement(elem->FirstChildElement(), h_mask);
         elem = elem->NextSiblingElement();
     }
@@ -221,116 +269,160 @@ static bool loadSVG(const char* filename, float* h_mask)
     for (int y = 0; y < SIZE; y++) {
         for (int x = 0; x < SIZE; x++) {
             if (x < w || x >= SIZE - w || y < w || y >= SIZE - w) {
-                h_mask[y * SIZE + x] = 1.f;
+                h_mask[y * SIZE + x] = echo::kOuterBoundaryMaterial;
             }
         }
     }
     printf("[SVG] Added boundaries\n");
 
     parseSVGElement(svg->FirstChildElement(), h_mask);
+    // Reassert the two-centimetre outside perimeter even when
+    // an authored SVG primitive overlaps its cells.
+    echo::stampOuterBoundary(h_mask,SIZE);
 
     printf("[SVG] Loaded %d rects, %d circles, %d tone markers\n", 
            (int)g_rects.size(), (int)g_circles.size(), (int)g_toneMarkers.size());
     return true;
 }
 
-static void updateDynamicMask(const float* h_static, float* h_dynamic, float wedge_x, float wedge_y, float pivot_x, float pivot_y) {
-    memcpy(h_dynamic, h_static, SIZE * SIZE * sizeof(float));
-    float fwd_angle = atan2f(g_pulse_y - pivot_y, g_pulse_x - pivot_x);
-    float wedge_half = 38.0f * PI / 180.0f;
-    int wedge_length = 10;
-
-    for (int i = 0; i <= wedge_length; i++) {
-        float cell1_x = wedge_x + i * cosf(fwd_angle - wedge_half);
-        float cell1_y = wedge_y + i * sinf(fwd_angle - wedge_half);
-        float cell2_x = wedge_x + i * cosf(fwd_angle + wedge_half);
-        float cell2_y = wedge_y + i * sinf(fwd_angle + wedge_half);
-
-        int ix1 = (int)roundf(cell1_x);
-        int iy1 = (int)roundf(cell1_y);
-        int ix2 = (int)roundf(cell2_x);
-        int iy2 = (int)roundf(cell2_y);
-
-        if (ix1 >= 0 && ix1 < SIZE && iy1 >= 0 && iy1 < SIZE)
-            h_dynamic[iy1 * SIZE + ix1] = 1.0f;
-        if (ix2 >= 0 && ix2 < SIZE && iy2 >= 0 && iy2 < SIZE)
-            h_dynamic[iy2 * SIZE + ix2] = 1.0f;
-    }
+// No moving player-funnel solids in the FDTD boundary field. The changing
+// geometry was causing pressure discontinuities audible as movement rattles.
+// Render the funnel as a visual overlay instead.
+static void updateDynamicMask(const float* staticMask,float* dynamicMask) {
+    memcpy(dynamicMask,staticMask,SIZE*SIZE*sizeof(float));
 }
 
+// Fused pressure / source / damping kernel. 2 launches rather than 4 per
+// 20.6us step removes substantial driver overhead on consumer GPUs.
+// This barrier-free stencil also works on partial CUDA blocks (SIZE=500).
 __global__ void updatePressure(float* p_next, const float* p, const float* p_prev,
-                               const float* mask, float c2, int size, float reflection)
+                               const float* mask, const float* worldEmitters,
+                               float c2, int size, float reflection,
+                               echo::BeamArray beam,
+                               float amplitude,
+                               unsigned long long step, int interval,
+                               int duration, float dt, float decay,
+                               bool automaticPulse, uint64_t manualPulseStart,
+                               int decoyX, int decoyY, uint64_t decoyStart)
 {
-    __shared__ float s_p[34][34];
-    int tx = threadIdx.x + 1, ty = threadIdx.y + 1;
-    int x = blockIdx.x * 32 + (tx - 1);
-    int y = blockIdx.y * 32 + (ty - 1);
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= size || y >= size) return;
-    int idx = y * size + x;
-    s_p[ty][tx] = p[idx];
-
-    if (tx == 1  && x > 0      && y < size) s_p[ty][0] = p[idx - 1];
-    if (tx == 32 && x < size - 1 && y < size) s_p[ty][33] = p[idx + 1];
-    if (ty == 1  && y > 0      && x < size) s_p[0][tx] = p[idx - size];
-    if (ty == 32 && y < size - 1 && x < size) s_p[33][tx] = p[idx + size];
-    __syncthreads();
-
-    if (x < 1 || x >= size - 1 || y < 1 || y >= size - 1) return;
-
-    if (mask[idx] > 0.f) {
-        p_next[idx] = -reflection * s_p[ty][tx];
+    const int idx = y * size + x;
+    if (x == 0 || y == 0 || x == size - 1 || y == size - 1 || mask[idx] > 0.0f) {
+        p_next[idx] = 0.0f;
         return;
     }
-    float lap = s_p[ty][tx + 1] + s_p[ty][tx - 1] +
-                s_p[ty + 1][tx] + s_p[ty - 1][tx] -
-                4.f * s_p[ty][tx];
-    p_next[idx] = 2.f * s_p[ty][tx] - p_prev[idx] + c2 * lap;
-}
 
-__global__ void applyDecay(float* p, float decay)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < SIZE * SIZE) {
-        p[idx] *= decay;
-    }
-}
+    const float center = p[idx], previous = p_prev[idx];
+    const bool wallL = mask[idx - 1] > 0.0f;
+    const bool wallR = mask[idx + 1] > 0.0f;
+    const bool wallD = mask[idx - size] > 0.0f;
+    const bool wallU = mask[idx + size] > 0.0f;
+    // Ghost polygons are encoded as NEGATIVE fractional coverage in
+    // the shared mask, never as abruptly changing solid walls (>0).
+    // Smooth edge permeability reflects pressure from rotating hexagons
+    // without zeroing pressure cells every frame.
+    const float softHere=echo::effectiveSoftCoverage(mask[idx]);
+    const float left=wallL?center:echo::softGhostNeighbour(
+        center,p[idx-1],softHere,echo::effectiveSoftCoverage(mask[idx-1]));
+    const float right=wallR?center:echo::softGhostNeighbour(
+        center,p[idx+1],softHere,echo::effectiveSoftCoverage(mask[idx+1]));
+    const float down=wallD?center:echo::softGhostNeighbour(
+        center,p[idx-size],softHere,echo::effectiveSoftCoverage(mask[idx-size]));
+    const float up=wallU?center:echo::softGhostNeighbour(
+        center,p[idx+size],softHere,echo::effectiveSoftCoverage(mask[idx+size]));
+    // Interior hard SVG walls keep adjustable reflection. The *outer*
+    // 2cm collision boundary is a physically separate, lossy impedance,
+    // so it returns a softer tail than an interior divider.
+    const float damping=echo::mixedWallDamping(
+        mask[idx-1],mask[idx+1],mask[idx-size],mask[idx+size],
+        reflection,sqrtf(c2));
+    float next = echo::impedanceWaveStep(center, previous, left, right,
+                                        down, up, c2, damping);
 
-__global__ void addPulse(float* p, float sx, float sy, float amplitude,
-                         int t, int interval, int duration, float dt)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx == 0) {
-        int adj = t - 1000;
-        if (adj >= 0 && (adj % interval) < duration) {
-            float val = amplitude * sinf(2.f * PI * 500.f * ((adj % duration)) * dt);
-            int ix = (int)roundf(sx), iy = (int)roundf(sy);
-            if (ix >= 0 && ix < SIZE && iy >= 0 && iy < SIZE) {
-                atomicAdd(&p[iy * SIZE + ix], val);
+    // Three parallel pairs form a physically narrower acoustic aperture.
+    // The front wave from each pair is summed INSIDE the pressure field;
+    // each rear element adds its delayed anti-phase wave to suppress sound
+    // toward the ears. This does not turn off waves to the side by ray test.
+    // No solid rotating wedge is inserted into the FDTD grid.
+    if(beam.valid) {
+        for(int k=0;k<3;++k) {
+            const float weight=beam.weights[k];
+            if(weight<=0.0f)continue;
+            const echo::PhasedSource& e=beam.elements[k];
+            // Bilinear source footprint and fractional phase delay prevent
+            // a turning ear from seeing a point source hop between whole
+            // grid cells. The room pressure update remains unchanged.
+            // Cheap integer bounding first: almost all of the 500x500
+            // CUDA threads do NOT calculate subcell weights, sines or
+            // fractional delay. Only <=4 cells for each active source.
+            if(x>=e.frontX-1 && x<=e.frontX+1 &&
+               y>=e.frontY-1 && y<=e.frontY+1) {
+                const float frontWeight=e.continuous?
+                    echo::sourceWeight(e.frontSubX,e.frontSubY,x,y):
+                    (x==e.frontX&&y==e.frontY?1.0f:0.0f);
+                if(frontWeight>0.0f) {
+                    const int pulseStep=echo::pulseIndex(
+                        step,interval,duration,automaticPulse,manualPulseStart);
+                    if(pulseStep>=0)
+                        next+=weight*frontWeight*amplitude*
+                              echo::clickSample(pulseStep,duration,dt);
+                }
+            }
+            if(beam.directional && e.enabled &&
+               x>=e.backX-1 && x<=e.backX+1 &&
+               y>=e.backY-1 && y<=e.backY+1) {
+                const float rearWeight=e.continuous?
+                    echo::sourceWeight(e.backSubX,e.backSubY,x,y):
+                    (x==e.backX&&y==e.backY?1.0f:0.0f);
+                if(rearWeight>0.0f) {
+                    const int backLag=e.continuous?
+                        (int)floorf(e.backDelaySub):e.backDelay;
+                    if(backLag>0 && step>=(uint64_t)backLag) {
+                        const int backStep=echo::pulseIndex(
+                            step-(uint64_t)backLag,interval,duration,
+                            automaticPulse,manualPulseStart);
+                        if(backStep>=0) {
+                            const float click=e.continuous?
+                                echo::subcellClickSample((float)backStep-
+                                    (e.backDelaySub-(float)backLag),
+                                    duration,dt):
+                                echo::clickSample(backStep,duration,dt);
+                            next-=weight*rearWeight*amplitude*click;
+                        }
+                    }
+                }
             }
         }
     }
+    // An actual remote source in the *same* FDTD solver: the decoy is
+    // not merely a stereo UI chirp or visually painted distraction.
+    if(x==decoyX && y==decoyY &&
+       decoyStart!=UINT64_MAX && step>=decoyStart &&
+       step-decoyStart<(uint64_t)duration) {
+        const int decoyStep=(int)(step-decoyStart);
+        next+=amplitude*0.95f*echo::clickSample(decoyStep,duration,dt);
+    }
+    // Continuous room-object sources travel through/refelect from the
+    // same FDTD geometry as clicks, unlike the old global UI beacons.
+    const float emitter=worldEmitters[idx];
+    if(emitter>=1.0f)
+        next+=echo::fdtdWorldTone(emitter,step,dt);
+    p_next[idx] = next * decay;
 }
 
 __global__ void captureAndReduce(const float* p, float lx, float ly,
                                  float rx, float ry, int sampleIndex,
                                  float* audioL, float* audioR, float waveVolume)
 {
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        int ilx = (int)roundf(lx), ily = (int)roundf(ly);
-        int irx = (int)roundf(rx), iry = (int)roundf(ry);
-        if (ilx < 0) ilx = 0; if (ilx >= SIZE) ilx = SIZE - 1;
-        if (ily < 0) ily = 0; if (ily >= SIZE) ily = SIZE - 1;
-        if (irx < 0) irx = 0; if (irx >= SIZE) irx = SIZE - 1;
-        if (iry < 0) iry = 0; if (iry >= SIZE) iry = SIZE - 1;
-
-        float vl = p[ily * SIZE + ilx];
-        float vr = p[iry * SIZE + irx];
-        audioL[sampleIndex] = vl * waveVolume;
-        audioR[sampleIndex] = vr * waveVolume;
-    }
+    if (blockIdx.x || threadIdx.x) return;
+    audioL[sampleIndex] = echo::bilinearSample(p, SIZE, lx, ly) * waveVolume;
+    audioR[sampleIndex] = echo::bilinearSample(p, SIZE, rx, ry) * waveVolume;
 }
 
 __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int showObj, int t,
+                          float visualScale,
                           float mlx, float mly, float mrx, float mry,
                           float px, float py, float wx, float wy,
                           float player_x, float player_y, float player_angle,
@@ -356,6 +448,8 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
     float pxOut_fp = (rx * ZOOM_FACTOR) / (size / 2.0f);
     float pyOut_fp = (ry * ZOOM_FACTOR) / (size / 2.0f);
     float fp_x = pxOut_fp * 0.5f + 0.5f;
+    const bool displayFunnel=echo::visualFunnelPixel((float)x,(float)y,
+        wx,wy,px,py,player_x,player_y);
 
     if (vbo_data[vbo_idx] < 0.f) {
         float wave = (t < 1000) ? 0.f : p[idx];
@@ -373,6 +467,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                 } else {
                     bool toneMarker = false;
                     for (int i = 0; i < numToneMarkers; i++) {
+                        if (toneMarkers[i].collected) continue;
                         float dtx = x - toneMarkers[i].x;
                         float dty = y - toneMarkers[i].y;
                         if (dtx * dtx + dty * dty <= 25.f) {
@@ -384,10 +479,22 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 0.f) {
-                            vbo_data[vbo_idx + 2] = -1.f;
+                        // Walls always win over the wedge outline. Its
+                        // whole 11.5cm guide fits inside the player's
+                        // 13cm collision radius, and cannot clip into a
+                        // wall or masquerade as a solid mouth.
+                        if(mask[idx] > 0.f) {
+                            vbo_data[vbo_idx + 2] = showObj?
+                                (mask[idx]>=3.5f?-1.25f:-1.f):0.f;
+                        } else if(showObj && mask[idx] < -1.20f) {
+                            vbo_data[vbo_idx + 2] = -8.8f; // LIME candy, not yellow wall
+                        } else if(showObj && mask[idx] < -0.32f &&
+                                  mask[idx]>=-1.0f) {
+                            vbo_data[vbo_idx + 2] = -8.f;
+                        } else if (displayFunnel && mask[idx]==0.0f) {
+                            vbo_data[vbo_idx + 2] = -4.f;
                         } else {
-                            vbo_data[vbo_idx + 2] = tanhf(wave * 0.01f);
+                            vbo_data[vbo_idx + 2] = echo::displayPressure(wave, visualScale);
                         }
                     }
                 }
@@ -415,6 +522,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                 } else {
                     bool toneMarker = false;
                     for (int i = 0; i < numToneMarkers; i++) {
+                        if (toneMarkers[i].collected) continue;
                         float dtx = x - toneMarkers[i].x;
                         float dty = y - toneMarkers[i].y;
                         if (dtx * dtx + dty * dty <= 25.f) {
@@ -426,10 +534,18 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 0.f) {
-                            vbo_data[fp_idx + 2] = -1.f;
+                        if(mask[idx] > 0.f) {
+                            vbo_data[fp_idx + 2] = showObj?
+                                (mask[idx]>=3.5f?-1.25f:-1.f):0.f;
+                        } else if(showObj && mask[idx] < -1.20f) {
+                            vbo_data[fp_idx + 2] = -8.8f; // LIME candy
+                        } else if(showObj && mask[idx] < -0.32f &&
+                                  mask[idx]>=-1.0f) {
+                            vbo_data[fp_idx + 2] = -8.f;
+                        } else if (displayFunnel && mask[idx]==0.0f) {
+                            vbo_data[fp_idx + 2] = -4.f;
                         } else {
-                            vbo_data[fp_idx + 2] = tanhf(wave * 0.01f);
+                            vbo_data[fp_idx + 2] = echo::displayPressure(wave, visualScale);
                         }
                     }
                 }
@@ -440,61 +556,11 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
     }
 }
 
-static bool checkPlayerCollision(float px, float py, const float* h_mask, float& collisionAngle, float playerAngle)
-{
-    int base = (int)ceilf(sqrtf(6.f * 6.f + 5.5f * 5.5f));
-    int radius = base + 10 - 5;
-    int ixmin = (int)fmaxf(0, floorf(px - radius));
-    int ixmax = (int)fminf(SIZE - 1, ceilf(px + radius));
-    int iymin = (int)fmaxf(0, floorf(py - radius));
-    int iymax = (int)fminf(SIZE - 1, ceilf(py + radius));
-    int r2 = radius * radius;
-
-    bool collided = false;
-    const int nS = 360, nR = 5;
-    float best = -1.f, bestAngle = 0.f;
-
-    for (int i = 0; i < nS; i++) {
-        float a = -PI + i * (2.f * PI / nS);
-        float sc = 0.f;
-        for (int j = 0; j < nR; j++) {
-            float rr = (radius - 5) + j * (5.f / (nR - 1));
-            float gx = px + rr * cosf(a);
-            float gy = py + rr * sinf(a);
-            int ix = (int)roundf(gx), iy = (int)roundf(gy);
-            if (ix >= 0 && ix < SIZE && iy >= 0 && iy < SIZE) {
-                if (h_mask[iy * SIZE + ix] > 0.f) {
-                    sc += 1.f;
-                }
-            }
-        }
-        if (sc > best) {
-            best = sc;
-            bestAngle = a;
-        }
-    }
-
-    collisionAngle = bestAngle - playerAngle + PI / 2.f;
-    if (collisionAngle < -PI) collisionAngle += 2.f * PI;
-    if (collisionAngle > PI) collisionAngle -= 2.f * PI;
-
-    for (int y = iymin; y <= iymax; y++) {
-        for (int x = ixmin; x <= ixmax; x++) {
-            float dx = x - px, dy = y - py;
-            if (dx * dx + dy * dy <= r2 && h_mask[y * SIZE + x] > 0.f) {
-                collided = true;
-                break;
-            }
-        }
-    }
-
-    return collided;
-}
-
 struct GraphicsContext {
     SDL_Window* window;
     SDL_GLContext gl_context;
     GLuint vbo, vao, shader;
+    GLuint glyphVAO, glyphVBO;
     cudaGraphicsResource* cuda_vbo_resource;
 };
 
@@ -505,18 +571,27 @@ layout(location=1) in float pressure;
 out vec3 color;
 void main(){
     gl_Position = vec4(pos, 0, 1);
-    if (pressure < -9.0)      color = vec3(0, 0, 0);       // Black (invisible)
+    if (pressure < -9.5)      color = vec3(0, 0, 0);       // Invisible background
+    else if (pressure < -9.0) color = vec3(1, 1, 1);       // Tiny rotating candy glint
+    else if (pressure < -8.5) color = vec3(0.53, 1, 0.12); // NEON LIME candy octagon
+    else if (pressure < -7.5) color = vec3(1, 0.18, 0.42); // Ghost reflector
     else if (pressure < -6.5) color = vec3(1, 1, 0);       // Gold for 'I'
     else if (pressure < -5.5) color = vec3(0, 1, 1);       // Cyan for 'W'
     else if (pressure < -4.5) color = vec3(1, 0, 1);       // Purple for 'O'
-    else if (pressure < -3.5) color = vec3(0.5, 0, 0.5);   // Dark purple (unused)
+    else if (pressure < -3.5) color = vec3(0.15, 0.42, 0.48); // Non-solid aiming guide, NOT an FDTD wall
     else if (pressure < -2.5) color = vec3(1, 0, 0);       // Red (pulse)
     else if (pressure < -1.5) color = vec3(0, 1, 0);       // Green (mic)
-    else if (pressure < -0.5) color = vec3(1, 1, 0);       // Yellow (objects)
+    else if (pressure < -1.1) color = vec3(0.24, 0.42, 0.66); // Outer rubber-like wall
+    else if (pressure < -0.5) color = vec3(1, 1, 0);       // Yellow (interior walls)
     else {
-        float r = (pressure > 0 ? pressure : 0);
-        float b = (pressure < 0 ? -pressure : 0);
-        color = vec3(r, 0, b);
+        // Display-only logarithmic exposure restores a broad gradation of
+        // visible wave strengths. The old tanh clipped most large pulses
+        // to identical saturated red/blue, causing hard contour bands.
+        float v=clamp(abs(pressure)/0.45,0.0,1.0);
+        float middle=0.13*sqrt(v);
+        color=pressure>=0.0 ?
+            vec3(v,middle,0.055*v) :
+            vec3(0.055*v,middle,v);
     }
 }
 )";
@@ -547,6 +622,8 @@ static void initGraphics(GraphicsContext &gfx)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS,1);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES,4);
 
     gfx.window = SDL_CreateWindow("Echolocation, Dual View (SVG)",
                                   SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -562,6 +639,7 @@ static void initGraphics(GraphicsContext &gfx)
     }
     glewExperimental = GL_TRUE;
     glewInit();
+    glEnable(GL_MULTISAMPLE);
     glClearColor(0, 0, 0, 1);
 
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
@@ -594,6 +672,87 @@ static void initGraphics(GraphicsContext &gfx)
     glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
+
+    // Small CPU-drawn map glyphs do not alter the acoustic occupancy mask.
+    // They show collectible shards/exit without creating fake reflectors.
+    glGenVertexArrays(1, &gfx.glyphVAO);
+    glGenBuffers(1, &gfx.glyphVBO);
+    glBindVertexArray(gfx.glyphVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, gfx.glyphVBO);
+    glBufferData(GL_ARRAY_BUFFER, 128 * 3 * sizeof(float), nullptr,
+                 GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3*sizeof(float),
+                          (void*)(2*sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+}
+
+// Event jingles are deliberately distinct from the wave-simulated clicks.
+// They indicate game rules; they should not be interpreted as 3D acoustics.
+static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
+{
+    const float duration=kind==8?0.07f:kind==5?0.52f:kind==6?0.24f:kind==7?0.32f:
+                         kind==4?0.24f:kind==2?0.66f:
+                         kind==3?0.60f:kind==1?0.34f:0.20f;
+    const int count=(int)(duration*sampleRate);
+    std::vector<float> samples(count*2,0.0f);
+    for(int i=0;i<count;++i) {
+        const float t=(float)i/sampleRate;
+        const int note=kind==7?(int)(t/0.16f):
+                       kind==2?(int)(t/0.22f):
+                       kind==3?(int)(t/0.20f):
+                       kind==1?(int)(t/0.17f):0;
+        const float frequency=kind==8?570.0f:
+                              kind==5?(460.0f+1080.0f*t/duration):
+                              kind==6?(1130.0f-540.0f*t/duration):
+                              kind==7?(930.0f+240.0f*(float)note):
+                              kind==4?(1040.0f+800.0f*t/duration):
+                              kind==2?(note==0?620.0f:note==1?830.0f:1240.0f):
+                              kind==3?(note==0?490.0f:note==1?350.0f:210.0f):
+                              kind==1?(note==0?350.0f:230.0f):1050.0f;
+        const float noteLength=kind==7?0.16f:kind==2?0.22f:
+                               kind==3?0.20f:kind==1?0.17f:duration;
+        const float phase=fmodf(t,noteLength)/noteLength;
+        const float envelope=sinf(PI*phase);
+        const float v=(kind==8?0.045f:0.18f)*
+                      envelope*envelope*sinf(2.0f*PI*frequency*t);
+        samples[2*i]=v;samples[2*i+1]=v;
+    }
+    SDL_QueueAudio(device,samples.data(),(Uint32)(samples.size()*sizeof(float)));
+}
+
+// Virtual cane assistance: three successive 75ms left/centre/right taps.
+// The tap pitch indicates obstacle distance and loudness indicates contact;
+// these stereo cues are separate from the 2D wave simulation.
+static void playCaneScan(SDL_AudioDeviceID device,int sampleRate,
+                         const float* staticMask,int size,
+                         float px,float py,float heading)
+{
+    if(SDL_GetQueuedAudioSize(device)>
+       (Uint32)(0.45f*sampleRate*2*sizeof(float)))return;
+    const auto rays=echo::sweepCane(staticMask,size,px,py,heading);
+    const int samples=(int)(0.39f*sampleRate);
+    std::vector<float> output(2*samples,0.0f);
+    const float panLeft[3]={0.96f,0.70f,0.18f};
+    const float panRight[3]={0.18f,0.70f,0.96f};
+    for(int i=0;i<3;++i) {
+        const float nearby=rays[i].hit?
+            fmaxf(0.0f,1.0f-fminf(rays[i].distanceCm,100.0f)/100.0f):0.0f;
+        const float frequency=rays[i].hit?510.0f+840.0f*nearby:245.0f;
+        const float loudness=rays[i].hit?0.09f+0.075f*nearby:0.029f;
+        const int first=(int)(i*0.13f*sampleRate);
+        const int n=(int)(0.075f*sampleRate);
+        for(int j=0;j<n && first+j<samples;++j){
+            const float t=(float)j/sampleRate;
+            const float env=sinf(PI*(float)j/(float)n);
+            const float sample=loudness*env*env*sinf(2.0f*PI*frequency*t);
+            output[2*(first+j)]+=sample*panLeft[i];
+            output[2*(first+j)+1]+=sample*panRight[i];
+        }
+    }
+    SDL_QueueAudio(device,output.data(),(Uint32)(output.size()*sizeof(float)));
 }
 
 int main(int argc, char* argv[])
@@ -609,7 +768,7 @@ int main(int argc, char* argv[])
         for (int y = 0; y < SIZE; y++) {
             for (int x = 0; x < SIZE; x++) {
                 if (x < w || x >= SIZE - w || y < w || y >= SIZE - w) {
-                    h_mask[y * SIZE + x] = 1.f;
+                    h_mask[y * SIZE + x] = echo::kOuterBoundaryMaterial;
                 }
             }
         }
@@ -618,7 +777,24 @@ int main(int argc, char* argv[])
         svgLoaded = true;
     }
 
+    const echo::SafeSpawn initialSpawn=echo::findFreeSpawn(
+        h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,13.0f);
+    if(!initialSpawn.valid) {
+        fprintf(stderr,"No safe player spawn on SVG level %s\n",svgFile);
+        free(h_mask);
+        return EXIT_FAILURE;
+    }
+    if(initialSpawn.x!=g_player.pivot_x || initialSpawn.y!=g_player.pivot_y)
+        printf("[LEVEL] Moved blocked player start to (%.1f, %.1f)\n",
+               initialSpawn.x,initialSpawn.y);
+    g_player.pivot_x=initialSpawn.x;
+    g_player.pivot_y=initialSpawn.y;
+    const Player initialPlayer=g_player;
+    updatePlayerComponents(g_player);
+
     g_numToneMarkers = g_toneMarkers.size();
+    // Object discovery tones are now physical FDTD world emitters; the
+    // old nonphysical proximity chimes are deliberately disabled.
     if (g_numToneMarkers > 0) {
         CUDA_CHECK(cudaMalloc(&d_toneMarkers, g_numToneMarkers * sizeof(ToneMarker)));
         CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(), 
@@ -628,6 +804,9 @@ int main(int argc, char* argv[])
 
     float *d_mask;
     CUDA_CHECK(cudaMalloc(&d_mask, SIZE * SIZE * sizeof(float)));
+    float *d_worldEmitters;
+    CUDA_CHECK(cudaMalloc(&d_worldEmitters,SIZE*SIZE*sizeof(float)));
+    std::vector<float> h_worldEmitters(SIZE*SIZE,0.0f);
 
     float *d_p, *d_p_prev, *d_p_next;
     CUDA_CHECK(cudaMalloc(&d_p, SIZE * SIZE * sizeof(float)));
@@ -640,10 +819,35 @@ int main(int argc, char* argv[])
     float *d_audioL, *d_audioR;
     CUDA_CHECK(cudaMalloc(&d_audioL, AUDIO_BATCH * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_audioR, AUDIO_BATCH * sizeof(float)));
-    float* h_audioBuffer = (float*)malloc(AUDIO_BATCH * 2 * sizeof(float));
+    std::vector<float> h_audioL(AUDIO_BATCH), h_audioR(AUDIO_BATCH);
+    std::vector<float> h_audioOut;
+    h_audioOut.reserve(AUDIO_BATCH * 2 + 8);
+    float* h_dynamic = (float*)malloc(SIZE * SIZE * sizeof(float));
+    if (!h_dynamic) { fprintf(stderr, "Out of host memory\n"); exit(1); }
 
     GraphicsContext gfx;
     initGraphics(gfx);
+    echo::View3D view3d;
+    const bool has3D = echo::init3D(view3d,h_mask,SIZE);
+    if(!has3D)fprintf(stderr,"[3D] Disabled: shader/program unavailable\n");
+    bool show3D=has3D, full3D=false, arcadeEnabled=true;
+
+    echo::EchoArcade arcade(h_mask,SIZE,g_player.pivot_x,g_player.pivot_y);
+    for(const ToneMarker& tm:g_toneMarkers){
+        if(tm.type=='W'){arcade.setExit(tm.x,tm.y);break;}
+    }
+    std::vector<echo::VisualOrb> orbs;
+    orbs.reserve(128);
+    std::vector<float> mapGlyphs;
+    mapGlyphs.reserve(128*3);
+    double lastArcadeMessage=0.0;
+    double lastThreatCue=0.0;
+    double lastGuidanceCue=0.0;
+    // Large-range artificial beacons were confusing and sounded through walls.
+    // Opt-in aids are quiet by default; short-range SVG discoveries still work.
+    bool dangerAudio=false, guidanceAudio=false;
+    std::printf("[ARCADE] %d ghosts, %d shards; reach the exit after collecting all.\n",
+                (int)arcade.enemies.size(),arcade.remaining);
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
@@ -673,11 +877,16 @@ int main(int argc, char* argv[])
 
     g_sampleRate = have.freq;
     recalcDerivedParams();
+    echo::StereoLinearResampler audioResampler(g_DT, g_sampleRate);
+    updatePlayerComponents(g_player);
+    // Mic positions are continuous across GPU batches: sampling an
+    // instantaneous new position once per SDL frame can zipper/rattle in
+    // the standing pressure field even when the wall grid is unchanged.
+    float previousMicLX=g_mic_l_x,previousMicLY=g_mic_l_y;
+    float previousMicRX=g_mic_r_x,previousMicRY=g_mic_r_y;
 
     dim3 thr(32, 32);
     dim3 blk((SIZE + 31) / 32, (SIZE + 31) / 32);
-    int threads1d = 1024;
-    int blocks1d = (SIZE * SIZE + threads1d - 1) / threads1d;
 
     uint64_t perfFreq = SDL_GetPerformanceFrequency();
     uint64_t lastCount = SDL_GetPerformanceCounter();
@@ -686,14 +895,41 @@ int main(int argc, char* argv[])
     int showObjects = 1;
     int audioBatchIndex = 0;
 
-    const int beepSamples = (int)(0.1f * g_sampleRate);
-    float* beepBuf = (float*)malloc(beepSamples * 2 * sizeof(float));
-    double lastBeep = 0.0;
-    double beepGap = 0.4;
-    double lastSlideTime = 0.0;
-    bool sliding = false;
-    bool wasSliding = false;
+    echo::ContactTrigger wallTouch;
+    bool gameWon = false;
+    int collectedItems = 0;
     double lastDebugTime = 0.0;
+    float intervalRawAudioPeak=0.0f;
+    float previousRaw[2]={0.0f,0.0f};
+    float intervalMaxSampleJump=0.0f,intervalJumpAngle=0.0f;
+    unsigned long long intervalSharpJumps=0;
+    unsigned long long intervalLimiterSamples=0,intervalUnderruns=0;
+    unsigned long long simStep2=0;
+    uint64_t manualPulseAt=UINT64_MAX;
+    uint64_t decoyPulseAt=UINT64_MAX;
+    int decoyPulseX=0,decoyPulseY=0;
+    double lastDecoySimTime=-100.0;
+    constexpr double decoyCooldownSeconds=9.0;
+    // Positive subcell coverage: smoothed before encoding as a
+    // negative fractional ghost material into the solver mask.
+    std::vector<float> h_ghostTarget(SIZE*SIZE,0.0f);
+    std::vector<float> h_ghostCoverage(SIZE*SIZE,0.0f);
+    std::vector<float> h_candyTarget(SIZE*SIZE,0.0f);
+    std::vector<float> h_candyCoverage(SIZE*SIZE,0.0f);
+    bool automaticPulse=true;
+    bool phasedClick=true, worldTones=true;
+    bool echoOnlyMonitor=false; // opt-in until on-hardware listening tests
+    echo::DirectResponse lastDirect;
+    uint64_t directPulseStart=UINT64_MAX;
+
+    std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
+    std::puts("[CONTROLS] W/S forward/back | A/D STRAFE left/right | Q/E or Left/Right TURN");
+    std::puts("[CONTROLS] F click | T auto-pings/stealth | G FDTD decoy (9s cooldown)");
+    std::puts("[CONTROLS] B narrow 6-source / isotropic click | N world chirps | J echo-only (experimental)");
+    std::puts("[CONTROLS] C obstacle scan | H spend charge for 5s ghost overdrive");
+    std::puts("[CONTROLS] 1/2 pulse interval");
+    std::puts("[CONTROLS] F5 short-range threat aid | F6 nearby-target aid (both OFF by default)");
+    std::puts("[CONTROLS] 3/4 decay | 5/6 reflections | 7/8 volume | 9/0 wave DISPLAY exposure");
 
     while (!quit) {
         SDL_Event e;
@@ -732,21 +968,123 @@ int main(int argc, char* argv[])
                         g_reflectionCoeff = 1.f - diff;
                         recalcDerivedParams();
                     } break;
-                    case SDLK_7: g_timeFudgeFactor -= 0.001f; recalcDerivedParams(); break;
-                    case SDLK_8: g_timeFudgeFactor += 0.001f; recalcDerivedParams(); break;
+                    case SDLK_7: g_waveVolumeScale -= 0.002f; recalcDerivedParams(); break;
+                    case SDLK_8: g_waveVolumeScale += 0.002f; recalcDerivedParams(); break;
+                    case SDLK_9:
+                        g_visualScale=fmaxf(0.001f,g_visualScale/1.25f);
+                        break;
+                    case SDLK_0:
+                        g_visualScale=fminf(0.08f,g_visualScale*1.25f);
+                        break;
                     case SDLK_SPACE: showObjects = !showObjects; break;
+                    case SDLK_F2: if(has3D){show3D=!show3D;full3D=false;} break;
+                    case SDLK_F3: if(has3D) {
+                        show3D=true;full3D=!full3D;
+                    } break;
+                    case SDLK_F4: arcadeEnabled=!arcadeEnabled; break;
+                    case SDLK_F5: dangerAudio=!dangerAudio; break;
+                    case SDLK_F6: guidanceAudio=!guidanceAudio; break;
+                    case SDLK_t:
+                        if(!e.key.repeat)automaticPulse=!automaticPulse;
+                        break;
+                    case SDLK_b:
+                        if(!e.key.repeat)phasedClick=!phasedClick;
+                        printf("[SOURCE] %s FDTD player click\n",
+                                phasedClick?"narrow 3-column phased beam":"single isotropic source");
+                        break;
+                    case SDLK_n:
+                        if(!e.key.repeat)worldTones=!worldTones;
+                        printf("[SOURCES] Room-object FDTD tones %s\n",
+                                worldTones?"ON":"OFF");
+                        break;
+                    case SDLK_j:
+                        if(!e.key.repeat) {
+                            echoOnlyMonitor=!echoOnlyMonitor;
+                            directPulseStart=UINT64_MAX;
+                            lastDirect={};
+                            printf("[MONITOR] %s direct-field subtraction (experimental)\n",
+                                echoOnlyMonitor?"Echo-only":"Full pressure");
+                        }
+                        break;
+                    case SDLK_f:
+                        if(!e.key.repeat) {
+                            manualPulseAt=simStep2;
+                            if(arcadeEnabled)arcade.hearClick(g_pulse_x,g_pulse_y);
+                        }
+                        break;
+                    case SDLK_h:
+                        if(!e.key.repeat && arcadeEnabled &&
+                           arcade.activateOverdrive()) {
+                            // Unlike the extra power-up game rules, this
+                            // activation click excites the actual wave field.
+                            manualPulseAt=simStep2;
+                            playArcadeFeedback(beepDev,g_sampleRate,5);
+                        }
+                        break;
+                    case SDLK_c:
+                        if(!e.key.repeat)playCaneScan(beepDev,g_sampleRate,
+                            h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                            g_player.angle-PI/4.0f);
+                        break;
+                    case SDLK_g:
+                        if(!e.key.repeat && arcadeEnabled && !arcade.won &&
+                           !arcade.lost &&
+                           simTime-lastDecoySimTime>=decoyCooldownSeconds) {
+                            const echo::DecoyPlacement d=echo::projectDecoy(
+                                h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                                g_pulse_x-g_player.pivot_x,
+                                g_pulse_y-g_player.pivot_y);
+                            if(d.valid) {
+                                decoyPulseX=(int)lroundf(d.x);
+                                decoyPulseY=(int)lroundf(d.y);
+                                decoyPulseAt=simStep2;
+                                lastDecoySimTime=simTime;
+                                arcade.hearClick(d.x,d.y);
+                                playArcadeFeedback(beepDev,g_sampleRate,4);
+                            }
+                        }
+                        break;
+                    case SDLK_r:
+                        arcade.reset();
+                        for(const ToneMarker& tm:g_toneMarkers)if(tm.type=='W'){
+                            arcade.setExit(tm.x,tm.y);break;
+                        }
+                        gameWon=false;collectedItems=0;simStep2=0;simTime=0;
+                        manualPulseAt=UINT64_MAX;decoyPulseAt=UINT64_MAX;
+                        directPulseStart=UINT64_MAX;
+                        lastDirect={};
+                        lastDecoySimTime=-100;automaticPulse=true;
+                        g_player=initialPlayer;
+                        updatePlayerComponents(g_player);
+                        previousMicLX=g_mic_l_x; previousMicLY=g_mic_l_y;
+                        previousMicRX=g_mic_r_x; previousMicRY=g_mic_r_y;
+                        for(ToneMarker &tm:g_toneMarkers)tm.collected=false;
+                        // FDTD emitters are reconstructed from reset objects.
+                        if(g_numToneMarkers>0)CUDA_CHECK(cudaMemcpy(
+                            d_toneMarkers,g_toneMarkers.data(),
+                            g_numToneMarkers*sizeof(ToneMarker),cudaMemcpyHostToDevice));
+                        CUDA_CHECK(cudaMemset(d_p,0,SIZE*SIZE*sizeof(float)));
+                        CUDA_CHECK(cudaMemset(d_p_prev,0,SIZE*SIZE*sizeof(float)));
+                        CUDA_CHECK(cudaMemset(d_p_next,0,SIZE*SIZE*sizeof(float)));
+                        audioResampler=echo::StereoLinearResampler(g_DT,g_sampleRate);
+                        SDL_ClearQueuedAudio(simDev);
+                        SDL_ClearQueuedAudio(beepDev);
+                        wallTouch=echo::ContactTrigger{};
+                        previousRaw[0]=previousRaw[1]=0.0f;
+                        intervalMaxSampleJump=0.0f;
+                        intervalSharpJumps=0;
+                        lastThreatCue=0;lastGuidanceCue=0;
+                        lastCount=SDL_GetPerformanceCounter();
+                        break;
+                    case SDLK_ESCAPE: quit = true; break;
                 }
             }
         }
 
         uint64_t now = SDL_GetPerformanceCounter();
-        float dtFrame = (float)((now - lastCount) / (double)perfFreq);
+        // Bound interaction movement after stalls; simulation remains audio-paced.
+        float dtFrame = fminf(0.05f, (float)((now - lastCount) / (double)perfFreq));
         lastCount = now;
-
-        float* h_dynamic = (float*)malloc(SIZE * SIZE * sizeof(float));
-        updateDynamicMask(h_mask, h_dynamic, g_wedge_x, g_wedge_y, g_player.pivot_x, g_player.pivot_y);
-        CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float), cudaMemcpyHostToDevice));
-        free(h_dynamic);
 
         const Uint8* ks = SDL_GetKeyboardState(NULL);
         Player newP = g_player;
@@ -754,8 +1092,10 @@ int main(int argc, char* argv[])
         float rotSpeed = PI / 2.f;
         float strafeSpeed = moveSpeed;
 
-        if (ks[SDL_SCANCODE_LEFT] || ks[SDL_SCANCODE_A]) newP.angle += rotSpeed * dtFrame;
-        if (ks[SDL_SCANCODE_RIGHT] || ks[SDL_SCANCODE_D]) newP.angle -= rotSpeed * dtFrame;
+        if (ks[SDL_SCANCODE_LEFT] || ks[SDL_SCANCODE_Q])
+            newP.angle += rotSpeed * dtFrame;
+        if (ks[SDL_SCANCODE_RIGHT] || ks[SDL_SCANCODE_E])
+            newP.angle -= rotSpeed * dtFrame;
 
         updatePlayerComponents(newP);
 
@@ -775,225 +1115,413 @@ int main(int argc, char* argv[])
 
         float sx = -fy;
         float sy = fx;
-        if (ks[SDL_SCANCODE_Q] || ks[SDL_SCANCODE_RCTRL]) {
+        if (ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_RCTRL]) {
             dx += strafeSpeed * dtFrame * sx;
             dy += strafeSpeed * dtFrame * sy;
         }
-        if (ks[SDL_SCANCODE_E] || ks[SDL_SCANCODE_KP_0]) {
+        if (ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_KP_0]) {
             dx -= strafeSpeed * dtFrame * sx;
             dy -= strafeSpeed * dtFrame * sy;
         }
 
-        float moveMag = sqrtf(dx * dx + dy * dy);
-        float maxStep = 13.5f;
-        if (moveMag > maxStep) {
-            dx = dx * maxStep / moveMag;
-            dy = dy * maxStep / moveMag;
-            moveMag = maxStep;
-        }
+        // Conservative 13 cm player radius, substepped motion and tangent/
+        // per-axis fallbacks. This replaces the 360-ray heuristic, which
+        // sometimes pushed the player through obstacles or stopped sliding.
+        const echo::SlideResult motion = echo::slideCircle(
+            h_mask, SIZE, g_player.pivot_x, g_player.pivot_y,
+            dx, dy, 13.0f);
+        newP.pivot_x = motion.x;
+        newP.pivot_y = motion.y;
+        const bool collided = motion.collided;
+        const float heading = newP.angle - PI / 4.0f;
+        // Use the collision's actual nearest obstructing wall cell. Previous
+        // code relied on a smeared aggregate normal and only panned a 440Hz
+        // tone, which was directionally ambiguous (front sounded like back).
+        const echo::WallContact contact=echo::findWallContact(
+            h_mask,SIZE,newP.pivot_x,newP.pivot_y,heading,
+            motion.wallX,motion.wallY,13.0f);
 
-        float collisionAngle = 0.f;
-        newP.pivot_x += dx;
-        newP.pivot_y += dy;
-        bool collided = checkPlayerCollision(newP.pivot_x, newP.pivot_y, h_mask, collisionAngle, newP.angle);
-
-        if (collided) {
-            float normalAngle = collisionAngle + newP.angle - PI / 2.f;
-            float normalX = cosf(normalAngle);
-            float normalY = sinf(normalAngle);
-            float dot = dx * normalX + dy * normalY;
-
-            float tangentAngle = normalAngle + PI / 2.f;
-            float tangentX = cosf(tangentAngle);
-            float tangentY = sinf(tangentAngle);
-            float slideDot = dx * tangentX + dy * tangentY;
-            if (fabsf(slideDot) > maxStep) slideDot = (slideDot > 0 ? maxStep : -maxStep);
-
-            float newX = g_player.pivot_x + slideDot * tangentX;
-            float newY = g_player.pivot_y + slideDot * tangentY;
-            float tempAngle;
-
-            if (!checkPlayerCollision(newX, newY, h_mask, tempAngle, newP.angle)) {
-                newP.pivot_x = newX;
-                newP.pivot_y = newY;
-                collisionAngle = tempAngle;
-                sliding = (fabsf(slideDot) > 0.01f);
-            } else {
-                tangentAngle = normalAngle - PI / 2.f;
-                tangentX = cosf(tangentAngle);
-                tangentY = sinf(tangentAngle);
-                slideDot = dx * tangentX + dy * tangentY;
-                if (fabsf(slideDot) > maxStep) slideDot = (slideDot > 0 ? maxStep : -maxStep);
-
-                newX = g_player.pivot_x + slideDot * tangentX;
-                newY = g_player.pivot_y + slideDot * tangentY;
-
-                if (!checkPlayerCollision(newX, newY, h_mask, tempAngle, newP.angle)) {
-                    newP.pivot_x = newX;
-                    newP.pivot_y = newY;
-                    collisionAngle = tempAngle;
-                    sliding = (fabsf(slideDot) > 0.01f);
-                } else {
-                    float pushX = g_player.pivot_x;
-                    float pushY = g_player.pivot_y;
-                    float stepSize = 1.0f;
-                    int maxSteps = 10;
-                    for (int i = 0; i < maxSteps && checkPlayerCollision(pushX, pushY, h_mask, tempAngle, newP.angle); i++) {
-                        pushX -= normalX * stepSize;
-                        pushY -= normalY * stepSize;
-                    }
-                    newP.pivot_x = pushX;
-                    newP.pivot_y = pushY;
-                    sliding = false;
-                }
-            }
-
-            newP.pivot_x = g_player.pivot_x * 0.2f + newP.pivot_x * 0.8f;
-            newP.pivot_y = g_player.pivot_y * 0.2f + newP.pivot_y * 0.8f;
-        } else {
-            sliding = false;
-        }
-
-        updatePlayerComponents(newP);
         g_player = newP;
         updatePlayerComponents(g_player);
-
-        double nowT = simTime;
-        if (!wasSliding && collided && nowT - lastBeep > beepGap) {
-            float pan = sinf(collisionAngle);
-            float lv = 0.5f + 0.5f * pan;
-            float rv = 0.5f - 0.5f * pan;
-            for (int i = 0; i < beepSamples; i++) {
-                float t = (float)i / (float)g_sampleRate;
-                float s = sinf(2.f * PI * 440.f * t) * 0.2f; // 32-bit float
-                beepBuf[2 * i] = s * lv;
-                beepBuf[2 * i + 1] = s * rv;
+        echo::ArcadeEvent arcadeEvent;
+        if(arcadeEnabled) {
+            arcadeEvent=arcade.update(dtFrame,g_player.pivot_x,g_player.pivot_y);
+            if(arcadeEvent.bounced) {
+                g_player.pivot_x=arcadeEvent.recoilX;
+                g_player.pivot_y=arcadeEvent.recoilY;
+                updatePlayerComponents(g_player);
+                // Ghost contact is now at most a 1.5cm correction, NOT a
+                // 16cm teleport. Keep the old microphone interpolation
+                // anchor, so the pressure receiver does not jump at once
+                // and make the same whipping noise we are investigating.
             }
-            SDL_QueueAudio(beepDev, beepBuf, beepSamples * 2 * sizeof(float));
-            lastBeep = nowT;
-        }
-
-        if (sliding && nowT - lastSlideTime > 0.1) {
-            float pan = sinf(collisionAngle);
-            float lv = 0.5f + 0.5f * pan;
-            float rv = 0.5f - 0.5f * pan;
-            int slideSamples = beepSamples;
-            float* slideBuf = (float*)malloc(slideSamples * 2 * sizeof(float));
-            for (int i = 0; i < slideSamples; i++) {
-                float t = (float)i / (float)g_sampleRate;
-                float s = sinf(2.f * PI * 330.f * t) * 0.05f; // 32-bit float
-                slideBuf[2 * i] = s * lv;
-                slideBuf[2 * i + 1] = s * rv;
-            }
-            SDL_QueueAudio(beepDev, slideBuf, slideSamples * 2 * sizeof(float));
-            free(slideBuf);
-            lastSlideTime = nowT;
-        }
-
-        // Handle marker beep playback
-        for (int i = 0; i < g_numToneMarkers; i++) {
-            ToneMarker& tm = g_toneMarkers[i];
-            float dx = tm.x - g_player.pivot_x;
-            float dy = tm.y - g_player.pivot_y;
-            float dist = sqrtf(dx * dx + dy * dy);
-            if (dist < 50.f) {
-                if (!tm.isPlaying) {
-                    tm.isPlaying = true;
-                    printf("[TONE DEBUG] Started playing marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
-                           tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
-                }
-                float angle = atan2f(dy, dx) - g_player.angle;
-                float pan = sinf(angle);
-                float atten = fmaxf(0.2f, 1.f - dist / 50.f);
-                float freq = (tm.type == 'O') ? 440.f : (tm.type == 'W') ? 660.f : 880.f; // Different freqs for O, W, I
-                int samplesToPlay = (int)(dtFrame * g_sampleRate);
-                float* markerBuf = (float*)malloc(samplesToPlay * 2 * sizeof(float));
-                for (int j = 0; j < samplesToPlay; j++) {
-                    float t = (float)j / (float)g_sampleRate;
-                    float sample = sinf(2.f * PI * freq * t) * 0.2f * atten; // 32-bit float
-                    markerBuf[2 * j] = sample * (0.5f + 0.5f * pan);
-                    markerBuf[2 * j + 1] = sample * (0.5f - 0.5f * pan);
-                }
-                SDL_QueueAudio(beepDev, markerBuf, samplesToPlay * 2 * sizeof(float));
-                free(markerBuf);
-            } else {
-                if (tm.isPlaying) {
-                    tm.isPlaying = false;
-                    printf("[TONE DEBUG] Stopped marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f (too far)\n",
-                           tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
-                }
+            if(arcade.reachExit(g_player.pivot_x,g_player.pivot_y)) {
+                arcadeEvent.cleared=true;
+                gameWon=true;
             }
         }
+        updateDynamicMask(h_mask,h_dynamic);
+        // Ghosts and smaller eight-sided candies spin through the SAME
+        // softened FDTD reflectivity algorithm, with separate material
+        // strength encoding in the existing single float mask:
+        // -coverage = ghost; -(1+coverage) = less rigid candy. Both can
+        // retain their pressure histories while turning or disappearing.
+        std::fill(h_ghostTarget.begin(),h_ghostTarget.end(),0.0f);
+        std::fill(h_candyTarget.begin(),h_candyTarget.end(),0.0f);
+        if(arcadeEnabled) {
+            arcade.stampGhostCoverage(h_ghostTarget.data());
+            arcade.stampCandyCoverage(h_candyTarget.data());
+        }
+        for(size_t j=0;j<h_ghostCoverage.size();++j) {
+            h_ghostCoverage[j]=echo::smoothGhostCoverage(
+                h_ghostCoverage[j],h_ghostTarget[j],dtFrame);
+            h_candyCoverage[j]=echo::smoothGhostCoverage(
+                h_candyCoverage[j],h_candyTarget[j],dtFrame);
+            if(h_dynamic[j]!=0.0f)continue; // never overwrite SVG walls
+            if(h_ghostCoverage[j]>0.002f)
+                h_dynamic[j]=-h_ghostCoverage[j];
+            else if(h_candyCoverage[j]>0.002f)
+                h_dynamic[j]=-(1.0f+h_candyCoverage[j]);
+        }
+        CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float),
+                              cudaMemcpyHostToDevice));
+        // CPU builds only the sparse FDTD source map once per *frame*.
+        // The pressure kernel sees O(1) map access, not O(object count)
+        // comparisons for every one of ~48,500 steps each second.
+        std::fill(h_worldEmitters.begin(),h_worldEmitters.end(),0.0f);
+        if(worldTones) {
+            if(arcadeEnabled) {
+                for(const echo::Enemy& en:arcade.enemies) {
+                    if(en.eaten)continue;
+                    const float proximity=echo::localEmitterGain(
+                        h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                        en.x,en.y,48.0f);
+                    if(proximity>0.01f)
+                        echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                            en.x,en.y,
+                            (int)en.archetype+echo::kGhostTracker,
+                            11.0f,proximity);
+                }
+                for(size_t n=0;n<arcade.shards.size();++n) {
+                    const auto &sh=arcade.shards[n];
+                    if(sh.collected)continue;
+                    const float proximity=echo::localEmitterGain(
+                        h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                        sh.x,sh.y,42.0f);
+                    if(proximity>0.01f)
+                        echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                            sh.x,sh.y,echo::kShardFirst+(int)(n%12),
+                            echo::kCandyRadiusCm+1.2f,proximity);
+                }
+                const float exitGain=echo::localEmitterGain(
+                    h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                    arcade.exitX,arcade.exitY,50.0f);
+                if(exitGain>0.01f)
+                    echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                        arcade.exitX,arcade.exitY,echo::kArcadeExit,
+                        0.0f,exitGain);
+            }
+            for(const ToneMarker &tm:g_toneMarkers) {
+                if(tm.collected)continue;
+                if(arcadeEnabled && tm.type=='W')continue;
+                const int id=tm.type=='W'?echo::kSvgGoal:
+                         tm.type=='I'?echo::kSvgItem:
+                         echo::kSvgObstacle;
+                const float maximum=tm.type=='O'?35.0f:
+                                    tm.type=='I'?42.0f:50.0f;
+                const float proximity=echo::localEmitterGain(
+                    h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                    tm.x,tm.y,maximum);
+                if(proximity>0.01f)
+                    echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                                           tm.x,tm.y,id,0.0f,proximity);
+            }
+        }
+        CUDA_CHECK(cudaMemcpy(d_worldEmitters,h_worldEmitters.data(),
+            SIZE*SIZE*sizeof(float),cudaMemcpyHostToDevice));
 
-        wasSliding = sliding;
+        double nowT = now / (double)perfFreq;
+        if(arcadeEnabled) {
+            if(arcadeEvent.pickups>0)playArcadeFeedback(beepDev,g_sampleRate,0);
+            if(arcadeEvent.chargesGained>0)playArcadeFeedback(beepDev,g_sampleRate,7);
+            if(arcadeEvent.ghostsCaught>0)playArcadeFeedback(beepDev,g_sampleRate,6);
+            if(arcadeEvent.hit)playArcadeFeedback(beepDev,g_sampleRate,8);
+            if(arcadeEvent.cleared)playArcadeFeedback(beepDev,g_sampleRate,2);
+            if(nowT-lastArcadeMessage>0.35) {
+                char title[256];
+                std::snprintf(title,sizeof(title),
+                    "ECHO ARCADE | %s | Score %d | Shards %d | Charges %d | No deaths | B beam N cues",
+                    arcade.won?"LEVEL CLEAR":
+                    arcade.overdrive>0?"OVERDRIVE":"EXPLORE",
+                    arcade.score,arcade.remaining,arcade.charges);
+                SDL_SetWindowTitle(gfx.window,title);
+                lastArcadeMessage=nowT;
+            }
+        }
+        // Extra nonphysical audio HUD: nearest approaching ghost produces
+        // a low stereo heartbeat that speeds up with proximity. F5 turns it
+        // off if the player wants to train with only wave reflections.
+        if(arcadeEnabled&&dangerAudio&&!arcade.won&&!arcade.lost&&arcade.overdrive<=0.0f) {
+            echo::ThreatCue nearest;
+            float bestDistance=1.0e9f;
+            for(const echo::Enemy &en:arcade.enemies) {
+                if(en.eaten)continue;
+                const float d=std::hypot(en.x-g_player.pivot_x,
+                                         en.y-g_player.pivot_y);
+                if(d<bestDistance) {
+                    bestDistance=d;
+                    nearest=echo::threatCue(g_player.pivot_x,
+                           g_player.pivot_y,g_player.angle,en.x,en.y,
+                           en.alert>0,en.archetype);
+                }
+            }
+            if(nearest.audible && nowT-lastThreatCue>=nearest.interval &&
+               SDL_GetQueuedAudioSize(beepDev) <
+                   (Uint32)(0.18*g_sampleRate*2*sizeof(float))) {
+                const int n=(int)(0.085*g_sampleRate);
+                std::vector<float> heartbeat(2*n);
+                for(int j=0;j<n;++j) {
+                    const float t=(float)j/g_sampleRate;
+                    const float env=sinf(PI*(float)j/(float)n);
+                    const float beat=(sinf(2.0f*PI*nearest.frequency*t) +
+                                      0.22f*sinf(4.0f*PI*nearest.frequency*t))*
+                                     env*env;
+                    heartbeat[2*j]=nearest.left*beat;
+                    heartbeat[2*j+1]=nearest.right*beat;
+                }
+                SDL_QueueAudio(beepDev,heartbeat.data(),
+                               (Uint32)(heartbeat.size()*sizeof(float)));
+                lastThreatCue=nowT;
+            }
+        }
 
-        int rawSteps = (int)ceilf(dtFrame / g_DT);
-        int steps = (int)(rawSteps * g_timeFudgeFactor);
-        if (steps < 1) steps = 1;
-        if (steps > 1000) steps = 1000;
+        // A distinct high-pitched optional "next target" beacon allows
+        // navigation without vision. It is game UI (direct stereo bearing),
+        // not a simulated sound propagation source; F6 disables the aid.
+        if(arcadeEnabled&&guidanceAudio&&!arcade.won&&!arcade.lost &&
+           nowT-lastGuidanceCue>=4.5 &&
+           SDL_GetQueuedAudioSize(beepDev) <
+               (Uint32)(0.15*g_sampleRate*2*sizeof(float))) {
+            const echo::GuidanceTarget target=arcade.guidanceTarget();
+            if(target.available &&
+               std::hypot(target.x-g_player.pivot_x,
+                          target.y-g_player.pivot_y)<35.0f &&
+               echo::hasClearSight(h_mask,SIZE,g_player.pivot_x,
+                        g_player.pivot_y,target.x,target.y)) {
+                const float dx=target.x-g_player.pivot_x;
+                const float dy=target.y-g_player.pivot_y;
+                const float bearing=atan2f(dy,dx)-
+                    (g_player.angle-PI/4.0f);
+                const float pan=sinf(bearing);
+                const float left=sqrtf(0.5f*(1.0f+pan));
+                const float right=sqrtf(0.5f*(1.0f-pan));
+                const int notes=target.exit?3:2;
+                const int n=(int)(notes*0.13f*g_sampleRate);
+                std::vector<float> beacon(2*n,0.0f);
+                const float distance=std::hypot(dx,dy);
+                const float gain=0.09f*echo::proximityStrength(distance,35.0f);
+                for(int j=0;j<n;++j) {
+                    const float t=(float)j/g_sampleRate;
+                    const int note=std::min(notes-1,(int)(t/0.13f));
+                    const float within=fmodf(t,0.13f);
+                    if(within>0.08f)continue;
+                    const float env=sinf(PI*within/0.08f);
+                    const float frequency=(target.exit?1190.0f:810.0f)+
+                                          note*(target.exit?170.0f:110.0f);
+                    const float chirp=gain*env*env*
+                        sinf(2.0f*PI*frequency*within);
+                    beacon[2*j]=chirp*left;
+                    beacon[2*j+1]=chirp*right;
+                }
+                SDL_QueueAudio(beepDev,beacon.data(),
+                               (Uint32)(beacon.size()*sizeof(float)));
+                lastGuidanceCue=nowT;
+            }
+        }
 
-        static unsigned long simStep2 = 0;
-        for (int i = 0; i < steps; i++) {
-            updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev, d_mask,
-                                         g_c2, SIZE, g_reflectionCoeff);
+        // A short single contact tap, only on collision onset or a genuinely
+        // new contact direction. Explicit ear-to-hit distances generate
+        // level asymmetry and sub-millisecond interaural delay, while rear
+        // contacts have softer spectral content. No recurring sliding beeps.
+        // Use the WORLD-space collision bearing to gate a fresh
+        // hit. Simply turning in place against the same wall must not
+        // manufacture another tap or a false "wedge collision".
+        const float worldContactBearing=atan2f(
+            contact.y-g_player.pivot_y,contact.x-g_player.pivot_x);
+        if(wallTouch.shouldPlay(collided && contact.valid,
+                 hypotf(dx,dy),worldContactBearing,nowT) &&
+           SDL_GetQueuedAudioSize(beepDev) <
+               (Uint32)(0.12f*g_sampleRate*2*sizeof(float))) {
+            const auto ears=echo::contactEars(contact.relative,
+                                             contact.distanceCm,g_sampleRate);
+            auto tap=echo::renderContactTap(ears,g_sampleRate);
+            if(!tap.empty())
+                SDL_QueueAudio(beepDev,tap.data(),
+                               (Uint32)(tap.size()*sizeof(float)));
+        }
+
+        // O/I/W landmarks now emit their location-specific, extremely quiet
+        // tones INSIDE the 2D FDTD field. Only the game-rule collection / win
+        // events remain direct UI audio (and the wall-contact tactile cue).
+        for(int i=0;i<g_numToneMarkers;++i) {
+            ToneMarker &tm=g_toneMarkers[i];
+            if(tm.collected)continue;
+            const float dist=std::hypot(tm.x-g_player.pivot_x,
+                                        tm.y-g_player.pivot_y);
+            if(dist<13.0f && tm.type=='I') {
+                tm.collected=true;
+                ++collectedItems;
+                printf("[GAME] SVG item collected: %d\n",collectedItems);
+                CUDA_CHECK(cudaMemcpy(d_toneMarkers,g_toneMarkers.data(),
+                    g_numToneMarkers*sizeof(ToneMarker),cudaMemcpyHostToDevice));
+                playArcadeFeedback(beepDev,g_sampleRate,0);
+            } else if(dist<13.0f && tm.type=='W' && !gameWon &&
+                      (!arcadeEnabled || arcade.remaining==0)) {
+                gameWon=true;
+                printf("[GAME] SVG goal reached\n");
+                if(!arcadeEnabled)playArcadeFeedback(beepDev,g_sampleRate,2);
+            }
+        }
+
+        // SDL's output clock, not render-frame delta or an arbitrary fudge
+        // factor, determines how many real physical FDTD steps are needed.
+        const int queuedFrames = (int)(SDL_GetQueuedAudioSize(simDev) /
+                                       (2 * sizeof(float)));
+        if(simStep2>1000 && queuedFrames<g_sampleRate/500)
+            ++intervalUnderruns;
+        const int targetFrames = (int)(0.060 * g_sampleRate);
+        const int missingFrames = std::max(0, targetFrames - queuedFrames);
+        const int steps = std::min(1024, std::min(AUDIO_BATCH,
+            (int)ceil((missingFrames + (missingFrames ? 2 : 0)) /
+                      (g_sampleRate * (double)g_DT))));
+
+        const auto beam=echo::playerBeam(SIZE,h_mask,
+            g_player.pivot_x,g_player.pivot_y,
+            g_player.angle-PI/4.0f,phasedClick);
+        for (int i = 0; i < steps; ++i) {
+            const float alpha=(float)(i+1)/(float)steps;
+            const float micLX=previousMicLX+(g_mic_l_x-previousMicLX)*alpha;
+            const float micLY=previousMicLY+(g_mic_l_y-previousMicLY)*alpha;
+            const float micRX=previousMicRX+(g_mic_r_x-previousMicRX)*alpha;
+            const float micRY=previousMicRY+(g_mic_r_y-previousMicRY)*alpha;
+            // Keep the actual wave grid intact. Option J subtracts an
+            // independently FDTD-simulated homogeneous incident field
+            // ONLY from the headphones, after GPU sampling. It therefore
+            // leaves reflections to be generated normally by the grid.
+            if(echoOnlyMonitor && echo::pulseIndex(
+                simStep2,g_pulseIntervalSteps,g_pulseDurationSteps,
+                automaticPulse,manualPulseAt)==0) {
+                lastDirect=echo::freeFieldDirect(
+                    beam,micLX,micLY,micRX,micRY,
+                    g_pulseDurationSteps,g_DT,g_c2,g_decayFactor,
+                    PULSE_AMPLITUDE,g_waveVolumeScale,
+                    phasedClick);
+                directPulseStart=simStep2;
+            }
+            if (arcadeEnabled && automaticPulse && simStep2>=1000ULL &&
+                (simStep2-1000ULL)%(unsigned long long)g_pulseIntervalSteps==0ULL)
+                arcade.hearClick(g_pulse_x,g_pulse_y);
+            updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev,
+                                         d_mask,d_worldEmitters,
+                                         g_c2, SIZE, g_reflectionCoeff,
+                                         beam,PULSE_AMPLITUDE,
+                                         simStep2, g_pulseIntervalSteps,
+                                         g_pulseDurationSteps, g_DT, g_decayFactor,
+                                         automaticPulse,manualPulseAt,
+                                         decoyPulseX,decoyPulseY,decoyPulseAt);
             CUDA_CHECK(cudaGetLastError());
 
-            addPulse<<<1, 1>>>(d_p_next, g_pulse_x, g_pulse_y, PULSE_AMPLITUDE,
-                               simStep2, g_pulseIntervalSteps, g_pulseDurationSteps,
-                               g_DT);
+            captureAndReduce<<<1, 1>>>(d_p_next, micLX, micLY,
+                                       micRX, micRY, audioBatchIndex,
+                                       d_audioL, d_audioR, g_waveVolumeScale);
             CUDA_CHECK(cudaGetLastError());
 
-            applyDecay<<<blocks1d, threads1d>>>(d_p_next, g_decayFactor);
-            CUDA_CHECK(cudaGetLastError());
-
-            captureAndReduce<<<1, 32>>>(d_p_next, g_mic_l_x, g_mic_l_y,
-                                      g_mic_r_x, g_mic_r_y, audioBatchIndex,
-                                      d_audioL, d_audioR, g_waveVolumeScale);
-            CUDA_CHECK(cudaGetLastError());
-
-            audioBatchIndex++;
-            simStep2++;
+            ++audioBatchIndex;
+            ++simStep2;
             simTime += g_DT;
 
             float* tmp = d_p_prev;
             d_p_prev = d_p;
             d_p = d_p_next;
             d_p_next = tmp;
-
-            if (audioBatchIndex >= AUDIO_BATCH) break;
         }
 
+        if(steps>0) {
+            previousMicLX=g_mic_l_x; previousMicLY=g_mic_l_y;
+            previousMicRX=g_mic_r_x; previousMicRY=g_mic_r_y;
+        }
+        if(manualPulseAt!=UINT64_MAX &&
+           simStep2>=manualPulseAt+(uint64_t)g_pulseDurationSteps)
+            manualPulseAt=UINT64_MAX;
+        if(decoyPulseAt!=UINT64_MAX &&
+           simStep2>=decoyPulseAt+(uint64_t)g_pulseDurationSteps)
+            decoyPulseAt=UINT64_MAX;
+
         if (audioBatchIndex > 0) {
-            float* hostL = (float*)malloc(audioBatchIndex * sizeof(float));
-            float* hostR = (float*)malloc(audioBatchIndex * sizeof(float));
-            CUDA_CHECK(cudaMemcpy(hostL, d_audioL, audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
-            CUDA_CHECK(cudaMemcpy(hostR, d_audioR, audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
-
-            for (int k = 0; k < audioBatchIndex; k++) {
-                h_audioBuffer[2 * k] = hostL[k];
-                h_audioBuffer[2 * k + 1] = hostR[k];
+            CUDA_CHECK(cudaMemcpy(h_audioL.data(), d_audioL,
+                                  audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
+            CUDA_CHECK(cudaMemcpy(h_audioR.data(), d_audioR,
+                                  audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
+            h_audioOut.clear();
+            const uint64_t firstStep=simStep2-(uint64_t)audioBatchIndex;
+            for (int k = 0; k < audioBatchIndex; ++k) {
+                const uint64_t physicalStep=firstStep+(uint64_t)k;
+                const float l=echoOnlyMonitor?
+                    echo::subtractDirect(h_audioL[k],lastDirect.left,
+                                         directPulseStart,physicalStep):
+                    h_audioL[k];
+                const float r=echoOnlyMonitor?
+                    echo::subtractDirect(h_audioR[k],lastDirect.right,
+                                         directPulseStart,physicalStep):
+                    h_audioR[k];
+                audioResampler.push(l,r,h_audioOut);
             }
-            SDL_QueueAudio(simDev, h_audioBuffer, audioBatchIndex * 2 * sizeof(float));
-            CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(), 
-                                g_numToneMarkers * sizeof(ToneMarker), 
-                                cudaMemcpyHostToDevice));
-            free(hostL);
-            free(hostR);
+            // A soft limiter prevents a numerical transient from delivering
+            // arbitrary full-scale peaks to headphones.
+            // Detect actual discontinuities in the *unprocessed* stereo
+            // pressure, including across SDL queue chunk boundaries.
+            // Instrumentation never changes the physics or post-filtering.
+            for (size_t n=0;n<h_audioOut.size();++n) {
+                float &sample=h_audioOut[n];
+                const int ear=(int)(n&1);
+                if(isfinite(sample)) {
+                    const float jump=fabsf(sample-previousRaw[ear]);
+                    if(jump>intervalMaxSampleJump) {
+                        intervalMaxSampleJump=jump;
+                        intervalJumpAngle=g_player.angle-PI/4.0f;
+                    }
+                    if(jump>0.5f)++intervalSharpJumps;
+                    previousRaw[ear]=sample;
+                    intervalRawAudioPeak=fmaxf(intervalRawAudioPeak,fabsf(sample));
+                    if(fabsf(sample)>0.95f)++intervalLimiterSamples;
+                    sample=0.8f*tanhf(sample);
+                } else {
+                    ++intervalLimiterSamples;
+                    previousRaw[ear]=0.0f;
+                    sample=0.0f;
+                }
+            }
+            if (!h_audioOut.empty() &&
+                SDL_QueueAudio(simDev, h_audioOut.data(),
+                               (Uint32)(h_audioOut.size() * sizeof(float))) != 0) {
+                fprintf(stderr, "SDL_QueueAudio error: %s\n", SDL_GetError());
+            }
             audioBatchIndex = 0;
-
-            const float BYTES_PER_FRAME = (float)(sizeof(float) * 2);
-            Uint32 queued = SDL_GetQueuedAudioSize(simDev);
-            float queuedSec = (float)queued / (BYTES_PER_FRAME * (float)g_sampleRate);
-
-            if (queuedSec > 0.06f) {
-                SDL_ClearQueuedAudio(simDev);
-                printf("Queue reset to avoid lag. (%.2f s)\n", queuedSec);
-            }
-
-            if (simTime - lastDebugTime >= 5.0) {
-                printf("[DEBUG] SimTime=%.2f  Steps=%d  QueuedSec=%.3f\n", simTime, steps, queuedSec);
-                lastDebugTime = simTime;
-            }
+        }
+        if (simTime - lastDebugTime >= 5.0) {
+            float queuedSeconds = SDL_GetQueuedAudioSize(simDev) /
+                                  (2.0f * sizeof(float) * g_sampleRate);
+            printf("[AUDIO-DIAG] SimTime=%.2f Steps=%d Queue=%.3fs RawPeak=%.4f MaxJump=%.4f JumpAngle=%.2f SharpJumps=%llu HighSamples=%llu Underflows=%llu B=%d N=%d J=%d\n",
+                   simTime,steps,queuedSeconds,intervalRawAudioPeak,
+                   intervalMaxSampleJump,intervalJumpAngle,
+                   intervalSharpJumps,intervalLimiterSamples,intervalUnderruns,
+                   (int)phasedClick,(int)worldTones,(int)echoOnlyMonitor);
+            lastDebugTime=simTime;
+            intervalRawAudioPeak=0.0f;
+            intervalMaxSampleJump=0.0f;
+            intervalSharpJumps=0;
+            intervalLimiterSamples=0;
+            intervalUnderruns=0;
         }
 
         float* vbo_data; size_t vbo_size;
@@ -1001,6 +1529,7 @@ int main(int argc, char* argv[])
         CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&vbo_data, &vbo_size, gfx.cuda_vbo_resource));
 
         updateVBO<<<blk, thr>>>(vbo_data, d_p, d_mask, SIZE, showObjects, simStep2,
+                                g_visualScale,
                                 g_mic_l_x, g_mic_l_y, g_mic_r_x, g_mic_r_y,
                                 g_pulse_x, g_pulse_y, g_wedge_x, g_wedge_y,
                                 g_player.pivot_x, g_player.pivot_y, g_player.angle,
@@ -1008,10 +1537,134 @@ int main(int argc, char* argv[])
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &gfx.cuda_vbo_resource, 0));
 
-        glClear(GL_COLOR_BUFFER_BIT);
-        glUseProgram(gfx.shader);
-        glBindVertexArray(gfx.vao);
-        glDrawArrays(GL_POINTS, 0, SIZE * SIZE * 2);
+        if(!full3D || !show3D) {
+            glViewport(0,0,WINDOW_WIDTH,WINDOW_HEIGHT);
+            glClearColor(0,0,0,1);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glDisable(GL_DEPTH_TEST);
+            glUseProgram(gfx.shader);
+            glBindVertexArray(gfx.vao);
+            glPointSize(1.0f);
+            glDrawArrays(GL_POINTS,0,SIZE*SIZE*2);
+
+            if(arcadeEnabled) {
+                mapGlyphs.clear();
+                // Glyphs live exclusively on the 2D map: none are added to
+                // the wave mask (unlike the actual reflecting ghosts).
+                auto addGlyph=[&](float x,float y,float code) {
+                    mapGlyphs.push_back((2*x/SIZE-1)*0.5f-0.5f);
+                    mapGlyphs.push_back(2*y/SIZE-1);
+                    mapGlyphs.push_back(code);
+                };
+                // No GL_POINT squares over ghost/shard masks. Previously
+                // their 8px square overlays stuck out of the curved
+                // rasterized polygons (the reported 'quarter-square coin').
+                // Let the same actual faceted FDTD occupancy define the
+                // silhouettes in this 2D view as well as acoustically.
+                addGlyph(arcade.exitX,arcade.exitY,-6.0f);
+                if(lastDecoySimTime>=0 &&
+                   simTime-lastDecoySimTime<1.2)
+                    addGlyph((float)decoyPulseX,(float)decoyPulseY,-6.0f);
+                glBindVertexArray(gfx.glyphVAO);
+                glBindBuffer(GL_ARRAY_BUFFER,gfx.glyphVBO);
+                glBufferData(GL_ARRAY_BUFFER,
+                    (GLsizeiptr)(mapGlyphs.size()*sizeof(float)),
+                    mapGlyphs.data(),GL_DYNAMIC_DRAW);
+                glPointSize(8.0f);
+                glDrawArrays(GL_POINTS,0,(GLsizei)(mapGlyphs.size()/3));
+                // One tiny contrasting orientation speck INSIDE each
+                // spinning polygon. Unlike the old oversized GL_POINT
+                // squares, it cannot stick out of the 11cm candy octagon
+                // or replace the rotating true FDTD reflector contour.
+                mapGlyphs.clear();
+                for(const auto& en:arcade.enemies) {
+                    if(en.eaten)continue;
+                    addGlyph(en.x+5.0f*cosf(en.visualSpin),
+                             en.y+5.0f*sinf(en.visualSpin),-7.0f);
+                }
+                for(const auto& sh:arcade.shards) {
+                    if(sh.collected)continue;
+                    const float mx=sh.x+2.5f*cosf(sh.spin);
+                    const float my=sh.y+2.5f*sinf(sh.spin);
+                    addGlyph(mx,my,-9.2f); // white glint, lime FDTD candy
+                    // Matching marker in the rotated right-hand 2D panel.
+                    // Keep its position inside the exact same octagon.
+                    const float dx=mx-g_player.pivot_x;
+                    const float dy=my-g_player.pivot_y;
+                    const float a=-g_player.angle-PI/4.0f+PI;
+                    const float rx=dx*cosf(a)-dy*sinf(a);
+                    const float ry=dx*sinf(a)+dy*cosf(a);
+                    const float fpX=0.5f+0.5f*rx*4.0f/(SIZE/2.0f);
+                    if(fpX>=0.0f && fpX<=1.0f) {
+                        mapGlyphs.push_back(fpX);
+                        mapGlyphs.push_back(ry*4.0f/(SIZE/2.0f));
+                        mapGlyphs.push_back(-9.2f);
+                    }
+                }
+                if(!mapGlyphs.empty()) {
+                    glBufferData(GL_ARRAY_BUFFER,
+                        (GLsizeiptr)(mapGlyphs.size()*sizeof(float)),
+                        mapGlyphs.data(),GL_DYNAMIC_DRAW);
+                    glPointSize(3.0f);
+                    glDrawArrays(GL_POINTS,0,(GLsizei)(mapGlyphs.size()/3));
+                }
+                glPointSize(1.0f);
+            }
+        }
+
+        if(has3D && show3D) {
+            orbs.clear();
+            if(arcadeEnabled) {
+                for(const echo::Enemy &en:arcade.enemies) {
+                    if(en.eaten)continue;
+                    const bool alert=en.alert>0.0f;
+                    const float idleR=en.archetype==0?0.67f:
+                                      en.archetype==1?1.0f:0.24f;
+                    const float idleG=en.archetype==0?0.21f:
+                                      en.archetype==1?0.58f:0.68f;
+                    const float idleB=en.archetype==0?0.95f:
+                                      en.archetype==1?0.12f:1.0f;
+                    orbs.push_back(echo::VisualOrb{en.x,en.y,0.105f,1.12f,
+                        arcade.overdrive>0?0.17f:alert?1.0f:idleR,
+                        arcade.overdrive>0?0.90f:alert?0.12f:idleG,
+                        arcade.overdrive>0?1.0f:alert?0.24f:idleB,
+                        arcade.overdrive>0?2.0f:alert?1.6f:0.8f,
+                        6,en.visualSpin});
+                }
+                for(const echo::Shard &shard:arcade.shards) {
+                    if(shard.collected)continue;
+                    orbs.push_back(echo::VisualOrb{shard.x,shard.y,
+                        echo::kCandyRadiusCm*0.01f,0.85f,
+                        0.48f,1.0f,0.12f,1.5f,8,shard.spin});
+                    // A white speck at the TOP of the surface visibly
+                    // orbits with the otherwise eight-fold symmetric
+                    // facets. It has NO acoustic material of its own.
+                    orbs.push_back(echo::VisualOrb{
+                        shard.x+2.8f*cosf(shard.spin),
+                        shard.y+2.8f*sinf(shard.spin),
+                        0.012f,0.85f+0.035f,
+                        1.0f,1.0f,0.93f,2.0f,0});
+                }
+                if(lastDecoySimTime>=0 && simTime-lastDecoySimTime<1.2)
+                    orbs.push_back(echo::VisualOrb{(float)decoyPulseX,
+                        (float)decoyPulseY,0.09f,0.65f,0.24f,0.94f,1.0f,2.0f});
+                orbs.push_back(echo::VisualOrb{arcade.exitX,arcade.exitY,0.17f,1.12f,
+                    arcade.remaining==0?0.22f:0.62f,
+                    arcade.remaining==0?1.0f:0.32f,0.85f,1.7f});
+            }
+            for(const ToneMarker &tm:g_toneMarkers) {
+                if(tm.collected || (arcadeEnabled&&tm.type=='W'))continue;
+                const float r=tm.type=='W'?0.1f:0.06f;
+                orbs.push_back(echo::VisualOrb{tm.x,tm.y,r,0.95f,
+                    tm.type=='W'?0.2f:tm.type=='I'?1.0f:0.9f,
+                    tm.type=='W'?1.0f:tm.type=='I'?0.8f:0.3f,
+                    tm.type=='W'?0.9f:tm.type=='I'?0.1f:1.0f,0.75f});
+            }
+            echo::render3D(view3d,full3D?0:SIZE,0,
+                           full3D?WINDOW_WIDTH:SIZE,WINDOW_HEIGHT,
+                           g_player.pivot_x,g_player.pivot_y,
+                           g_player.angle,orbs);
+        }
         SDL_GL_SwapWindow(gfx.window);
     }
 
@@ -1024,12 +1677,15 @@ int main(int argc, char* argv[])
     CUDA_CHECK(cudaFree(d_p_prev));
     CUDA_CHECK(cudaFree(d_p_next));
     CUDA_CHECK(cudaFree(d_mask));
+    CUDA_CHECK(cudaFree(d_worldEmitters));
     CUDA_CHECK(cudaFree(d_audioL));
     CUDA_CHECK(cudaFree(d_audioR));
     free(h_mask);
-    free(h_audioBuffer);
-    free(beepBuf);
+    free(h_dynamic);
 
+    echo::release3D(view3d);
+    glDeleteBuffers(1, &gfx.glyphVBO);
+    glDeleteVertexArrays(1, &gfx.glyphVAO);
     glDeleteBuffers(1, &gfx.vbo);
     glDeleteVertexArrays(1, &gfx.vao);
     glDeleteProgram(gfx.shader);

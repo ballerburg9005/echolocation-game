@@ -1,0 +1,27 @@
+name: CPU physics, collision and SVG tests
+
+on:
+  push:
+    branches:
+      - main
+      - 'improve/**'
+  pull_request:
+
+concurrency:
+  group: cpu-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run dependency-free numerical tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in tests/test_*.cpp; do
+            executable="/tmp/$(basename "$source" .cpp)"
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic "$source" -o "$executable"
+            "$executable"
+          done

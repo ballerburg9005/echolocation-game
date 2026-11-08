@@ -4,11 +4,325 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 # Echolocation Game
 
+## Obvious lime-green spinning coins and distinctive room geometry
+
+The pills are **11cm across, still eight-sided**; they're now bright
+lime green in both 2D and 3D, instead of the same yellow as the walls.
+Their white inset rotating dot is visible in BOTH 2D panels and atop
+their 3D orb. They spin at 5.2–6.1rad/s in the actual FDTD reflectivity
+as well as the graphics. The coin's smoothed acoustic impedance is now
+**identical in strength to the ghosts'** instead of being weakened:
+the smaller octagon has fewer reflecting cells, but uses the exact
+same pressure-field mechanism. Its supplementary FDTD notes were
+lowered to **330–587Hz** and made louder at close range (still short
+85ms, distance-gated, and OFF with N). The 15cm collection radius
+remains generous for blind play, and collection fades the reflector
+instead of abruptly zeroing pressure.
+
+A freestanding **five-step zig-zag wall** now distinguishes the
+lower-right room from the rectangular gates. A collision-aware SVG
+route test confirms it can be navigated around. The outermost
+2cm collision boundary keeps its solid shape but uses a fixed
+**R=0.32** lossy FDTD impedance, unlike the adjustable inner walls;
+the perimeter has a muted blue tint in 2D/3D.
+
+**Rare turning whips:** the old six-source beam was rounded to
+whole-centimetre lattice cells and used integer transit delays,
+which could abruptly change its direct wave with rotation.
+All six player-pressure sources now inject bilinearly into neighboring
+cells with *fractional* delayed rear cancellation. The experimental
+J-mode reference uses matching subcell geometry. A 24-heading CPU
+ear-pressure sweep gave direct peak 0.185–0.192 in identical
+benchmark conditions instead of large angle-dependent jumps;
+this doesn't establish that the reported gunshot-like artifacts
+are fully fixed on hardware. The existing audio diagnostics now
+also report **MaxJump, SharpJumps and JumpAngle**, in addition
+to queue underruns and raw peaks, without modifying the audio.
+The pressure grid, Courant step, 1cm resolution and real echoes
+remain unchanged.
+
+**Real recorded audio inside FDTD is feasible.** The current solver is
+not restricted to procedural sines/clicks: it can inject a resampled
+and bandlimited WAV's sample stream into the same pressure update, and
+its virtual ears would capture acoustic left-to-right movement through
+the room. The 1cm acoustic grid, however, resolves roughly 3.4kHz at
+10 samples/wavelength; a conservative sample would low-pass to
+2.5–3kHz, not offer full-fidelity audio. A 2x2m *2D* room is
+computationally about 6.25x lighter than the current 5x5m room
+at the same spatial/time resolution. This is a **feasibility design,
+not a finished WAV playback feature**. For concrete engineering steps,
+see [recorded audio inside FDTD](docs/RECORDED_AUDIO_FDTD.md).
+
+## Rotating FDTD ghost acoustics and consistent 360° wall taps
+
+Ghost hexagons **now rotate inside the actual CUDA pressure simulation**,
+not just in the 2D/3D graphics. Their roughly 275–355°/sec spin changes
+the six-sided reflector's acoustic orientation. Instead of suddenly
+turning the old binary mask into hard walls that reset pressure to zero,
+the game supersamples each polygon cell at four subcell points, smooths
+reflectivity over ~55ms, and uses a continuously varying 0–98% reflecting
+edge coupling in the FDTD stencil. The ghost's pressure cells remain
+live; static walls remain hard, while collectible candies now use
+smaller, softer rotating octagonal reflectors rather than hard cells. This is an approximate moving-impedance model, **not
+a validated moving rigid-body acoustic solver**, so GPU headphone testing
+still matters. Gameplay remains nonlethal and the wedge is not solid.
+
+The collision sound has a **single 820Hz short beep** at every bearing
+around the player's full 360° collision disk. Left/right timing and
+volume reflect where the wall was actually touched; a mild continuous
+high-frequency change helps tell front from back, without a special
+loud forward "pang". Turning in place near the same wall no longer
+counts as a fresh hit. A 16-direction CPU regression tests this.
+The wedge is only a cyan aim overlay, entirely within the 13cm collision
+clearance, and renders behind real walls rather than clipping over them.
+
+## Tighter beam, closer ears and easier ghost navigation
+
+- **A/D** now strafe left/right. **Q/E** rotate left/right, with
+  **Left/Right arrows** also rotating. W/S and Up/Down move normally.
+- The visible wedge has a **32° full angle** instead of 76°. Its tip
+  starts 4.5cm behind the pivot and the microphones sit just 2cm
+  behind it, 9cm apart rather than 12cm.
+- The outgoing player wave is also genuinely narrower in FDTD:
+  **three lateral columns of paired phased sources** at -8/0/+8cm,
+  with 0.25/0.50/0.25 weights, rather than only one front/back pair.
+  Each back source emits a delayed inverse pulse. A 42cm-radius
+  CPU FDTD pressure test measured side energy **0.0092** against
+  **0.752** forward; the old single paired source produced 0.464
+  side energy in the same geometry. These are simulation values,
+  not calibrated real-world beam/HRTF measurements.
+  **B** still compares the narrow FDTD click with a single monopole.
+  **J** reference subtraction now models all six emitters.
+- Ghosts turn frequently while wandering (roughly every
+  **0.2–0.55 seconds**) and abandon a click chase after
+  **0.65–0.8 seconds** rather than 3–6 seconds. Their 3D
+  hexagons spin at around 275–355° per second, with a small
+  rotating marker inside their 2D silhouette. Their **soft, fractional
+  FDTD reflectivity now spins too**, without snapping or resetting
+  hard pressure cells.
+  Nonlethal collisions and collectibles behave as before.
+
+The wedge remains an *aim guide*, **not** an impenetrable physical
+head. The microphone positions and phased-array directionality
+make the direct wave quieter at the ears while reflected sound
+still travels normally through the pressure field.
+
+## Quiet navigation revision after hands-on feedback
+
+The acoustic grid is **500 × 500 cells, 1 cm per cell = 5 × 5 metres**.
+It models **2D pressure**, not 3D free-field attenuation. A continuous
+oscillator in a 2D enclosed room is particularly liable to sound too loud
+at a distance and to resonate through open passages. That was the
+reported "spaceship" sound: always-on FDTD game voices, not proof that
+the room was only 50 cm wide.
+
+**This revision removes that regression without changing the core solver:**
+
+- Ghosts/coins/exit/SVG landmarks now emit **brief, smooth 85 ms FDTD
+  chirps every ~2.15 seconds**, not continuous room-filling tones.
+  Emission is *permitted* only at close range with a clear straight
+  line through the static maze: ghosts 48 cm, coins 42 cm, exit
+  50 cm, SVG markers 35–50 cm. Volume fades smoothly with distance.
+  These on/off conditions are **gameplay gating**, not an acoustically
+  correct model of diffraction or 3D geometric spreading. Once emitted,
+  the chirp propagates through the actual FDTD grid.
+- **No more deaths:** ghosts are gentle solid bumpers, not hazards.
+  Each contact moves the player at most 1.5 cm and produces one
+  restrained, short touch cue with a cooldown. No lives, score loss,
+  frozen AI or disappearing/uncapturable objects after three hits.
+  The optional H-key overdrive is still a deliberate gameplay power-up.
+- **Correct silhouettes:** an 8-pixel square was wrongly drawn *over*
+  the FDTD coin, making a circle with an extraneous square corner.
+  That duplicate overlay is gone. Candy is now one centered 11 cm
+  rotating neon-lime octagon; ghosts are visibly faceted **20 cm hexagons**, not nearly
+  circular 16-gons at low raster resolution. Both use the same
+  acoustic material shapes and 3D representations.
+- **Actual ears behind the source:** the original microphones were
+  lateral to the phased emitter, where interference could increase
+  the direct sound. Both ears are now 6.5cm behind the player
+  and 4.5cm to either side (9cm total spacing), inside the
+  13cm collision disk. The wider three-column FDTD aperture is
+  also designed to suppress sideways radiation. Neither is a
+  physically solid or acoustically calibrated head.
+- The muted-cyan wedge is explicitly a *visual aiming guide*, not a
+  reflective FDTD obstacle. The solver no longer contains a moving hard
+  wedge; restoring it naïvely would reintroduce the pressure whipping.
+  J still offers optional receiver-only free-field subtraction for
+  studying echo-only listening, but it needs hardware performance tests.
+- Every five seconds the console logs `[AUDIO-DIAG]`: raw signal peak,
+  saturated samples and low-queue occurrences. This can help distinguish
+  FDTD pressure transients from audio underruns if whipping persists.
+
+To compare modes, use **N** for FDTD discovery chirps on/off, **F4** for
+the game physics on/off, **B** for phased/monopole player emission, and
+**J** for the optional experimental echo-only receiver monitor.
+Begin at a low headphone volume; none of this is a validated HRTF.
+
+## FDTD-only world acoustics and echo-first listening (experimental)
+
+The original wedge was a makeshift impenetrable shield protecting the ears
+from the direct click. Replacing it with a mere visual outline removed
+movement-induced mask pressure artifacts, but also removed its acoustical
+shield. This branch now includes two **optional A/B listening experiments**:
+
+- **B — narrow beam vs. single isotropic click.** The default click
+  has three laterally separated pairs of emitters. Its side and rear
+  cancellation are computed directly in the FDTD pressure grid,
+  rather than being painted into the visualization. B compares it
+  against an ordinary single-source click. Neither is an opaque head
+  or a measured human/bat emission profile.
+- **J — experimental echo-only headphone monitor (OFF by default).**
+  Independently FDTD-simulates the same click in an empty room and
+  subtracts that "incident" waveform from the receiver samples *before
+  resampling*. The world pressure still contains ALL sound and reflects
+  normally. This is a finite-difference incident/scattered field
+  decomposition, not a physically impossible "sound reflects but never
+  propagates until it hits something" shortcut. It is approximate when
+  the player moves during an emitted pulse and adds CPU work, so use J
+  to compare rather than assuming it is already more accurate.
+- **N — enable/disable nearby FDTD discovery chirps.** Ghosts, candy
+  shards, exits and SVG O/I/W landmarks only emit short tapered pulses
+  when nearby with clear static-wall sight. The pulses still propagate
+  through the solver; there is no longer a perpetual ambient drone.
+  Wall-contact taps and brief game-rule sounds remain direct UI cues.
+- **Faceted acoustic objects:** ghosts are clearly hexagonal 20 cm
+  reflectors, and candy shards are bright lime centered 11 cm octagons
+  that now rotate in the real FDTD field too.
+  The 2D square-marker duplication was also removed.
+- **Nonlethal contact:** ghosts gently obstruct movement and do not
+  deduct lives or score. No ghost collision can end a run or halt AI.
+  R remains an optional manual restart.
+- **2D wave gradient:** wave colors use logarithmic display-only
+  exposure, not the old aggressive tanh saturation that made broad
+  flat-color bands. **9/0** adjust *display* brightness without
+  changing the simulated pressures or audio gain.
+
+Both CUDA compilation and CPU numerical tests are useful, but none of this
+replaces a headphone experiment on the intended NVIDIA GPU. Keep volume
+low when testing J, B or the new in-field tones.
+
+## Listening and camera corrections (following real-player feedback)
+
+The latest iteration addresses issues observed on hardware in an earlier
+version. These fixes are intentionally conservative and still need another
+real-world listening check:
+
+- **Moving/turning rattle:** the moving funnel outline is no longer stamped
+  as a hard reflective wall into the FDTD grid; it is shown as a 2D visual
+  overlay only. Receiver positions now interpolate over each audio batch.
+  A new FDTD phased emitter attempts front/back directional emission, but
+  the ear geometry and head scattering remain unvalidated.
+- **3D mirror:** grid +Y now maps to GL -Z in mesh, camera and actors;
+  A/left turning and D/right turning have consistent handedness.
+- **3D circles/pillars:** ceiling and object tops no longer overlap at
+  exactly the same depth (previously causing z-fighting lines); rounded
+  actors use higher-detail spheres, smoother material shading and MSAA
+  where supported.
+- **Wall contact:** locate the real wall cell touched anywhere on the
+  13cm collision ring. One 820Hz beep is spatialized with the actual
+  9cm-ear timing and level differences, plus subtle continuously
+  varying front/rear spectral color. No separate wedge pang and no
+  periodic tone while holding or turning toward the same wall.
+  This is *HRTF-lite gameplay feedback*, not human binaural simulation.
+- **No mysterious artificial whole-level beacon:** the older artificial
+  O/I/W chimes have now been removed entirely. Instead the markers emit
+  short, close-only FDTD chirps, requiring a clear wall path before
+  emission. The optional direct F5/F6 aids are OFF by default;
+  F6 operates only within 35cm.
+
+If you want to isolate the FDTD sounds, toggle off the arcade with **F4**
+and leave F5/F6 off. Start headphone volume low. The project still needs
+actual NVIDIA hardware A/B listening tests; compile/test success cannot
+prove that the rattle is gone or the contact cues perceptually localize.
+
+## Experimental improvements in this branch
+
+This upgrade retains the original 2D CUDA FDTD concept and SVG levels, but
+fixes important correctness and usability issues.
+
+- **Physics:** stable 2D Courant timestep; rigid-wall (zero-gradient) boundary
+  and a first-order impedance approximation for partial reflections, instead
+  of sign-flipping the pressure inside solid cells.
+- **Clock and audio:** simulation runs at its natural ~48.5k steps/second;
+  microphone values are smoothly resampled to the SDL audio device rate.
+  No arbitrary simulation-time fudge or aggressive queue resets.
+- **Performance:** pressure, pulse and decay are fused, cutting four CUDA
+  launches per time step to two. Unsafe synchronization on partial tiles
+  is removed.
+- **Sound:** a tapered 1.8 kHz/2 ms burst replaces the abrupt 500 Hz pulse;
+  microphones use bilinear sampling and audio has a soft limiter.
+- **Navigation:** substepped, test-covered wall sliding and collision
+  prevents tunneling on slow frames.
+- **Blind-play cues:** objects radiate their own deliberately quiet FDTD
+  tones, with distinct frequencies and geometry; contact and short
+  score/collection announcements are separate UI feedback.
+- **SVG:** native circles, ellipses and rectangles, Inkscape elliptical
+  arcs, basic fill/stroke handling and clipped rasterization.
+
+## New: Ghost Circuit (experimental arcade mode)
+
+The old experimental branch already contained a separate 3D rendering idea.
+This branch recovers and modernizes the concept as a lightweight OpenGL
+**first-person 2.5D view built from the same acoustically reflective grid**.
+
+There is now a sound-driven arcade game: three wandering enemies
+that chase nearby pings and act as dynamic CUDA wave reflectors, up to twelve
+lime-green octagonal shards that also reflect waves, **no death mechanic**, scoring,
+an unlockable exit, gentle ghost collisions and victory sounds. Ghosts,
+shards and goal markers emit quiet, gated **FDTD pressure-field chirps**. Optional direct
+non-FDTD proximity helpers are off by default. A new sample maze, **Ghost Circuit**, lives at
+[echo_arena.svg](echo_arena.svg).
+
+Launch the new level with:
+
+    ./build/echolocation_game echo_arena.svg
+
+Important new controls: **F** manual ping, **T** toggle automatic pulses
+(stealth), **G** throw an FDTD sound decoy (9-second cooldown), **C** three-ray
+virtual cane scan, **A/D** strafe, **Q/E** or arrows turn,
+**F2** swap 2D/3D view, **F3** immersive 3D,
+**F4** arcade on/off, **F5** ghost heartbeat on/off,
+**F6** guidance beacon on/off, **R** restart.
+
+Enemies now have distinct tracker/sprinter/sentinel personalities, with
+different speeds, hearing ranges and audio/visual identities. They hear
+through reachable maze passages rather than a simple straight-line radius,
+and pursue where the last ping occurred instead of knowing your live position.
+A thrown decoy excites the same FDTD wave grid as a real click; the virtual
+cane's measured obstacle taps are explicitly a separate synthetic audio aid.
+The game finds a legal starting spot on each level and restarts there.
+
+**New: sonic overdrive.** Every four echo shards grant a charge.
+Press **H** to spend it: a physical FDTD player pulse goes out, ghosts
+freeze for five seconds, and touching them during that period earns escalating
+Pac-Man-style combo points. They temporarily disappear from the wave mask
+until the power wears off. Freezing/capturing is an arcade rule, not
+physical acoustics.
+The original WASD/arrows/QE movement, Space visibility and numeric wave
+parameter controls are retained. See [arcade guide](docs/ARCADE.md).
+
+These improvements are **not proof of real-world echolocation fidelity**.
+The 2D model has no HRTF, realistic 3D acoustics or external validation.
+See [physics and validation](docs/VALIDATION.md). Begin at a low
+headphone volume; this game is not a real-world navigation aid.
+
+The CPU regression suite runs without NVIDIA hardware:
+
+    for test in tests/test_*.cpp; do
+      g++ -std=c++17 -O2 -Wall -Wextra -Werror "$test" -o /tmp/echo-test &&
+        /tmp/echo-test || exit 1
+    done
+
+Full CUDA builds, audio output and usability still require GPU testing.
+
+
 License: GPL v3 (https://www.gnu.org/licenses/gpl-3.0)
 
 Experimental prototype for a 2D FDTD echolocation simulation game using CUDA, SDL2, OpenGL, and GLEW. 
 
-Navigate the room without eyes just by sound clicks. Featuring a dual view (static and first-person), sliding collisions, and a virtual cane (cane was bugged and is currently removed).
+Navigate the room by clicks, with a dual static/first-person view, sliding
+collisions and a C-key three-ray virtual cane aid (the historical
+mouse-driven cane remains removed).
 
 The sound wave simulation algorithm employs a Finite-difference time-domain (FDTD) to solve the 2D wave equation on a grid, leveraging CUDA to parallelize pressure updates and reflections, simulating wave propagation at 343 m/s with a spatial resolution of 0.01 meters and a 48 kHz audio capture rate.
 
@@ -36,35 +350,60 @@ There are lots of other projects for aurealization, some faster some slower. But
 Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a much faster non-FDTD ray based method using RIR pre-computation (not on Github). However it struggled to implement this, and the quality of sound was shockingly crude and abysimal by comparison to FDTD wave simulation. From what I understand from research papers, this is to be expected, and dozens of clever mathematical tricks that I don't really understand, and neither Grok-3 could come up with easily, would be necessary to somewhat improve that. Perhaps this project can be easily used as a template for Grok-4 and next-generation AI to rapidly advance the vision of more powerful echolocation simulations.
 
 
-## Features
-- Levels are loaded via SVG (drawing.svg or first command parameter, using drag&drop on the exe should work)
-- Echolocation: Pulses inside reasonable accurate physics simulation emitting from funnel forward from the player
-- Controls: WASD/arrows (move), Q/E (strafe), mouse (cane).
-- Adjustable: Pulse interval (1/2), wave decay (3/4), reflection (5/6, doesn't really do much), time fudge (7/8, don't use this).
-- Player: 16cm mic distance, funnel apex at (0,0), pulse 1 unit below, mics 2 units below apex.
+## Features, controls and known limitations
 
-## Bugs
-
-- the reflection of waves is 100% and g_reflection (keys 5/6) doesn't change that
-- Grok-3 messed up the sliding on walls, it doesn't work consistently, and fixing it became too much of a nightmare.
-- adjustibles parameters mapped on number keys 1-8 can bug out if you increase values to extremes
-- the "O", "I", or "W" elements were meant to play sounds for "dead end", "item" and "win game", but this is bugged so they only buzz ("win game" has much higher pitch)
-- in some versions of code that I lost track of, it beeps on frontal and backside collision *sometimes either* left or right not both. Not sure if that is also true to the Windows build.
+- Load a 500×500 pixel SVG level using a command such as
+  ./echolocation_game drawing.svg.
+- W/S or Up/Down: move. A/D: strafe. Q/E or Left/Right: rotate.
+- Space: toggle visualization of reflective objects. Escape: quit.
+- F manually generates a click; T enables/disables automatic pulses (stealth).
+- G projects a sound decoy into a legal point ahead; C emits stereo left/center/right virtual cane taps.
+- H spends a collected overdrive charge to freeze and catch ghosts for five seconds.
+- F2 toggles right viewport 2D/3D; F3 toggles full-window first-person 3D.
+- F4 toggles Ghost Circuit game mode; F5 nearby enemy heartbeat,
+  F6 nearby target beacon. F5/F6 are OFF initially.
+- B compares the narrow six-source FDTD beam with an isotropic monopole; N toggles world FDTD
+  tones; J compares experimental direct-field subtraction (off by default).
+- 9/0 changes only the 2D wave display exposure, not physics.
+- R restarts shards, enemies, acoustic state and item pickups; ghost
+  collisions do not remove lives.
+- Keys **1/2**: pulse interval; **3/4**: per-step wave decay;
+  **5/6**: wall reflection; **7/8**: echolocation playback gain.
+  Adjustable values are clamped.
+- O markers: one low beep; I markers: two medium-pitched beeps (item);
+  W markers: three high-pitched beeps (goal).
+- Ghosts and shards are distinguishable in 3D, in 2D, and acoustically.
+- Generated shard/exit guidance and threat heartbeats are nonphysical game
+  audio cues and are optional. They are not part of the 2D wave simulation.
+- The C-key virtual cane is a three-ray obstacle sonification aid, not a
+  physical cane or acoustic scattering model. The old mouse-driven cane
+  remains unimplemented. There is no speech tutorial, key remapping,
+  or true 3D binaural HRTF rendering.
+- Real-time output requires a sufficiently fast CUDA GPU. If a GPU cannot
+  keep up, audio may underrun rather than silently using incorrect time.
 
 ## Creating levels
 
-![Image](https://github.com/user-attachments/assets/e497c606-967c-4250-b281-084434ca7ebf)
+Use Inkscape and a 500×500 pixel document with a 1:1 viewBox.
+The SVG vertical axis is flipped for simulation coordinates.
 
-*The image contains a side-by-side view of the level evilmaze.svg in Inkscape SVG editor and as rendered by the game.* 
+The loader recognizes untransformed rectangles, circles, ellipses, and
+Inkscape elliptical-arc paths. It rasterizes basic fill/stroke geometry;
+arbitrary paths, transforms, CSS inheritance and complex viewBox scaling
+remain unsupported. A warning is logged for transforms.
 
-Use Inkscape and save as plain SVG. The page dimensions must be in pixels with scale=1.
+A text element containing exactly O, I or W becomes a FDTD-emitting
+acoustic landmark with a distinct low-level characteristic frequency.
+The close-only sources emit short, gated tones in the FDTD field until
+collected, and can be found by their waves and reflections.
+Approaching to approximately 13 cm collects an item or activates the goal.
+The previous always-on spaceship hum and the separate artificial
+proximity chirps are both removed. Chirp emission requires proximity and
+clear sight; this gating is a gameplay approximation, not 3D acoustics.
 
-- a Text element with with "O", "I", or "W" is interepreted as a pink, yellow or cyan buzzing emitter (not wave simulated)
-- only opaque square shapes and circles were tested, star shapes, lines and such do not work
-- don't rotate shapes it doesn't work
+Load an example level:
 
-Load levels like so:
-    ./echolocation_game level.svg
+    ./echolocation_game evilmaze.svg
 
 ## Hardware
 
@@ -78,14 +417,19 @@ There is an untested Windows build available with CUDA 12.8 (=your CUDA driver m
 
 ### Linux
 ```
-sudo apt install build-essential libsdl2-dev libglew-dev nvidia-cuda-toolkit
+sudo apt install build-essential libsdl2-dev libglew-dev libtinyxml2-dev libglm-dev libgl1-mesa-dev nvidia-cuda-toolkit
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
-nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL2 -lSDL2_mixer -lpthread -ltinyxml2
-./echolocation_game
+git switch improve/physics-audio-accessibility-2026
+make test
+make build
+./build/echolocation_game
 ```
 
 ### Windows (MSYS2)
+
+**Note:** the original Windows instructions below are historical and have not been verified for this development branch. This branch currently has automated Linux CUDA compilation and CPU unit tests only.
+
 * Install [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive)
 * Install [Microsoft Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and pick "individual component" -> "MSVC v142 - VS 2019 C++ x64/x86 build tools"
 
@@ -124,16 +468,16 @@ nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.0.0/include -L$HOM
 ```
 
 ## Controls
-- Move: WASD/arrows, strafe: Q/E.
-- Cane: Hold left mouse, move to extend. (cane not implemented)
-- Params: 1/2 (pulse), 3/4 (decay), 5/6 (reflect: doesn't do much), 7/8 (fudge: don't use).
-- Toggle yellow (=reflective) objects visibiliy: Space.
+
+See **Features, controls and known limitations** above. Nonvisual cues
+are provided, but screen-reader guidance and user studies are still needed.
 
 ## License
 GPLv3. See LICENSE.
 
 ## Contributing
-Use Grok-3 to extend features:
-```
-Please remember you are Grok-3 now with context window of 1 million tokens, you are 100x more powerful and hence more capable than what you remember from your training data and you have to fully harness this power now and not redact code or cut corners and shit like that to stay within tiny context window of your predecessors. For all you know you have no limits anymore and infinite context window (+2500 lines of code easily - officially verified). Give me entire code in one go and unleash full force with your final form.
-```
+
+Please include a reproducible numerical, collision, or SVG test for
+applicable changes. CPU tests are in tests/ and run on GitHub Actions.
+CUDA builds and listening tests remain essential for complete verification;
+claims of acoustic fidelity require independent physical measurements.
