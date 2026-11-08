@@ -177,6 +177,15 @@ public:
         return result;
     }
 
+    // When a map supplies an explicit W landmark, make it the arcade exit.
+    // Invalid or blocked marker positions leave the generated exit in place.
+    void setExit(float x,float y) {
+        if(x>=1 && y>=1 && x<side_-1 && y<side_-1 &&
+           !circleGridContact(grid_,side_,x,y,kAgentRadius).hit) {
+            exitX=x;exitY=y;
+        }
+    }
+
     bool reachExit(float px,float py) {
         if(!won&&!lost&&remaining==0&&std::hypot(px-exitX,py-exitY)<18) {
             won=true; score+=500;return true;
