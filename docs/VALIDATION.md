@@ -14,11 +14,17 @@ a validated simulator of human echolocation or of 3D binaural hearing.
   SDL-device-rate) output timeline with persistent resampler phase.
 - The default emitted pulse is a 1.8 kHz, 2 ms Hann-tapered burst rather than
   a discontinuous 500 Hz quarter-cycle.
-- A rigid wall uses the zero-normal-gradient pressure boundary condition
-  \(p_{ghost}=p_{fluid}\). For pressure reflection \(R<1\), a first-order
-  impedance-inspired boundary term uses
-  \(p_{ghost}=p-(1-R)/(1+R)\,(p-p_{prev})/\mathrm{CFL}\).
-  This is a local approximation; R is **not** calibrated to materials.
+- Rigid walls use the zero-normal-gradient pressure boundary condition
+  \(p_{ghost}=p_{fluid}\). For pressure reflection \(R<1\), a
+  **centered-time, semi-implicit** local impedance approximation damps
+  normal velocity at each neighboring wall. With \(n_w\) adjacent solid
+  cells, \(q=n_w\,\mathrm{CFL}(1-R)/(2(1+R))\), and a rigid-wall
+  Laplacian, the update is
+  \(p^{n+1}=[2p^n-(1-q)p^{n-1}+\mathrm{CFL}^2\nabla_h^2p^n]/(1+q)\).
+  This is a locally reacting approximation, not a measured wall model.
+  An earlier backward-time ghost formula was discarded because it became
+  unstable near \(R=0\). The full interval \(R=0..1\) is covered by a
+  600-step CPU regression test.
 - User-selectable per-step decay is artificial amplitude damping, not a
   physical frequency-dependent attenuation law. Walls are still represented
   by square grid cells, so corners are stair-stepped.
@@ -44,7 +50,7 @@ a validated simulator of human echolocation or of 3D binaural hearing.
 ## What is tested
 
 The CPU-only tests check the Courant condition, unchanged uniform pressure,
-hard/partially absorbing interface behavior, interpolated receiver placement,
+long-run stability for reflection R=0..1, interpolated receiver placement,
 tapered pulse endpoints, and 48-kHz resampling without drift in a 1-second
 synthetic 1-kHz tone. Tests can run without a CUDA card:
 
