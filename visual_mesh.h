@@ -25,6 +25,16 @@ inline void quad(std::vector<VisualVertex>& mesh,
     VisualVertex e{x3,y3,z3,nx,ny,nz,r,g,b};
     triangle(mesh,a,c,d);triangle(mesh,a,d,e);
 }
+// OpenGL uses a right-handed XYZ camera, while grid Y increases towards
+// mathematical left. Put grid-Y on negative Z; positive player rotation
+// now turns LEFT in both the 2D diagnostic and first-person 3D camera.
+inline float visualZFromGridY(float gridY,float cellMetres=0.01f) {
+    return -gridY*cellMetres;
+}
+inline float visualForwardZ(float heading) {
+    return -std::sin(heading);
+}
+
 inline std::vector<VisualVertex> extrudeMask(const float* mask,int size,
                                              float cellMetres=0.01f,
                                              float heightMetres=2.5f) {
@@ -67,6 +77,12 @@ inline std::vector<VisualVertex> extrudeMask(const float* mask,int size,
                 quad(out,a,0,d,b,0,d,b,H,d,a,H,d,
                      0,0,1,0.29f,0.56f,0.68f);
         }
+    }
+    // Mirror the horizontal grid axis into a right-handed GL world.
+    // Position, normals, camera and moving orbs must transform together.
+    for (VisualVertex &v:out) {
+        v.z=-v.z;
+        v.nz=-v.nz;
     }
     return out;
 }
