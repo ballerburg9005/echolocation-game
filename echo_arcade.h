@@ -91,11 +91,13 @@ inline ThreatCue threatCue(float px,float py,float angle,
                            float ex,float ey,bool alerted,
                            unsigned archetype=0) {
     const float distance=std::hypot(ex-px,ey-py);
-    if(distance>=105.0f)return {};
-    const float closeness=1.0f-std::max(0.0f,distance)/105.0f;
+    // Optional UI heartbeat is deliberately local. Gameplay itself must
+    // still allow listening to FDTD echoes from much farther away.
+    if(distance>=55.0f)return {};
+    const float closeness=1.0f-std::max(0.0f,distance)/55.0f;
     const float bearing=std::atan2(ey-py,ex-px)-(angle-0.7853981633974483f);
     const float pan=std::sin(bearing);
-    const float amplitude=0.035f+closeness*0.12f;
+    const float amplitude=0.12f*closeness*closeness;
     ThreatCue t;
     t.left=amplitude*std::sqrt(0.5f*(1.0f+pan));
     t.right=amplitude*std::sqrt(0.5f*(1.0f-pan));
