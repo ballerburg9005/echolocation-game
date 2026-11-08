@@ -1,0 +1,18 @@
+name: CPU acoustics tests
+
+on:
+  push:
+    branches:
+      - main
+      - 'improve/**'
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile independent numerical tests
+        run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic tests/test_acoustics.cpp -o /tmp/echo-acoustics-tests
+      - name: Run numerical tests
+        run: /tmp/echo-acoustics-tests
