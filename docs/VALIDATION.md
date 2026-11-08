@@ -81,9 +81,12 @@ shards are stamped into the *dynamic* wave mask as special reflective cells.
 Enemy reflection (0.82) and shard reflection (0.62) are approximate local
 material boundary coefficients. Neither is a calibrated measurement.
 
-Enemy sound attraction, stereo threat heartbeat, item/exit guidance beacons,
-pickups and win jingles are game logic/audio cues. They are **not** modeled
-as pressure-field sources or 3D binaural recordings. The manual-click F and
+Enemy sound-attraction decisions, optional stereo threat heartbeat/target
+guidance and brief pickup/win feedback are game logic and UI cues, not
+modeled pressure-field sources or 3D binaural recordings. However the
+ghosts, shards, exit and SVG O/I/W markers now ALSO emit distinct soft
+oscillating pressure sources **inside the actual FDTD solver**, so their
+environmental sound does follow simulated 2D scattering and propagation. The manual-click F and
 automatic-click T controls use the same physical timestep and are covered
 by pulse scheduler tests. A dedicated 3D mesh test checks that each wall
 surface originates from the actual mask and that solid adjacencies do not
@@ -138,3 +141,60 @@ short-range and occluded discovery, 3D handedness and ceiling separation.
 transient suppression or an audible difference.** Compare with previous
 recordings and listen while moving and turning on a physical GPU before
 accepting these changes.
+
+
+## Forward FDTD sound, "echo only" and persistent arcade reflectors
+
+The previous mouth wedge was a moving acoustic hard-wall baffle surrounding
+the click source; it was intended to shelter the microphones but introduced
+binary boundary jumps during locomotion. It is now visual only. The new
+default click uses a pair of FDTD sources about 6cm apart. The rear source
+emits the negative tapered pulse after the sound-travel delay between
+sources, making their far-field waves approximately cancel to the rear.
+This is a phased finite-difference source, NOT an impenetrable head shield,
+a pressure ray, or a calibrated bat-like beam. The two ears remain in
+unshielded free-field cells.
+
+A dependency-free free-field CPU FDTD test using the same Courant stencil
+measured normalized rear receiver energy 0.00433 with the phased pair
+versus 0.2161 with a single source, a reduction of approximately 98%.
+Forward energy was approximately 0.9405 in the paired case. These values
+apply only to that particular geometry, timeline and numerical setup;
+especially close ears and room reverberation require independent listening.
+
+The optional **J** mode implements linear incident/scattered pressure
+decomposition at the *receivers*. For each player pulse, it computes the
+homogeneous free-field wave on a separate small CPU grid with the same
+source shape and samples it at the two virtual ears. These samples are
+subtracted from the main solver microphone samples before audio-rate
+resampling. The main FDTD grid still propagates the entire direct wave,
+so obstacles reflect normally. No physically impossible "ignore pressure
+before reflection" algorithm is used. The reference only lasts around
+3.3ms and can mismatch during position changes; longer free-field tails,
+moving obstacles and GPU/CPU precision differences may leave direct
+signal artifacts. Computing the reference on CPU at a pulse start may
+delay frames, hence J is deliberately OFF by default.
+
+Game acoustic models now use 16-gon ghost masks and eight-sided shard
+masks, with corresponding 3D faceted presentation. They remain present
+after loss/win instead of abruptly disappearing. Ghost hits recoil the
+player and do not teleport the ghost wave-mask objects to their spawns.
+Moving binary reflectors CAN STILL introduce pressure discontinuities
+as their boundaries cross grid cells. Numerical moving-medium treatment,
+subcell geometry/impedance interpolation and real hardware artifact
+tests remain future work.
+
+Quiet room-object tones are added in the same pressure update as
+the clicks. A single sparse emission map encodes ghost, individual
+shard, exit and SVG O/I/W source identities and fractional source
+weights. World tones are not postprocessed stereo panning; they can
+scatter and reflect within the physical 2D grid. The amplitude is a
+deliberately small, uncalibrated game design choice; resonances and
+relative loudness must be tested on headphones. Toggle **N** to isolate
+the pulse/scattering sound. Direct UI feedback and wall-contact taps
+remain synthetic (the latter intentionally so).
+
+The 2D visualization uses bounded logarithmic exposure between
+-0.45 and +0.45 so pressure values cannot overlap negative-coded
+map object markers. Keys 9/0 adjust visualization only, not the
+physical pressure state. Tests verify numeric bounds and monotonicity.
