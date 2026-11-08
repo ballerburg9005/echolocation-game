@@ -159,8 +159,16 @@ ECHO_SOURCE_HD inline float toneFrequency(int id) {
     if(id==kGhostTracker)return 660.0f;
     if(id==kGhostSprinter)return 840.0f;
     if(id==kGhostSentinel)return 530.0f;
-    if(id>=kShardFirst && id<=kShardLast)
-        return 1020.0f+(id-kShardFirst)*14.0f;
+    if(id>=kShardFirst && id<=kShardLast) {
+        // Gentle upper-register pentatonic bell notes. Individual coins
+        // rotate in FDTD too, so this cue supplements their high-frequency
+        // scattering rather than replacing it with a stereo UI sound.
+        const int note=(id-kShardFirst)%5;
+        return note==0?1760.00f:
+               note==1?1975.53f:
+               note==2?2217.46f:
+               note==3?2637.02f:2960.00f;
+    }
     if(id==kArcadeExit)return 1240.0f;
     if(id==kSvgGoal)return 1180.0f;
     if(id==kSvgItem)return 990.0f;
