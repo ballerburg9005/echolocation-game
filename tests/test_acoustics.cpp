@@ -27,6 +27,32 @@ int main() {
     assert(near(echo::impedanceWaveStep(4, 4, 4, 4, 4, 4,
                   echo::kCourantSquared, 0.25f), 4));
 
+    // Different *material* reflection at the outer perimeter, without
+    // changing the grid, wave speed, interior wall or hard collision.
+    const float innerDamp=echo::mixedWallDamping(
+        1,0,0,0,0.9f,echo::kCourant);
+    const float outsideDamp=echo::mixedWallDamping(
+        echo::kOuterBoundaryMaterial,0,0,0,0.9f,echo::kCourant);
+    assert(outsideDamp>innerDamp*4.0f);
+    assert(near(echo::mixedWallDamping(
+        1,1,0,0,0.9f,echo::kCourant),2.0f*innerDamp));
+    assert(near(echo::mixedWallDamping(
+        echo::kOuterBoundaryMaterial,1,0,0,0.9f,echo::kCourant),
+        outsideDamp+innerDamp));
+    assert(near(echo::mixedWallDamping(
+        0,0,0,0,0.9f,echo::kCourant),0.0f));
+    std::vector<float> perimeter(40*40,0.0f);
+    echo::stampOuterBoundary(perimeter.data(),40);
+    assert(perimeter[0]==echo::kOuterBoundaryMaterial);
+    assert(perimeter[39*40+39]==echo::kOuterBoundaryMaterial);
+    assert(perimeter[20*40+20]==0.0f);
+    assert(perimeter[20*40+1]==echo::kOuterBoundaryMaterial);
+    assert(perimeter[20*40+2]==0.0f);
+    // Fixed pressure throughout a uniform room stays fixed with this
+    // centered-time loss: a soft boundary must not inject a loud impulse.
+    assert(near(echo::impedanceWaveStep(1.0f,1.0f,1.0f,1.0f,
+        1.0f,1.0f,echo::kCourantSquared,outsideDamp),1.0f));
+
     float field[4] = {0, 1, 2, 3};
     assert(near(echo::bilinearSample(field, 2, 0.5f, 0.5f), 1.5f));
     assert(near(echo::bilinearSample(field, 2, -1.0f, 0.0f), 0.0f));
