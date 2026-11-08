@@ -617,19 +617,26 @@ static void initGraphics(GraphicsContext &gfx)
 // They indicate game rules; they should not be interpreted as 3D acoustics.
 static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
 {
-    const float duration=kind==4?0.24f:kind==2?0.66f:kind==3?0.60f:kind==1?0.34f:0.20f;
+    const float duration=kind==5?0.52f:kind==6?0.24f:kind==7?0.32f:
+                         kind==4?0.24f:kind==2?0.66f:
+                         kind==3?0.60f:kind==1?0.34f:0.20f;
     const int count=(int)(duration*sampleRate);
     std::vector<float> samples(count*2,0.0f);
     for(int i=0;i<count;++i) {
         const float t=(float)i/sampleRate;
-        const int note=kind==2?(int)(t/0.22f):
+        const int note=kind==7?(int)(t/0.16f):
+                       kind==2?(int)(t/0.22f):
                        kind==3?(int)(t/0.20f):
                        kind==1?(int)(t/0.17f):0;
-        const float frequency=kind==4?(1040.0f+800.0f*t/duration):
+        const float frequency=kind==5?(460.0f+1080.0f*t/duration):
+                              kind==6?(1130.0f-540.0f*t/duration):
+                              kind==7?(930.0f+240.0f*(float)note):
+                              kind==4?(1040.0f+800.0f*t/duration):
                               kind==2?(note==0?620.0f:note==1?830.0f:1240.0f):
                               kind==3?(note==0?490.0f:note==1?350.0f:210.0f):
                               kind==1?(note==0?350.0f:230.0f):1050.0f;
-        const float noteLength=kind==2?0.22f:kind==3?0.20f:kind==1?0.17f:duration;
+        const float noteLength=kind==7?0.16f:kind==2?0.22f:
+                               kind==3?0.20f:kind==1?0.17f:duration;
         const float phase=fmodf(t,noteLength)/noteLength;
         const float envelope=sinf(PI*phase);
         const float v=0.18f*envelope*envelope*sinf(2.0f*PI*frequency*t);
@@ -819,7 +826,8 @@ int main(int argc, char* argv[])
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
     std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
     std::puts("[CONTROLS] F click | T auto-pings/stealth | G throw wall-blocked decoy (9s cooldown)");
-    std::puts("[CONTROLS] C 3-ray virtual cane obstacle scan | 1/2 pulse interval");
+    std::puts("[CONTROLS] C obstacle scan | H spend charge for 5s ghost overdrive");
+    std::puts("[CONTROLS] 1/2 pulse interval");
     std::puts("[CONTROLS] F5 enemy heartbeat | F6 target beacon | 3/4 decay | 5/6 reflections | 7/8 volume");
 
     while (!quit) {
@@ -876,6 +884,15 @@ int main(int argc, char* argv[])
                         if(!e.key.repeat) {
                             manualPulseAt=simStep2;
                             if(arcadeEnabled)arcade.hearClick(g_pulse_x,g_pulse_y);
+                        }
+                        break;
+                    case SDLK_h:
+                        if(!e.key.repeat && arcadeEnabled &&
+                           arcade.activateOverdrive()) {
+                            // Unlike the extra power-up game rules, this
+                            // activation click excites the actual wave field.
+                            manualPulseAt=simStep2;
+                            playArcadeFeedback(beepDev,g_sampleRate,5);
                         }
                         break;
                     case SDLK_c:
@@ -1009,15 +1026,18 @@ int main(int argc, char* argv[])
         double nowT = now / (double)perfFreq;
         if(arcadeEnabled) {
             if(arcadeEvent.pickups>0)playArcadeFeedback(beepDev,g_sampleRate,0);
+            if(arcadeEvent.chargesGained>0)playArcadeFeedback(beepDev,g_sampleRate,7);
+            if(arcadeEvent.ghostsCaught>0)playArcadeFeedback(beepDev,g_sampleRate,6);
             if(arcadeEvent.hit)playArcadeFeedback(beepDev,g_sampleRate,
                                                    arcadeEvent.gameOver?3:1);
             if(arcadeEvent.cleared)playArcadeFeedback(beepDev,g_sampleRate,2);
             if(nowT-lastArcadeMessage>0.35) {
                 char title[256];
                 std::snprintf(title,sizeof(title),
-                    "ECHO ARCADE | %s | Score %d | Lives %d | Shards %d | F2 view F3 immersive R restart",
-                    arcade.won?"LEVEL CLEAR":arcade.lost?"GAME OVER":"HUNT THE ECHO",
-                    arcade.score,arcade.lives,arcade.remaining);
+                    "ECHO ARCADE | %s | Score %d | Lives %d | Shards %d | Charges %d | H overdrive G decoy C cane",
+                    arcade.won?"LEVEL CLEAR":arcade.lost?"GAME OVER":
+                    arcade.overdrive>0?"GHOSTS FROZEN":"HUNT THE ECHO",
+                    arcade.score,arcade.lives,arcade.remaining,arcade.charges);
                 SDL_SetWindowTitle(gfx.window,title);
                 lastArcadeMessage=nowT;
             }
@@ -1025,7 +1045,7 @@ int main(int argc, char* argv[])
         // Extra nonphysical audio HUD: nearest approaching ghost produces
         // a low stereo heartbeat that speeds up with proximity. F5 turns it
         // off if the player wants to train with only wave reflections.
-        if(arcadeEnabled&&dangerAudio&&!arcade.won&&!arcade.lost) {
+        if(arcadeEnabled&&dangerAudio&&!arcade.won&&!arcade.lost&&arcade.overdrive<=0.0f) {
             echo::ThreatCue nearest;
             float bestDistance=1.0e9f;
             for(const echo::Enemy &en:arcade.enemies) {
@@ -1329,7 +1349,8 @@ int main(int argc, char* argv[])
                     mapGlyphs.push_back(code);
                 };
                 for(const echo::Enemy &en:arcade.enemies)
-                    if(!arcade.won&&!arcade.lost)addGlyph(en.x,en.y,-8.0f);
+                    if(!arcade.won&&!arcade.lost&&!en.eaten)
+                        addGlyph(en.x,en.y,arcade.overdrive>0?-6.0f:-8.0f);
                 for(const echo::Shard &shard:arcade.shards)
                     if(!shard.collected)addGlyph(shard.x,shard.y,-7.0f);
                 addGlyph(arcade.exitX,arcade.exitY,-6.0f);
@@ -1352,6 +1373,7 @@ int main(int argc, char* argv[])
             if(arcadeEnabled) {
                 for(const echo::Enemy &en:arcade.enemies) {
                     if(arcade.lost||arcade.won)break;
+                    if(en.eaten)continue;
                     const bool alert=en.alert>0.0f;
                     const float idleR=en.archetype==0?0.67f:
                                       en.archetype==1?1.0f:0.24f;
@@ -1360,8 +1382,10 @@ int main(int argc, char* argv[])
                     const float idleB=en.archetype==0?0.95f:
                                       en.archetype==1?0.12f:1.0f;
                     orbs.push_back(echo::VisualOrb{en.x,en.y,0.105f,1.12f,
-                        alert?1.0f:idleR,alert?0.12f:idleG,
-                        alert?0.24f:idleB,alert?1.6f:0.8f});
+                        arcade.overdrive>0?0.17f:alert?1.0f:idleR,
+                        arcade.overdrive>0?0.90f:alert?0.12f:idleG,
+                        arcade.overdrive>0?1.0f:alert?0.24f:idleB,
+                        arcade.overdrive>0?2.0f:alert?1.6f:0.8f});
                 }
                 for(const echo::Shard &shard:arcade.shards) {
                     if(shard.collected)continue;
