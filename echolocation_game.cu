@@ -847,6 +847,8 @@ int main(int argc, char* argv[])
     bool gameWon = false;
     int collectedItems = 0;
     double lastDebugTime = 0.0;
+    float intervalRawAudioPeak=0.0f;
+    unsigned long long intervalLimiterSamples=0,intervalUnderruns=0;
     unsigned long long simStep2=0;
     uint64_t manualPulseAt=UINT64_MAX;
     uint64_t decoyPulseAt=UINT64_MAX;
@@ -1299,6 +1301,8 @@ int main(int argc, char* argv[])
         // factor, determines how many real physical FDTD steps are needed.
         const int queuedFrames = (int)(SDL_GetQueuedAudioSize(simDev) /
                                        (2 * sizeof(float)));
+        if(simStep2>1000 && queuedFrames<g_sampleRate/500)
+            ++intervalUnderruns;
         const int targetFrames = (int)(0.060 * g_sampleRate);
         const int missingFrames = std::max(0, targetFrames - queuedFrames);
         const int steps = std::min(1024, std::min(AUDIO_BATCH,
@@ -1400,7 +1404,14 @@ int main(int argc, char* argv[])
             // A soft limiter prevents a numerical transient from delivering
             // arbitrary full-scale peaks to headphones.
             for (float &sample : h_audioOut) {
-                sample = isfinite(sample) ? 0.8f * tanhf(sample) : 0.0f;
+                if(isfinite(sample)) {
+                    intervalRawAudioPeak=fmaxf(intervalRawAudioPeak,fabsf(sample));
+                    if(fabsf(sample)>0.95f)++intervalLimiterSamples;
+                    sample=0.8f*tanhf(sample);
+                } else {
+                    ++intervalLimiterSamples;
+                    sample=0.0f;
+                }
             }
             if (!h_audioOut.empty() &&
                 SDL_QueueAudio(simDev, h_audioOut.data(),
@@ -1412,9 +1423,14 @@ int main(int argc, char* argv[])
         if (simTime - lastDebugTime >= 5.0) {
             float queuedSeconds = SDL_GetQueuedAudioSize(simDev) /
                                   (2.0f * sizeof(float) * g_sampleRate);
-            printf("[DEBUG] SimTime=%.2f Steps=%d AudioQueue=%.3fs\n",
-                   simTime, steps, queuedSeconds);
-            lastDebugTime = simTime;
+            printf("[AUDIO-DIAG] SimTime=%.2f Steps=%d Queue=%.3fs RawPeak=%.4f HighSamples=%llu Underflows=%llu B=%d N=%d J=%d\n",
+                   simTime,steps,queuedSeconds,intervalRawAudioPeak,
+                   intervalLimiterSamples,intervalUnderruns,
+                   (int)phasedClick,(int)worldTones,(int)echoOnlyMonitor);
+            lastDebugTime=simTime;
+            intervalRawAudioPeak=0.0f;
+            intervalLimiterSamples=0;
+            intervalUnderruns=0;
         }
 
         float* vbo_data; size_t vbo_size;
