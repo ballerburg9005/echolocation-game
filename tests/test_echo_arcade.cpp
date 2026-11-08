@@ -90,7 +90,13 @@ int main(){
     for(const auto &enemy:soundTest.enemies)assert(enemy.alert==0.0f);
     // Overdrive requires four collected shards. A stunned ghost is harmless
     // and can be captured for bonus points; after 5 seconds it respawns.
-    echo::EchoArcade powered(mask.data(),N,23,25,777);
+    const int P=240;
+    std::vector<float> powerMap(P*P,0.0f);
+    for(int edge=0;edge<P;++edge) {
+        powerMap[edge]=powerMap[(P-1)*P+edge]=1;
+        powerMap[edge*P]=powerMap[edge*P+P-1]=1;
+    }
+    echo::EchoArcade powered(powerMap.data(),P,23,25,777);
     assert(powered.shards.size()>=4);
     const auto firstPowerShard=powered.shards[0];
     assert(!powered.activateOverdrive());
