@@ -13,6 +13,14 @@ int main(){
     }
     // Wall with passable opening in the middle, for BFS pathfinding.
     for(int y=1;y<N-1;++y)if(y<49||y>71)mask[y*N+N/2]=1;
+    // Facing east at +45° input angle: an enemy north must sound left.
+    auto left=echo::threatCue(50,50,0.7853981634f,50,90,true);
+    auto right=echo::threatCue(50,50,0.7853981634f,50,10,true);
+    assert(left.audible&&right.audible);
+    assert(left.left>left.right&&right.right>right.left);
+    assert(echo::threatCue(0,0,0,200,200,false).audible==false);
+    auto close=echo::threatCue(50,50,0.7853981634f,50,60,false);
+    assert(close.interval<left.interval);
     echo::EchoArcade game(mask.data(),N,23,25,128);
     assert(!game.enemies.empty());
     assert(!game.shards.empty());
