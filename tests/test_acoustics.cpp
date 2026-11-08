@@ -43,6 +43,17 @@ int main() {
     }
     assert(peak > 0.6f && peak <= 1.0f);
 
+    // Manual and automatic pulses use identical physical steps with no
+    // simulator clock distortion; manual takes precedence when simultaneous.
+    assert(echo::pulseIndex(999,500,100,true,UINT64_MAX)==-1);
+    assert(echo::pulseIndex(1000,500,100,true,UINT64_MAX)==0);
+    assert(echo::pulseIndex(1100,500,100,true,UINT64_MAX)==-1);
+    assert(echo::pulseIndex(1000,500,100,false,UINT64_MAX)==-1);
+    assert(echo::pulseIndex(1000,500,100,false,1000)==0);
+    assert(echo::pulseIndex(1008,500,100,false,1000)==8);
+    assert(echo::pulseIndex(1100,500,100,false,1000)==-1);
+    assert(echo::pulseIndex(1001,500,100,true,1000)==1);
+
     // One second of 48.5 kHz FDTD must become 48 kHz stereo without drifting.
     echo::StereoLinearResampler resampler(echo::kStepSeconds, 48000);
     std::vector<float> rendered;
