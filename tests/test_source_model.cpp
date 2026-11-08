@@ -83,5 +83,19 @@ int main(){
     assert(echo::fdtdWorldTone(0,100,echo::kStepSeconds)==0);
     assert(std::isfinite(echo::fdtdWorldTone(
         echo::kGhostTracker+0.5f,100,echo::kStepSeconds)));
+    // Atmospheric spaceship drones were caused by persistent unmodulated
+    // in-field oscillators. Only short, tapered pings may radiate now.
+    int audible=0,silent=0;
+    for(uint64_t step=0;step<180000ULL;step+=113ULL) {
+        const float sample=echo::fdtdWorldTone(
+            echo::kGhostTracker+0.72f,step,echo::kStepSeconds);
+        if(std::fabs(sample)>0.00001f)++audible;
+        else ++silent;
+    }
+    assert(audible>5);
+    assert(silent>audible*15);
+    // Nothing emitted at zero signal strength.
+    assert(!echo::placeWorldEmitter(emap,materials.data(),80,
+            40,40,echo::kGhostTracker,8.0f,0.0f));
     std::puts("phased FDTD source, n-gon reflectors and in-field material tones passed");
 }
