@@ -21,13 +21,16 @@ The maze has three wandering ghosts and up to twelve echo shards.
 Ghost contact is nonlethal; there is no lives-based game-over state.
 The room measures 5×5 metres (500×500 cells at 1 cm per cell).
 
-- Find all shards. They are now **4cm-radius eight-sided octagons**,
-  down from 7cm radius, and spin 10.5–12.4 radians/s in the
-  **actual FDTD reflector geometry** as well as the 3D view. The
-  same sub-cell smoothing used for ghost rattles gives a softer
-  and lighter candy reflection. Brief 85ms FDTD notes use friendly
-  1.76–2.96kHz pentatonic pitches when within 42cm and unobstructed.
-  The coin pickup distance stays an easy 15cm for blind play.
+- Find all shards. They are **5.5cm-radius eight-sided octagons**,
+  still smaller than the original 7cm radius but easier to perceive
+  than the previous 4cm experiment. They're vivid lime green in
+  BOTH 2D views and 3D, with a small inset white marker visibly
+  orbiting as they spin at 5.2–6.1rad/s. They rotate in the
+  **actual FDTD impedance field** too, with exactly the
+  ghosts' reflection strength and 55ms sub-cell smoothing.
+  Their own 85ms FDTD notes now use more audible **330–587Hz**
+  pentatonic pitches when within 42cm and unobstructed.
+  The generous 15cm pickup radius is unchanged for blind play.
   Optional direct guidance is off by default.
 - Ghosts are **nonlethal solid bumpers**, not hazards. Their 10cm-radius,
   six-sided reflective bodies change the wave mask and move through
@@ -106,10 +109,9 @@ This is NOT an impenetrable head or a calibrated bat beam.
 
 The tracker/sprinter/sentinel and candy have different *actual pressure
 field emitters*, placed in nearby fluid cells just outside their
-rotating reflective polygon outlines. The candy audio is intentionally
-higher and softer than the ghosts', with a gentle upper-register
-pentatonic note as well as the smaller octagon's motion-induced
-scattering. Generated exits and SVG O/I/W markers also
+rotating reflective polygon outlines. The candy sound uses the same rotating-scatterer reflection strength
+as ghosts but a smaller eight-sided geometry and a distinct, lower
+330–587Hz pentatonic source note. Generated exits and SVG O/I/W markers also
 have distinct frequencies. Emission is a short 85ms Hann-tapered chirp
 rather than a continuously driven spaceship-like oscillator, spaced
 approximately 2.15s apart. The CPU enables a source only while the
@@ -234,11 +236,12 @@ application; it cannot exercise real GPU audio playback.
 
 - Real-time throughput and actual audio-device latency need profiling on
   representative NVIDIA hardware.
-- Ghosts and now the smaller eight-sided candies use rotating
+- Ghosts and the smaller eight-sided candies use rotating
   **fractional impedance** instead of abrupt moving hard solids.
   Their 2x2 sub-cell coverage is smoothed over ~55ms, avoiding
-  abrupt pressure resets on rotation and collection. Candy has
-  deliberately lower effective reflection strength than a ghost.
+  abrupt pressure resets on rotation and collection. Candy now has
+  the SAME effective reflection strength as a ghost; the smaller
+  geometry and lower emitted notes give it a different signature.
   This is not yet true rigid-body scattering or a conservative
   moving-boundary solver. The old moving wedge remains absent.
 - The optional J incident-field reference uses CPU time per click. Under
@@ -268,3 +271,37 @@ the current 5x5m planar grid. No ceiling, floor, real head scattering
 or individualized HRTFs are modeled; power draw alone does not
 validate performance on weaker GPUs. This is not implemented yet.
 See [WAV-in-FDTD design](RECORDED_AUDIO_FDTD.md).
+
+
+## Asymmetric room and outer-surface acoustics
+
+The lower-right section of `echo_arena.svg` now contains a stepped
+five-part zig-zag reflecting wall. This uses only supported SVG rectangles
+and is a real 2D FDTD obstacle. A 5cm-spaced walkable-path regression uses
+the actual 13cm-radius collider and confirms a route between the start
+and the last room; a player never needs to squeeze through the zig-zag.
+
+The outer **2cm ring** remains solid for movement and field occupancy,
+but its wave interface uses a fixed lower pressure-reflection coefficient
+`R=0.32` (broadband, impedance-loss approximation; not a measured rubber
+frequency response). Interior SVG walls remain set by keys 5/6.
+The outer wall is drawn muted blue in 2D and 3D, interior walls
+remain their old color. This does not reduce the grid size, temporal
+resolution, or interior reflection accuracy.
+
+## Turning crackle diagnosis
+
+All six player click sources now use continuously placed sub-cell
+pressure injection with normalized bilinear weights and fractional
+front/rear propagation delays. The earlier rounded integer emitters
+changed placement/discrete delay abruptly as the player rotated.
+The J experimental direct-reference model is matched to the new
+in-field emitter geometry. This is NOT a blanket audio filter,
+reduced resolution, or echo deletion. A free-field CPU sweep over
+24 headings showed near-ear click peaks of ~0.185–0.192.
+`[AUDIO-DIAG]` now reports raw **MaxJump, SharpJumps and JumpAngle**,
+in addition to sample peaks, clipping counts and SDL queue underflows.
+If loud whip noises continue, please compare T (auto-clicks off),
+B (monopole versus beam) and N (object emitters off) and
+share those diagnostic lines; audio underruns or geometry motion can
+still cause other artifacts.
