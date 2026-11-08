@@ -20,7 +20,7 @@ struct VisualOrb {
     float r=1,g=1,b=1;
     float glow=0.7f;
     int sides=0; // 0 smooth, 8-sided candy, 6-sided ghost
-    float spin=0.0f; // visible yaw, not a new moving FDTD wall mask
+    float spin=0.0f; // shared with rotating FDTD ghost/candy geometry
 };
 struct View3D {
     GLuint program=0;
@@ -46,8 +46,8 @@ out vec3 vWorld;
 out vec3 vNormal;
 out vec3 vColor;
 void main() {
-    // Rotate faceted ghosts visually about vertical, without snapping
-    // solid cells in the acoustical wave solver every rendered frame.
+    // Rotate the same faceted actors as the fractional FDTD acoustic
+    // reflectors, without introducing a separate hard moving wall.
     float c=cos(uSpin),s=sin(uSpin);
     vec3 local=vec3(c*aPos.x+s*aPos.z,aPos.y,
                     -s*aPos.x+c*aPos.z);
