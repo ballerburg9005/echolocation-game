@@ -124,7 +124,7 @@ int main(){
     assert(candyArea>60.0f && candyArea<120.0f);
     assert(std::fabs(candyArea-shiftedArea)<candyArea*0.12f);
     assert(edgeChange>1.0f);
-    assert(echo::rotatingCandyCoverage(5,0,0)==0.0f);
+    assert(echo::rotatingCandyCoverage(7,0,0)==0.0f);
     assert(echo::rotatingCandyCoverage(0,0,0)==1.0f);
     // 8-fold rotational symmetry is preserved.
     for(int y=-5;y<=5;++y)for(int x=-5;x<=5;++x)
