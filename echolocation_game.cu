@@ -616,7 +616,7 @@ static void initGraphics(GraphicsContext &gfx)
 // They indicate game rules; they should not be interpreted as 3D acoustics.
 static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
 {
-    const float duration=kind==2?0.66f:kind==3?0.60f:kind==1?0.34f:0.20f;
+    const float duration=kind==4?0.24f:kind==2?0.66f:kind==3?0.60f:kind==1?0.34f:0.20f;
     const int count=(int)(duration*sampleRate);
     std::vector<float> samples(count*2,0.0f);
     for(int i=0;i<count;++i) {
@@ -624,7 +624,8 @@ static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
         const int note=kind==2?(int)(t/0.22f):
                        kind==3?(int)(t/0.20f):
                        kind==1?(int)(t/0.17f):0;
-        const float frequency=kind==2?(note==0?620.0f:note==1?830.0f:1240.0f):
+        const float frequency=kind==4?(1040.0f+800.0f*t/duration):
+                              kind==2?(note==0?620.0f:note==1?830.0f:1240.0f):
                               kind==3?(note==0?490.0f:note==1?350.0f:210.0f):
                               kind==1?(note==0?350.0f:230.0f):1050.0f;
         const float noteLength=kind==2?0.22f:kind==3?0.20f:kind==1?0.17f:duration;
@@ -1277,6 +1278,9 @@ int main(int argc, char* argv[])
                 for(const echo::Shard &shard:arcade.shards)
                     if(!shard.collected)addGlyph(shard.x,shard.y,-7.0f);
                 addGlyph(arcade.exitX,arcade.exitY,-6.0f);
+                if(lastDecoySimTime>=0 &&
+                   simTime-lastDecoySimTime<1.2)
+                    addGlyph((float)decoyPulseX,(float)decoyPulseY,-6.0f);
                 glBindVertexArray(gfx.glyphVAO);
                 glBindBuffer(GL_ARRAY_BUFFER,gfx.glyphVBO);
                 glBufferData(GL_ARRAY_BUFFER,
@@ -1303,6 +1307,9 @@ int main(int argc, char* argv[])
                     orbs.push_back(echo::VisualOrb{shard.x,shard.y,0.065f,0.85f,
                         1.0f,0.78f,0.16f,1.1f});
                 }
+                if(lastDecoySimTime>=0 && simTime-lastDecoySimTime<1.2)
+                    orbs.push_back(echo::VisualOrb{(float)decoyPulseX,
+                        (float)decoyPulseY,0.09f,0.65f,0.24f,0.94f,1.0f,2.0f});
                 orbs.push_back(echo::VisualOrb{arcade.exitX,arcade.exitY,0.17f,1.12f,
                     arcade.remaining==0?0.22f:0.62f,
                     arcade.remaining==0?1.0f:0.32f,0.85f,1.7f});
