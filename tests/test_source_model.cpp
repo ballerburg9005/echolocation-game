@@ -89,6 +89,7 @@ int main(){
 
     // The six actual source cells must fit in a 13cm player collision
     // radius and be bilaterally symmetric, even when rotated.
+    mask[east.frontY*N+east.frontX]=0.0f;
     const auto narrow=echo::playerBeam(N,mask.data(),90,90,0,true);
     const auto mono=echo::playerBeam(N,mask.data(),90,90,0,false);
     assert(narrow.valid && narrow.directional);
