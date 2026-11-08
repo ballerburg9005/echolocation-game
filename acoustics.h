@@ -23,21 +23,32 @@ constexpr float kClickFrequencyHz = 1800.0f;
 constexpr float kClickDurationSeconds = 0.002f;
 constexpr float kPi = 3.14159265358979323846f;
 
-// First-order locally reacting boundary approximation. R=1 is a hard,
-// zero-normal-gradient wall. Smaller pressure reflection coefficients introduce
-// velocity-dependent loss at solid interfaces. This is an approximation of
-// impedance in the 2D scalar wave model, not measured wall-material acoustics.
-ECHO_HD inline float wallGhost(float pressure, float previous,
-                               float reflection, float courant) {
+// Local, centered-time impedance boundary approximation. A rigid wall
+// (R=1) contributes zero damping; softer walls contribute a centered-time
+// velocity term proportional to (1-R)/(1+R) for each solid neighbor.
+//
+// A *backward*-time ghost pressure can be unstable at R=0 on this CFL grid.
+// Instead, the damping is evaluated at (p_next-p_prev)/(2dt), making the
+// update semi-implicit in velocity while retaining an explicit per-cell solve.
+// The ghost's spatial pressure is always the fluid cell (Neumann geometry).
+ECHO_HD inline float wallDamping(float reflection, float courant,
+                                 int adjacentWalls) {
     const float r = fmaxf(0.0f, fminf(1.0f, reflection));
     const float impedance = (1.0f - r) / (1.0f + r);
-    return pressure - (impedance / courant) * (pressure - previous);
+    return 0.5f * courant * impedance * adjacentWalls;
 }
 
 ECHO_HD inline float waveStep(float p, float prev, float left, float right,
                               float down, float up, float courantSq) {
     return 2.0f * p - prev +
            courantSq * (left + right + down + up - 4.0f * p);
+}
+
+ECHO_HD inline float impedanceWaveStep(float p, float prev, float left,
+                                       float right, float down, float up,
+                                       float courantSq, float damping) {
+    return (2.0f*p - (1.0f-damping)*prev +
+            courantSq*(left+right+down+up-4.0f*p)) / (1.0f+damping);
 }
 
 // Hann-tapered burst: zero at both ends, avoiding the old discontinuous
