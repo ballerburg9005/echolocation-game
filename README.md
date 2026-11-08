@@ -124,11 +124,15 @@ sudo apt install build-essential libsdl2-dev libglew-dev libtinyxml2-dev libgl1-
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
 git switch improve/physics-audio-accessibility-2026
-nvcc -std=c++17 -o echolocation_game echolocation_game.cu -lGLEW -lGL -lSDL2 -ltinyxml2 -lpthread
-./echolocation_game
+make test
+make build
+./build/echolocation_game
 ```
 
 ### Windows (MSYS2)
+
+**Note:** the original Windows instructions below are historical and have not been verified for this development branch. This branch currently has automated Linux CUDA compilation and CPU unit tests only.
+
 * Install [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive)
 * Install [Microsoft Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and pick "individual component" -> "MSVC v142 - VS 2019 C++ x64/x86 build tools"
 
