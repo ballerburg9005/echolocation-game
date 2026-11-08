@@ -69,10 +69,18 @@ int main(){
     // A sub-cell rotating ghost is an acoustic impedance, not a hard
     // occupancy that erases p_next when its edge moves every frame.
     assert(reflectors>0 && partial>0);
-    game.stampShards(dynamic.data());
-    int shardReflectors=0;
-    for(float value:dynamic)if(value==3.0f)++shardReflectors;
-    assert(shardReflectors>0);
+    std::vector<float> candyCoverage(N*N,0.0f);
+    game.stampCandyCoverage(candyCoverage.data());
+    int shardReflectors=0,subcells=0;
+    for(float value:candyCoverage) {
+        if(value>0.0f)++shardReflectors;
+        if(value>0.0f&&value<1.0f)++subcells;
+    }
+    assert(shardReflectors>0 && subcells>0);
+    // Candies are smaller eight-sided rotating FDTD reflectors rather
+    // than hard material=3 cells that reset pressure on collection.
+    for(float value:dynamic)assert(value!=3.0f);
+    assert(echo::kCandyRadiusCm==4.0f);
     const float soundX=game.enemies[0].x;
     const float soundY=game.enemies[0].y;
     game.hearClick(soundX,soundY);
@@ -182,13 +190,13 @@ int main(){
     assert(!game.lost && game.lives==3);
     // Faceted source material must be centered, not a circle plus a shifted
     // second square in the 2D visualization.
-    std::vector<float> shapeMask=mask;
-    game.stampShards(shapeMask.data());
+    std::vector<float> shapeMask(N*N,0.0f);
+    game.stampCandyCoverage(shapeMask.data());
     int materialCount=0;
     for(int y=0;y<N;++y)for(int x=0;x<N;++x)
-        if(shapeMask[y*N+x]==3.0f)++materialCount;
+        if(shapeMask[y*N+x]>0.01f)++materialCount;
     assert(materialCount>0);
-    assert(echo::insideNgon(0,0,5,8,echo::kPi/8));
-    assert(!echo::insideNgon(6,6,5,8,echo::kPi/8));
+    assert(echo::insideNgon(0,0,echo::kCandyRadiusCm,8,0.0f));
+    assert(!echo::insideNgon(6,0,echo::kCandyRadiusCm,8,0.0f));
     std::puts("echo arcade tests passed: deterministic reachable spawns, audio attraction, pickups, exit, reset and reflectors");
 }
