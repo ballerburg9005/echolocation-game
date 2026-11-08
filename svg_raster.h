@@ -12,10 +12,12 @@ inline int rasterRect(float* mask, int size, float x, float y, float width,
     if (!(width > 0 && height > 0) || !std::isfinite(x) || !std::isfinite(y)
         || !std::isfinite(width) || !std::isfinite(height)) return 0;
     const float half = std::max(0.0f, stroke) * 0.5f;
-    const int minX = std::max(0, (int)std::max(-1.0f, std::floor(x-half)));
-    const int maxX = std::min(size-1, (int)std::min((float)size, std::ceil(x+width+half)));
-    const int minY = std::max(0, (int)std::max(-1.0f, std::floor(size-(y+height+half))));
-    const int maxY = std::min(size-1, (int)std::min((float)size, std::ceil(size-(y-half))));
+    // Clamp while still floating-point: converting huge SVG coordinates
+    // directly to int is undefined and can make raster loops unbounded.
+    const int minX = (int)std::max(0.0f, std::min((float)size, std::floor(x-half)));
+    const int maxX = (int)std::max(-1.0f, std::min((float)(size-1), std::ceil(x+width+half)));
+    const int minY = (int)std::max(0.0f, std::min((float)size, std::floor(size-(y+height+half))));
+    const int maxY = (int)std::max(-1.0f, std::min((float)(size-1), std::ceil(size-(y-half))));
     int marked = 0;
     for (int iy = minY; iy <= maxY; ++iy) {
         const float sy = size - iy - 0.5f;
@@ -43,10 +45,10 @@ inline int rasterEllipse(float* mask, int size, float cx, float cy,
     if (!(rx > 0 && ry > 0) || !std::isfinite(cx) || !std::isfinite(cy)
         || !std::isfinite(rx) || !std::isfinite(ry)) return 0;
     const float half = std::max(0.0f, stroke)*0.5f;
-    const int minX = std::max(0, (int)std::max(-1.0f, std::floor(cx-rx-half)));
-    const int maxX = std::min(size-1, (int)std::min((float)size, std::ceil(cx+rx+half)));
-    const int minY = std::max(0, (int)std::max(-1.0f, std::floor(size-(cy+ry+half))));
-    const int maxY = std::min(size-1, (int)std::min((float)size, std::ceil(size-(cy-ry-half))));
+    const int minX = (int)std::max(0.0f, std::min((float)size, std::floor(cx-rx-half)));
+    const int maxX = (int)std::max(-1.0f, std::min((float)(size-1), std::ceil(cx+rx+half)));
+    const int minY = (int)std::max(0.0f, std::min((float)size, std::floor(size-(cy+ry+half))));
+    const int maxY = (int)std::max(-1.0f, std::min((float)(size-1), std::ceil(size-(cy-ry-half))));
     int marked = 0;
     for (int iy = minY; iy <= maxY; ++iy) {
         const float sy = size-iy-0.5f;
