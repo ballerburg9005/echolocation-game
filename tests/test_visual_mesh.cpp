@@ -17,5 +17,15 @@ int main() {
     mask[3*N+4]=1;
     auto c=echo::extrudeMask(mask.data(),N);
     assert(c.size()==12+6+6*6); // merged roof plus six exterior faces
+    // OpenGL view basis: looking east, screen-right points +Z.
+    // Increasing bearing is a LEFT turn: an eastward fixed landmark should
+    // move to screen-right as the camera turns toward north (+grid Y).
+    const float north=echo::visualForwardZ(3.14159265358979323846f/2.0f);
+    assert(north < -0.99f);
+    assert(echo::visualZFromGridY(100) < echo::visualZFromGridY(20));
+    // The player and walls use the SAME grid-to-world orientation.
+    bool negativeWallZ=false;
+    for(const auto &v:c)if(v.z < -0.03f)negativeWallZ=true;
+    assert(negativeWallZ);
     std::puts("3D visual mesh tests passed: room, acoustic-mask walls, exterior faces and merged roofs");
 }
