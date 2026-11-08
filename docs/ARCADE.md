@@ -23,6 +23,14 @@ The maze has three enemies, three lives, and up to twelve echo shards.
   simulation, and optional guidance is available.
 - Avoid enemies. Their 8 cm radius bodies change the wave mask and move through
   accessible paths. Each enemy has an approximate reflection coefficient.
+- Ghosts have distinct roles: a medium-speed violet **tracker**, a fast
+  orange **sprinter**, and a slower blue **sentinel** with longer hearing
+  range. Hearing follows reachable corridors rather than a direct radius
+  through sealed walls. Ghosts pursue the **last audible source** instead of
+  receiving omniscient updates about the player's position.
+- Throw a **decoy** with G. A second tapered pulse is emitted from the
+  projected safe cell inside the real CUDA solver, luring ghosts away from
+  the player. It stops at static maze walls; the cooldown is 9 seconds.
 - Ghosts wander until a nearby click alerts them, then pursue via a 5 cm
   navigation-grid shortest-path field. An encounter removes one life,
   deducts up to 150 points, allows two seconds of invulnerability, and
@@ -39,6 +47,8 @@ The maze has three enemies, three lives, and up to twelve echo shards.
 | Q/E | Strafe |
 | F | Emit a manual echolocation click |
 | T | Toggle automatic clicks; off means stealth/manual only |
+| G | Throw a remote physical echo decoy, up to 85 cm ahead (9s cooldown) |
+| C | Sweep a synthetic left/center/right stereo cane (100 cm range) |
 | F2 | Toggle right 2D/3D viewport |
 | F3 | Toggle immersive full-window 3D |
 | F4 | Arcade on/off, preserving pure FDTD navigation mode |
@@ -63,10 +73,18 @@ enemy heartbeat (F5), and stereo target guidance (F6) do not enter the FDTD
 field. They are deliberately synthesized and panned; they do not travel
 through walls, apply HRTFs, or follow real room reverberation.
 
-**Stealth:** T disables automatic pulses, not numerical timekeeping.
-F triggers a click on demand. Enemy awareness uses a simplified game rule
-that checks the local click position. It is not a validated acoustic
-receiver and may hear through some obstacles.
+**Stealth and decoys:** T disables automatic player pulses, not
+numerical timekeeping. F triggers a player click on demand; G sends a
+secondary physical click from a forward point not hidden inside an SVG
+wall. A nearby enemy follows a path toward the last source it heard,
+making diversion possible. This hearing check uses a coarse 5-cm
+walkable-path approximation: it is a gameplay heuristic, not a validated
+sound-pressure or diffraction calculation.
+
+**Cane:** the C-key probe measures exact collision-mask distances along
+three rays (left, forward, right), then generates three successive synthetic
+stereo taps. Their volume and pitch encode how close the obstacle is.
+This is not a physical cane model, reflected sound, or haptic sensation.
 
 Turn F5/F6 off when experimenting with reflection-only navigation, or leave
 them on for more accessible gameplay. Start headphones at a low volume.
@@ -101,5 +119,8 @@ application; it cannot exercise real GPU audio playback.
   be checked against a moving-boundary reference solver.
 - Ghost sound detection and 5 cm grid pathfinding are heuristics, not
   perceptually or scientifically validated acoustics.
+- Decoy clicks run through the numerical solver, but decoy targeting and
+  enemy detection are rules. The C-key cane is deliberately synthetic
+  navigational sonification.
 - Accessible onboarding, spoken instruction, remappable keys and evaluation
   with blind players are not implemented yet.
