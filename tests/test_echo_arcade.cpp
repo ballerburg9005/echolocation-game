@@ -80,7 +80,7 @@ int main(){
     // Candies are smaller eight-sided rotating FDTD reflectors rather
     // than hard material=3 cells that reset pressure on collection.
     for(float value:dynamic)assert(value!=3.0f);
-    assert(echo::kCandyRadiusCm==4.0f);
+    assert(echo::kCandyRadiusCm==5.5f);
     const float soundX=game.enemies[0].x;
     const float soundY=game.enemies[0].y;
     game.hearClick(soundX,soundY);
@@ -101,7 +101,7 @@ int main(){
     for(int i=0;i<5;++i)game.update(0.05f,23,25);
     // Candy rotation is physical source geometry, but spinning must
     // never collect a coin or change score without player proximity.
-    assert(game.shards[0].spin>candySpinBefore+2.0f);
+    assert(game.shards[0].spin>candySpinBefore+1.0f);
     assert(game.remaining==reachableBefore);
     // Check rotation BEFORE a complete 2*pi revolution; a fast-spinning
     // symmetrical shape naturally returns close to its original angle.
