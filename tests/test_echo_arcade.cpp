@@ -138,33 +138,40 @@ int main(){
     assert(game.won);
     game.reset();
     assert(!game.won && game.lives==3 && game.remaining>0);
-    // Three contacts exhaust lives; invulnerability prevents multiple
-    // penalties during the same sustained overlap.
-    for(int collision=0;collision<3;++collision) {
+    // Ghosts are gentle, nonlethal bumpers: ten or fifty collisions cannot
+    // remove collectibles, stop AI, subtract score or cause GAME OVER.
+    const int scoreBeforeHits=game.score;
+    for(int collision=0;collision<12;++collision) {
         game.enemies[0].x=23;
         game.enemies[0].y=25;
-        game.invulnerability=0;
-        auto hit=game.update(0,23,25);
-        assert(hit.hit);
-        assert(hit.bounced && hit.recoilX>0 && hit.recoilY>0);
-        assert(game.lives==2-collision);
-        assert(hit.gameOver==(collision==2));
+        game.invulnerability=0.0f;
+        const auto bump=game.update(0,23,25);
+        assert(bump.hit && bump.bounced);
+        assert(bump.recoilX>23 && bump.recoilX<26);
+        assert(!bump.gameOver && !game.lost && game.lives==3);
+        assert(game.score==scoreBeforeHits);
+        assert(game.guidanceTarget().available);
         auto repeat=game.update(0,23,25);
-        assert(!repeat.hit);
+        assert(!repeat.hit); // no repeated contact jingle
     }
-    assert(game.lost);
-    // Even after the third collision the world must not go silent/blank:
-    // all remaining candy and ghosts stay in the FDTD acoustic mask.
-    std::vector<float> afterLoss=mask;
-    game.stampEnemies(afterLoss.data());
-    game.stampShards(afterLoss.data());
-    int livingGhostMask=0,livingShardMask=0;
-    for(float cell:afterLoss) {
-        if(cell==2.0f)++livingGhostMask;
-        if(cell==3.0f)++livingShardMask;
-    }
-    assert(livingGhostMask>0 && livingShardMask>0);
+    // Ensure pickups work after sustained ghost contact as well.
+    const auto afterBumpsShard=game.shards[0];
+    const int beforePickup=game.remaining;
+    game.update(0,afterBumpsShard.x,afterBumpsShard.y);
+    assert(game.remaining==beforePickup-1);
+    assert(!game.lost && game.lives==3);
     game.reset();
     assert(!game.lost && game.lives==3);
+    // Faceted source material must be centered, not a circle plus a shifted
+    // second square in the 2D visualization.
+    std::vector<float> shapeMask=mask;
+    game.stampShards(shapeMask.data());
+    const auto shard=game.shards[0];
+    int materialCount=0;
+    for(int y=0;y<N;++y)for(int x=0;x<N;++x)
+        if(shapeMask[y*N+x]==3.0f)++materialCount;
+    assert(materialCount>0);
+    assert(echo::insideNgon(0,0,5,8,echo::kPi/8));
+    assert(!echo::insideNgon(6,6,5,8,echo::kPi/8));
     std::puts("echo arcade tests passed: deterministic reachable spawns, audio attraction, pickups, exit, reset and reflectors");
 }
