@@ -5,6 +5,7 @@
 // their disks onto the wave mask. AI awareness is a *game mechanic*,
 // not a physical acoustic sensing calculation.
 #include "collision.h"
+#include "source_model.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -364,7 +365,7 @@ public:
     // the CUDA boundary kernel decides the coefficient for that interface.
     // These are collectible (not movement-blocking) to preserve reachability.
     void stampShards(float* dynamicMask) const {
-        if(lost||won)return;
+        // A finished round stops AI/movement, not the acoustic scenery.
         for(const Shard &s:shards){
             if(s.collected)continue;
             const int minX=std::max(1,(int)std::floor(s.x-5.0f));
@@ -373,14 +374,15 @@ public:
             const int maxY=std::min(side_-2,(int)std::ceil(s.y+5.0f));
             for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x){
                 float dx=(x+0.5f)-s.x,dy=(y+0.5f)-s.y;
-                if(dx*dx+dy*dy<=25.0f&&grid_[y*side_+x]<=0 &&
+                if(insideNgon(dx,dy,5.0f,8,0.3926990817f)&&
+                   grid_[y*side_+x]<=0 &&
                     dynamicMask[y*side_+x]<1.5f)
                     dynamicMask[y*side_+x]=3.0f;
             }
         }
     }
     void stampEnemies(float* dynamicMask) const {
-        if(lost||won) return;
+        // Ghost reflectors must not disappear when the last life is lost.
         for(const Enemy&e:enemies){
             if(e.eaten)continue;
             const int minX=std::max(1,(int)std::floor(e.x-8));
@@ -389,7 +391,9 @@ public:
             const int maxY=std::min(side_-2,(int)std::ceil(e.y+8));
             for(int yy=minY; yy<=maxY;++yy)for(int xx=minX;xx<=maxX;++xx){
                 const float dx=(xx+0.5f)-e.x,dy=(yy+0.5f)-e.y;
-                if(dx*dx+dy*dy<=64 && grid_[yy*side_+xx]<=0)
+                if(insideNgon(dx,dy,8.0f,16,
+                     (float)e.archetype*0.1963495408f) &&
+                     grid_[yy*side_+xx]<=0)
                     dynamicMask[yy*side_+xx]=2.0f;
             }
         }
