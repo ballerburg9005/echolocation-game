@@ -22,6 +22,30 @@ struct Enemy {
     float wanderTimer=0.0f;
     unsigned direction=0;
 };
+// Assistive proximity heartbeat for enemies. This is explicitly game UI
+// sonification, not part of the modeled wave field. Facing angle uses the
+// same -45-degree offset as the original player's sound funnel.
+struct ThreatCue {
+    float left=0,right=0,frequency=0,interval=0;
+    bool audible=false;
+};
+inline ThreatCue threatCue(float px,float py,float angle,
+                           float ex,float ey,bool alerted) {
+    const float distance=std::hypot(ex-px,ey-py);
+    if(distance>=105.0f)return {};
+    const float closeness=1.0f-std::max(0.0f,distance)/105.0f;
+    const float bearing=std::atan2(ey-py,ex-px)-(angle-0.7853981633974483f);
+    const float pan=std::sin(bearing);
+    const float amplitude=0.035f+closeness*0.12f;
+    ThreatCue t;
+    t.left=amplitude*std::sqrt(0.5f*(1.0f+pan));
+    t.right=amplitude*std::sqrt(0.5f*(1.0f-pan));
+    t.frequency=200.0f+120.0f*closeness+(alerted?65.0f:0.0f);
+    t.interval=std::max(0.17f,(0.9f-0.65f*closeness)*(alerted?0.8f:1.0f));
+    t.audible=true;
+    return t;
+}
+
 struct Shard {
     float x=0, y=0;
     bool collected=false;
