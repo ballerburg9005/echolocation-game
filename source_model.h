@@ -23,8 +23,9 @@ namespace echo {
 // The original microphones sat almost exactly left/right of the source.
 // A two-element forward beam has poor lateral suppression there; worse,
 // near-field interference can INCREASE direct pressure at those positions.
-// Keep the ears behind both source elements, still inside the player's
-// 13cm collision circle: 8cm backwards, 6cm lateral (10cm radial).
+// Keep the ears behind all source elements, inside the 13cm player
+// collision circle: 6.5cm back and 4.5cm lateral (~7.9cm radial).
+// Narrower 9cm inter-ear spacing makes the two dots sit close to the wedge.
 // This is not rigid head scattering; it is deliberate receiver placement.
 struct ReceiverLayout {
     float leftX=0,leftY=0,rightX=0,rightY=0;
@@ -32,8 +33,8 @@ struct ReceiverLayout {
 inline ReceiverLayout shieldedReceivers(float x,float y,float heading) {
     const float fx=std::cos(heading),fy=std::sin(heading);
     const float lx=-fy,ly=fx;
-    return {x-8.0f*fx+6.0f*lx,y-8.0f*fy+6.0f*ly,
-            x-8.0f*fx-6.0f*lx,y-8.0f*fy-6.0f*ly};
+    return {x-6.5f*fx+4.5f*lx,y-6.5f*fy+4.5f*ly,
+            x-6.5f*fx-4.5f*lx,y-6.5f*fy-4.5f*ly};
 }
 struct PhasedSource {
     int frontX=0,frontY=0,backX=0,backY=0,backDelay=0;
@@ -67,6 +68,61 @@ inline PhasedSource phasedSource(int side,const float* walls,
     out.enabled=out.backDelay>0;
     return out;
 }
+// A two-element endfire source suppresses the BACK but leaves much of
+// the SIDE of a 2D wavefront intact. A simple 3-across aperture
+// (0.25/0.50/0.25 at -8/0/+8 cm lateral displacement) steers the
+// surviving radiation into a narrower forward lobe at 1.8 kHz.
+// Each column is still a paired front/phase-delayed-negative-rear FDTD
+// pressure source, NOT an opaque wedge or a ray-only acoustic filter.
+// All six source cells fit inside the 13cm player collision circle.
+struct BeamArray {
+    PhasedSource elements[3];
+    float weights[3]={0.0f,1.0f,0.0f};
+    bool directional=false;
+    bool valid=false;
+};
+inline BeamArray playerBeam(int side,const float* walls,
+    float x,float y,float heading,bool narrow=true) {
+    BeamArray array;
+    const auto central=phasedSource(side,walls,x,y,heading);
+    if(!central.enabled)return array; // leave the main CUDA click inactive
+    array.elements[1]=central;
+    array.valid=true;
+    if(!narrow)return array; // B-key A/B: original single monopole
+    array.directional=true;
+    const float forwardX=std::cos(heading),forwardY=std::sin(heading);
+    const float sideX=-forwardY,sideY=forwardX;
+    PhasedSource sides[2];
+    bool allGood=true;
+    for(int k=0;k<2;++k){
+        const float offset=k==0?-8.0f:8.0f;
+        auto &p=sides[k];
+        p.frontX=(int)std::lround(x+6.0f*forwardX+offset*sideX);
+        p.frontY=(int)std::lround(y+6.0f*forwardY+offset*sideY);
+        p.backX=(int)std::lround(x+offset*sideX);
+        p.backY=(int)std::lround(y+offset*sideY);
+        auto freeCell=[&](int cx,int cy){
+            return cx>1&&cy>1&&cx<side-2&&cy<side-2&&
+                   walls[cy*side+cx]<=0.0f;
+        };
+        p.enabled=freeCell(p.frontX,p.frontY)&&freeCell(p.backX,p.backY);
+        if(p.enabled){
+            const float separation=std::hypot(
+                (float)(p.frontX-p.backX),(float)(p.frontY-p.backY));
+            p.backDelay=(int)std::lround(
+                separation*kCellMetres/(kSpeedOfSound*kStepSeconds));
+            p.enabled=p.backDelay>0;
+        }
+        allGood=allGood&&p.enabled;
+    }
+    if(!allGood)return array; // fallback: central endfire, no clipped array
+    array.elements[0]=sides[0];
+    array.elements[2]=sides[1];
+    array.weights[0]=0.25f;array.weights[1]=0.50f;
+    array.weights[2]=0.25f;
+    return array;
+}
+
 // Every source contributes to the SAME linear pressure update: the delayed
 // back element cancels the source's backward wave by phase interference.
 // Its emitted pulse may extend beyond the front click by backDelay steps.
