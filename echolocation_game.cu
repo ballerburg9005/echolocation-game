@@ -472,7 +472,8 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         // 13cm collision radius, and cannot clip into a
                         // wall or masquerade as a solid mouth.
                         if(mask[idx] > 0.f) {
-                            vbo_data[vbo_idx + 2] = showObj?-1.f:0.f;
+                            vbo_data[vbo_idx + 2] = showObj?
+                                (mask[idx]>=3.5f?-1.25f:-1.f):0.f;
                         } else if(showObj && mask[idx] < -1.20f) {
                             vbo_data[vbo_idx + 2] = -8.8f; // LIME candy, not yellow wall
                         } else if(showObj && mask[idx] < -0.32f &&
@@ -522,7 +523,8 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                     }
                     if (!toneMarker) {
                         if(mask[idx] > 0.f) {
-                            vbo_data[fp_idx + 2] = showObj?-1.f:0.f;
+                            vbo_data[fp_idx + 2] = showObj?
+                                (mask[idx]>=3.5f?-1.25f:-1.f):0.f;
                         } else if(showObj && mask[idx] < -1.20f) {
                             vbo_data[fp_idx + 2] = -8.8f; // LIME candy
                         } else if(showObj && mask[idx] < -0.32f &&
@@ -567,7 +569,8 @@ void main(){
     else if (pressure < -3.5) color = vec3(0.15, 0.42, 0.48); // Non-solid aiming guide, NOT an FDTD wall
     else if (pressure < -2.5) color = vec3(1, 0, 0);       // Red (pulse)
     else if (pressure < -1.5) color = vec3(0, 1, 0);       // Green (mic)
-    else if (pressure < -0.5) color = vec3(1, 1, 0);       // Yellow (objects)
+    else if (pressure < -1.1) color = vec3(0.24, 0.42, 0.66); // Outer rubber-like wall
+    else if (pressure < -0.5) color = vec3(1, 1, 0);       // Yellow (interior walls)
     else {
         // Display-only logarithmic exposure restores a broad gradation of
         // visible wave strengths. The old tanh clipped most large pulses
