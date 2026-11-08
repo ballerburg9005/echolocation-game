@@ -74,6 +74,18 @@ int main() {
     assert(!echo::visualFunnelPixel(5.0f*std::cos(oldHalfAngle),
         5.0f*std::sin(oldHalfAngle),0,0,10,0,0,0));
     assert(!echo::visualFunnelPixel(-5,0,0,0,10,0,0,0));
+    // The forward cyan wedge is VISUAL ONLY and fully inside the real
+    // 13cm collision disk, so it can neither hit nor visually clip
+    // into an SVG wall while the player remains legally placed.
+    int wedgePixels=0;
+    for(int y=-14;y<=14;++y)for(int x=-14;x<=14;++x) {
+        if(!echo::visualFunnelPixel((float)x,(float)y,
+                                    -4.5f,0,6.0f,0,0,0))
+            continue;
+        ++wedgePixels;
+        assert(std::hypot((float)x,(float)y)<13.0f);
+    }
+    assert(wedgePixels>8);
 
     // One second of 48.5 kHz FDTD must become 48 kHz stereo without drifting.
     echo::StereoLinearResampler resampler(echo::kStepSeconds, 48000);
