@@ -58,6 +58,13 @@ and pursue where the last ping occurred instead of knowing your live position.
 A thrown decoy excites the same FDTD wave grid as a real click; the virtual
 cane's measured obstacle taps are explicitly a separate synthetic audio aid.
 The game finds a legal starting spot on each level and restarts there.
+
+**New: sonic overdrive.** Every four echo shards grant a charge.
+Press **H** to spend it: a physical FDTD player pulse goes out, ghosts
+freeze for five seconds, and touching them during that period earns escalating
+Pac-Man-style combo points. They temporarily disappear from the wave mask
+until the power wears off. Freezing/capturing is an arcade rule, not
+physical acoustics.
 The original WASD/arrows/QE movement, Space visibility and numeric wave
 parameter controls are retained. See [arcade guide](docs/ARCADE.md).
 
@@ -116,6 +123,7 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 - Space: toggle visualization of reflective objects. Escape: quit.
 - F manually generates a click; T enables/disables automatic pulses (stealth).
 - G projects a sound decoy into a legal point ahead; C emits stereo left/center/right virtual cane taps.
+- H spends a collected overdrive charge to freeze and catch ghosts for five seconds.
 - F2 toggles right viewport 2D/3D; F3 toggles full-window first-person 3D.
 - F4 toggles Ghost Circuit game mode; F5 enemy heartbeat, F6 target beacons.
 - R restarts all lives, shards, enemies, acoustic state and item pickups.
