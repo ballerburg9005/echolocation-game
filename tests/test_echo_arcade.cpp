@@ -13,6 +13,16 @@ int main(){
     }
     // Wall with passable opening in the middle, for BFS pathfinding.
     for(int y=1;y<N-1;++y)if(y<49||y>71)mask[y*N+N/2]=1;
+    // A decoy is a legitimate secondary sound source, projected along an
+    // unobstructed corridor. It never crosses the central SVG wall.
+    const auto decoy=echo::projectDecoy(mask.data(),N,23,25,1,0,90);
+    assert(decoy.valid && decoy.x>23 && decoy.x<N/2-3);
+    assert(!echo::circleGridContact(mask.data(),N,decoy.x,decoy.y,3).hit);
+    assert(!echo::projectDecoy(mask.data(),N,23,25,0,0).valid);
+    const auto freeDecoy=echo::projectDecoy(mask.data(),N,23,25,-1,0,14);
+    assert(freeDecoy.valid && freeDecoy.x<23);
+    // A source about to hit a wall must not be assigned inside the wall.
+    assert(!echo::projectDecoy(mask.data(),N,4,25,-1,0).valid);
     // Facing east at +45° input angle: an enemy north must sound left.
     auto left=echo::threatCue(50,50,0.7853981634f,50,90,true);
     auto right=echo::threatCue(50,50,0.7853981634f,50,10,true);
