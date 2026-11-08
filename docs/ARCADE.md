@@ -36,8 +36,12 @@ The room measures 5×5 metres (500×500 cells at 1 cm per cell).
 - Throw a **decoy** with G. A second tapered pulse is emitted from the
   projected safe cell inside the real CUDA solver, luring ghosts away from
   the player. It stops at static maze walls; the cooldown is 9 seconds.
-- Ghosts wander until a nearby click alerts them, then pursue along a
-  5cm-grid shortest path. A contact gently displaces the player at most
+- Ghosts wander with rapid changes of heading (every 0.20–0.55 seconds)
+  until a nearby click alerts them. After **0.65–0.8 seconds**
+  without another local click, they abandon pursuit and resume wandering.
+  Their visual bodies spin rapidly (up to about 355° per second);
+  the hard FDTD mask remains fixed in orientation to avoid whipping.
+  A contact gently displaces the player at most
   1.5cm and triggers one subdued cue with 0.9s cooldown. It does not
   deduct score/lives, end gameplay, freeze AI or disable pickups.
   Reflectors never teleport away as a penalty.
@@ -56,8 +60,8 @@ The room measures 5×5 metres (500×500 cells at 1 cm per cell).
 | Input | Action |
 |---|---|
 | W/S or Up/Down | Walk forward and backward |
-| A/D or Left/Right | Rotate |
-| Q/E | Strafe |
+| A/D | Strafe left and right |
+| Q/E or Left/Right | Turn left and right |
 | F | Emit a manual echolocation click |
 | T | Toggle automatic clicks; off means stealth/manual only |
 | G | Throw a remote physical echo decoy, up to 85 cm ahead (9s cooldown) |
@@ -68,7 +72,7 @@ The room measures 5×5 metres (500×500 cells at 1 cm per cell).
 | F4 | Arcade on/off, preserving pure FDTD navigation mode |
 | F5 | Opt into nearby directional enemy heartbeat (off initially) |
 | F6 | Opt into nearby, unobstructed target discovery chime (off initially) |
-| B | Toggle player FDTD click: forward phased pair (default) / isotropic monopole |
+| B | Toggle narrow six-source forward FDTD beam (default) / isotropic monopole |
 | N | Toggle nearby, intermittent FDTD object/landmark chirps (on by default) |
 | J | Toggle experimental echo-only receiver subtraction (off by default) |
 | 9/0 | Lower/raise 2D wave-display exposure (does not alter physics) |
@@ -83,12 +87,14 @@ The room measures 5×5 metres (500×500 cells at 1 cm per cell).
 ### Sound types
 
 **Physics-based:** the player's 1.8kHz tapered click excites the 2D FDTD
-field. With B in its default forward mode, two pressure sources separated
-by about 6cm emit equal and opposite pulses, with the rear negative
-source delayed by the physical transit time. Far-field radiation behind
-the player is consequently reduced by destructive interference, without
-moving the wedge's hard binary boundary. This is NOT a perfect bat beam or
-an impenetrable head. Both virtual microphones sample the FDTD pressure.
+field. Default mode has **three separate phased front/back pairs**,
+spaced -8, 0 and +8cm laterally, with weights 0.25, 0.50 and 0.25.
+Each rear source emits an inverse click delayed by its source separation
+divided by the speed of sound. The 16cm aperture suppresses sideways
+energy; the delayed rear sources suppress backward energy in the same
+actual FDTD pressure grid. No rays are discarded or wedge solids moved.
+The B key selects a single isotropic source for comparison.
+This is NOT an impenetrable head or a calibrated bat beam.
 
 The tracker/sprinter/sentinel and candy have different *actual pressure
 field emitters*, placed in nearby fluid cells just outside their
@@ -125,22 +131,23 @@ a measured binaural or material-contact impulse response.
 visual player wedge was a crude soundproof baffle intended to keep the
 ears behind the outbound pulse. Its rotating hard mask generated abrupt
 acoustic boundary changes (audible whipping/rattling), so it is no
-longer stamped into the FDTD solver. Its visible 2D outline remains as a muted-cyan **non-solid aiming
-guide**, clearly different from the yellow reflective walls.
-Instead B selects a phased directional source or monopole.
+longer stamped into the FDTD solver. Its visible 2D outline remains a muted-cyan **non-solid 32° aiming
+guide**, clearly different from yellow reflective walls. Previously
+the full visible opening was 76°. The wedge tip is 4.5cm behind the
+pivot; the two virtual ears sit just 2cm behind it, at -6.5cm
+longitudinal and ±4.5cm lateral, 9cm apart. Ears remain inside the
+13cm collision radius.
 
-**Actual ear geometry mattered:** the earlier microphones were
-approximately level with the rear phased element but to its sides,
-where interference could make the direct sound *stronger*. Each receiver
-is now 8cm behind the pivot and 6cm to its corresponding side, fully
-within the player's 13cm collision radius. A CPU test with these exact
-positions measures phased-pair direct-click energy equal to 0.0775
-times the single-emitter energy (about 92% lower at the virtual ears).
-The earlier 98% figure measured a much more distant rear probe and
-was not an honest prediction of ear shielding. The wedge still does
-not physically block pressure in the room model; the source and
-microphone geometry reduce the direct field without abruptly moving
-a binary wall. This is *not* a calibrated scattering human head.
+**Near-ear source geometry matters:** the historical ears lay to the
+sides of the original phased pair, where interference could increase
+direct sound. Moving them behind the source improves suppression.
+The new narrow FDTD beam further suppresses the sides.
+A 42cm-radius CPU 2D pressure benchmark for a straight-ahead source
+measured forward energy 0.752, side energy 0.00919 and rear 0.00254.
+The old endfire pair gave 0.464 side energy in that same benchmark.
+These are *not* calibrated directional hearing or a soundproof head;
+the wedge is still only a visual aid. Restoring a fast-moving binary
+hard wedge would recreate nonphysical pressure jumps.
 
 J enables *experimental scattered-field monitoring*: a small free-field
 CPU FDTD computes the identical incident pulse and subtracts it from
