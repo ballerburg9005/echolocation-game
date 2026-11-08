@@ -638,6 +638,22 @@ int main(int argc, char* argv[])
 
     GraphicsContext gfx;
     initGraphics(gfx);
+    echo::View3D view3d;
+    const bool has3D = echo::init3D(view3d,h_mask,SIZE);
+    if(!has3D)fprintf(stderr,"[3D] Disabled: shader/program unavailable\n");
+    bool show3D=has3D, full3D=false, arcadeEnabled=true;
+
+    echo::EchoArcade arcade(h_mask,SIZE,g_player.pivot_x,g_player.pivot_y);
+    for(const ToneMarker& tm:g_toneMarkers){
+        if(tm.type=='W'){arcade.setExit(tm.x,tm.y);break;}
+    }
+    std::vector<echo::VisualOrb> orbs;
+    orbs.reserve(128);
+    std::vector<float> mapGlyphs;
+    mapGlyphs.reserve(128*3);
+    double lastArcadeMessage=0.0;
+    std::printf("[ARCADE] %d ghosts, %d shards; reach the exit after collecting all.\n",
+                (int)arcade.enemies.size(),arcade.remaining);
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
@@ -690,6 +706,11 @@ int main(int argc, char* argv[])
     bool gameWon = false;
     int collectedItems = 0;
     double lastDebugTime = 0.0;
+    unsigned long long simStep2=0;
+
+    std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
+    std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
+    std::puts("[CONTROLS] 1/2 ping interval | 3/4 decay | 5/6 reflections | 7/8 volume");
 
     while (!quit) {
         SDL_Event e;
@@ -731,6 +752,31 @@ int main(int argc, char* argv[])
                     case SDLK_7: g_waveVolumeScale -= 0.002f; recalcDerivedParams(); break;
                     case SDLK_8: g_waveVolumeScale += 0.002f; recalcDerivedParams(); break;
                     case SDLK_SPACE: showObjects = !showObjects; break;
+                    case SDLK_F2: if(has3D)show3D=!show3D; break;
+                    case SDLK_F3: if(has3D) {
+                        show3D=true;full3D=!full3D;
+                    } break;
+                    case SDLK_F4: arcadeEnabled=!arcadeEnabled; break;
+                    case SDLK_r:
+                        arcade.reset();
+                        for(const ToneMarker& tm:g_toneMarkers)if(tm.type=='W'){
+                            arcade.setExit(tm.x,tm.y);break;
+                        }
+                        gameWon=false;collectedItems=0;simStep2=0;simTime=0;
+                        g_player=Player{50.0f,150.0f,-PI/4.0f};
+                        updatePlayerComponents(g_player);
+                        for(ToneMarker &tm:g_toneMarkers)tm.collected=false;
+                        if(g_numToneMarkers>0)CUDA_CHECK(cudaMemcpy(
+                            d_toneMarkers,g_toneMarkers.data(),
+                            g_numToneMarkers*sizeof(ToneMarker),cudaMemcpyHostToDevice));
+                        CUDA_CHECK(cudaMemset(d_p,0,SIZE*SIZE*sizeof(float)));
+                        CUDA_CHECK(cudaMemset(d_p_prev,0,SIZE*SIZE*sizeof(float)));
+                        CUDA_CHECK(cudaMemset(d_p_next,0,SIZE*SIZE*sizeof(float)));
+                        audioResampler=echo::StereoLinearResampler(g_DT,g_sampleRate);
+                        SDL_ClearQueuedAudio(simDev);
+                        SDL_ClearQueuedAudio(beepDev);
+                        lastBeep=0;lastSlideTime=0;wasSliding=false;
+                        break;
                     case SDLK_ESCAPE: quit = true; break;
                 }
             }
