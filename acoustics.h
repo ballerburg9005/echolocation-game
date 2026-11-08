@@ -51,11 +51,16 @@ ECHO_HD inline float mixedWallDamping(float leftMaterial,
     const bool solidR=rightMaterial>0.0f;
     const bool solidD=downMaterial>0.0f;
     const bool solidU=upMaterial>0.0f;
+    const int solid=(int)solidL+(int)solidR+(int)solidD+(int)solidU;
+    // Nearly every cell is fluid; avoid two extra impedance calculations
+    // in ~12 billion cell updates/sec when no wall is adjacent.
+    if(solid==0)return 0.0f;
     const int soft=(int)(solidL&&leftMaterial>=3.5f)+
                    (int)(solidR&&rightMaterial>=3.5f)+
                    (int)(solidD&&downMaterial>=3.5f)+
                    (int)(solidU&&upMaterial>=3.5f);
-    const int solid=(int)solidL+(int)solidR+(int)solidD+(int)solidU;
+    if(soft==0)return wallDamping(interiorReflection,courant,solid);
+    if(soft==solid)return wallDamping(kOuterBoundaryReflection,courant,solid);
     return wallDamping(interiorReflection,courant,solid-soft)+
            wallDamping(kOuterBoundaryReflection,courant,soft);
 }
