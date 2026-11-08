@@ -120,7 +120,7 @@ There is an untested Windows build available with CUDA 12.8 (=your CUDA driver m
 
 ### Linux
 ```
-sudo apt install build-essential libsdl2-dev libglew-dev libtinyxml2-dev libgl1-mesa-dev nvidia-cuda-toolkit
+sudo apt install build-essential libsdl2-dev libglew-dev libtinyxml2-dev libglm-dev libgl1-mesa-dev nvidia-cuda-toolkit
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
 git switch improve/physics-audio-accessibility-2026
