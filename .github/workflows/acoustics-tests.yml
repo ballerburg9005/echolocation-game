@@ -1,4 +1,4 @@
-name: CPU acoustics tests
+name: CPU physics, collision and SVG tests
 
 on:
   push:
@@ -12,7 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compile independent numerical tests
-        run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic tests/test_acoustics.cpp -o /tmp/echo-acoustics-tests
-      - name: Run numerical tests
-        run: /tmp/echo-acoustics-tests
+      - name: Compile and run dependency-free numerical tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in tests/test_*.cpp; do
+            executable="/tmp/$(basename "$source" .cpp)"
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic "$source" -o "$executable"
+            "$executable"
+          done
