@@ -18,10 +18,14 @@ int main() {
     assert(near(echo::waveStep(4, 4, 4, 4, 4, 4,
                                echo::kCourantSquared), 4));
 
-    // Hard walls enforce a zero-gradient ghost; lower R causes actual loss.
-    assert(near(echo::wallGhost(2.0f, 1.0f, 1.0f, echo::kCourant), 2.0f));
-    assert(echo::wallGhost(2.0f, 1.0f, 0.0f, echo::kCourant) < 2.0f);
-    assert(near(echo::wallGhost(2.0f, 2.0f, 0.5f, echo::kCourant), 2.0f));
+    // Centered-time impedance damping: hard walls have none; R=0 is
+    // maximally absorptive but must remain numerically stable.
+    assert(near(echo::wallDamping(1.0f, echo::kCourant, 2), 0.0f));
+    assert(near(echo::wallDamping(0.0f, echo::kCourant, 2), echo::kCourant));
+    assert(echo::wallDamping(0.5f, echo::kCourant, 1) >
+           echo::wallDamping(0.9f, echo::kCourant, 1));
+    assert(near(echo::impedanceWaveStep(4, 4, 4, 4, 4, 4,
+                  echo::kCourantSquared, 0.25f), 4));
 
     float field[4] = {0, 1, 2, 3};
     assert(near(echo::bilinearSample(field, 2, 0.5f, 0.5f), 1.5f));
@@ -58,5 +62,48 @@ int main() {
         assert(near(rendered[2*i], -rendered[2*i+1], 0.000001f));
     }
     assert(maxError < 0.004f);
-    std::printf("acoustics tests passed: Courant, rigid/absorbing walls, bilinear microphones, click and 48 kHz timing (max tone error %g)\n", maxError);
+    // Evolve a closed 2D room to catch boundary instabilities that algebraic
+    // one-step checks miss. Explicit backward-time ghost loss diverges at R=0.
+    constexpr int N = 60, STEPS = 600;
+    float finalEnergies[4] = {};
+    const float reflectionValues[4] = {0.0f, 0.5f, 0.9f, 1.0f};
+    for (int m = 0; m < 4; ++m) {
+        const float reflection = reflectionValues[m];
+        std::vector<float> current(N*N, 0.0f), previous(N*N, 0.0f);
+        std::vector<float> next(N*N, 0.0f);
+        for (int y = 1; y < N-1; ++y) {
+            for (int x = 1; x < N-1; ++x) {
+                const float r2 = (float)((x-N/2)*(x-N/2) + (y-N/2)*(y-N/2));
+                current[y*N+x] = std::exp(-r2/8.0f);
+            }
+        }
+        previous = current; // zero initial time derivative
+        for (int t = 0; t < STEPS; ++t) {
+            for (int y = 1; y < N-1; ++y) {
+                for (int x = 1; x < N-1; ++x) {
+                    const int i = y*N+x;
+                    const bool wl = x==1, wr = x==N-2;
+                    const bool wd = y==1, wu = y==N-2;
+                    const float center = current[i];
+                    const float damping = echo::wallDamping(reflection,
+                                       echo::kCourant, (int)wl+(int)wr+(int)wd+(int)wu);
+                    next[i] = echo::impedanceWaveStep(
+                        center, previous[i],
+                        wl ? center : current[i-1], wr ? center : current[i+1],
+                        wd ? center : current[i-N], wu ? center : current[i+N],
+                        echo::kCourantSquared, damping);
+                    assert(std::isfinite(next[i]));
+                    assert(std::fabs(next[i]) < 10.0f);
+                }
+            }
+            previous.swap(current);
+            current.swap(next);
+        }
+        float energy = 0.0f;
+        for (float p : current) energy += p*p;
+        finalEnergies[m] = energy;
+    }
+    assert(finalEnergies[0] < finalEnergies[3] * 0.2f);
+    assert(finalEnergies[1] < finalEnergies[3] * 0.5f);
+    std::printf("acoustics tests passed: Courant, stable impedance walls R=0..1, bilinear microphones, click and 48 kHz timing (max tone error %g)\n", maxError);
 }
