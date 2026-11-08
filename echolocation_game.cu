@@ -659,6 +659,21 @@ int main(int argc, char* argv[])
         svgLoaded = true;
     }
 
+    const echo::SafeSpawn initialSpawn=echo::findFreeSpawn(
+        h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,13.0f);
+    if(!initialSpawn.valid) {
+        fprintf(stderr,"No safe player spawn on SVG level %s\n",svgFile);
+        free(h_mask);
+        return EXIT_FAILURE;
+    }
+    if(initialSpawn.x!=g_player.pivot_x || initialSpawn.y!=g_player.pivot_y)
+        printf("[LEVEL] Moved blocked player start to (%.1f, %.1f)\n",
+               initialSpawn.x,initialSpawn.y);
+    g_player.pivot_x=initialSpawn.x;
+    g_player.pivot_y=initialSpawn.y;
+    const Player initialPlayer=g_player;
+    updatePlayerComponents(g_player);
+
     g_numToneMarkers = g_toneMarkers.size();
     if (g_numToneMarkers > 0) {
         CUDA_CHECK(cudaMalloc(&d_toneMarkers, g_numToneMarkers * sizeof(ToneMarker)));
@@ -856,7 +871,7 @@ int main(int argc, char* argv[])
                         gameWon=false;collectedItems=0;simStep2=0;simTime=0;
                         manualPulseAt=UINT64_MAX;decoyPulseAt=UINT64_MAX;
                         lastDecoySimTime=-100;automaticPulse=true;
-                        g_player=Player{50.0f,150.0f,-PI/4.0f};
+                        g_player=initialPlayer;
                         updatePlayerComponents(g_player);
                         for(ToneMarker &tm:g_toneMarkers)tm.collected=false;
                         if(g_numToneMarkers>0)CUDA_CHECK(cudaMemcpy(
@@ -870,6 +885,7 @@ int main(int argc, char* argv[])
                         SDL_ClearQueuedAudio(beepDev);
                         lastBeep=0;lastSlideTime=0;lastThreatCue=0;
                         lastGuidanceCue=0;wasSliding=false;
+                        lastCount=SDL_GetPerformanceCounter();
                         break;
                     case SDLK_ESCAPE: quit = true; break;
                 }
