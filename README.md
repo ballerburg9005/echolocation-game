@@ -4,6 +4,58 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 # Echolocation Game
 
+## Quiet navigation revision after hands-on feedback
+
+The acoustic grid is **500 × 500 cells, 1 cm per cell = 5 × 5 metres**.
+It models **2D pressure**, not 3D free-field attenuation. A continuous
+oscillator in a 2D enclosed room is particularly liable to sound too loud
+at a distance and to resonate through open passages. That was the
+reported "spaceship" sound: always-on FDTD game voices, not proof that
+the room was only 50 cm wide.
+
+**This revision removes that regression without changing the core solver:**
+
+- Ghosts/coins/exit/SVG landmarks now emit **brief, smooth 85 ms FDTD
+  chirps every ~2.15 seconds**, not continuous room-filling tones.
+  Emission is *permitted* only at close range with a clear straight
+  line through the static maze: ghosts 48 cm, coins 42 cm, exit
+  50 cm, SVG markers 35–50 cm. Volume fades smoothly with distance.
+  These on/off conditions are **gameplay gating**, not an acoustically
+  correct model of diffraction or 3D geometric spreading. Once emitted,
+  the chirp propagates through the actual FDTD grid.
+- **No more deaths:** ghosts are gentle solid bumpers, not hazards.
+  Each contact moves the player at most 1.5 cm and produces one
+  restrained, short touch cue with a cooldown. No lives, score loss,
+  frozen AI or disappearing/uncapturable objects after three hits.
+  The optional H-key overdrive is still a deliberate gameplay power-up.
+- **Correct silhouettes:** an 8-pixel square was wrongly drawn *over*
+  the FDTD coin, making a circle with an extraneous square corner.
+  That duplicate overlay is gone. Candy is now one centered 14 cm
+  octagon; ghosts are visibly faceted **20 cm hexagons**, not nearly
+  circular 16-gons at low raster resolution. Both use the same
+  acoustic material shapes and 3D representations.
+- **Actual ears behind the source:** the original microphones were
+  lateral to the two-element phased FDTD emitter, where the phase
+  interference actually *increased* the direct sound. Both ears are now
+  8 cm behind the player pivot and 6 cm to either side, fully inside
+  the 13 cm collision circle. A CPU FDTD test of these exact ear
+  positions measures only **7.75% of the monopole direct-click energy**
+  with the paired source (~92.25% attenuation). This is not evidence
+  of a physically impenetrable head or guaranteed perceptual improvement.
+- The muted-cyan wedge is explicitly a *visual aiming guide*, not a
+  reflective FDTD obstacle. The solver no longer contains a moving hard
+  wedge; restoring it naïvely would reintroduce the pressure whipping.
+  J still offers optional receiver-only free-field subtraction for
+  studying echo-only listening, but it needs hardware performance tests.
+- Every five seconds the console logs `[AUDIO-DIAG]`: raw signal peak,
+  saturated samples and low-queue occurrences. This can help distinguish
+  FDTD pressure transients from audio underruns if whipping persists.
+
+To compare modes, use **N** for FDTD discovery chirps on/off, **F4** for
+the game physics on/off, **B** for phased/monopole player emission, and
+**J** for the optional experimental echo-only receiver monitor.
+Begin at a low headphone volume; none of this is a validated HRTF.
+
 ## FDTD-only world acoustics and echo-first listening (experimental)
 
 The original wedge was a makeshift impenetrable shield protecting the ears
@@ -28,22 +80,17 @@ shield. This branch now includes two **optional A/B listening experiments**:
   propagates until it hits something" shortcut. It is approximate when
   the player moves during an emitted pulse and adds CPU work, so use J
   to compare rather than assuming it is already more accurate.
-- **N — disable/enable quiet FDTD world sounds.** Ghosts, generated candy
-  shards, exits, and legacy SVG O/I/W landmarks emit distinct, gently
-  modulated tones directly into the pressure field. Propagation, room
-  occlusion and 2D reflections are therefore handled by FDTD.
-  They are intentionally quiet but may still resonate in small rooms;
-  toggle N when testing echo-only navigation. Collision taps and short
-  game-rule reward sounds remain direct UI feedback, not FDTD.
-- **Faceted acoustic objects:** ghosts are **16-gon reflectors** and
-  candy shards are octagons, instead of smooth solid disks. This makes
-  physical contours available to the grid but does not guarantee that
-  facets will sound perceptually distinct at the current wavelength.
-- **Collision and game-over bug fix:** enemy hits push the player away
-  (with three seconds of protection) instead of instantly teleporting
-  every ghost FDTD reflector back to spawn. After game over, enemies
-  and remaining shards stay visible and acoustically present; **R**
-  restarts the round.
+- **N — enable/disable nearby FDTD discovery chirps.** Ghosts, candy
+  shards, exits and SVG O/I/W landmarks only emit short tapered pulses
+  when nearby with clear static-wall sight. The pulses still propagate
+  through the solver; there is no longer a perpetual ambient drone.
+  Wall-contact taps and brief game-rule sounds remain direct UI cues.
+- **Faceted acoustic objects:** ghosts are now clearly hexagonal 20 cm
+  reflectors and candy shards are clean centered 14 cm octagons.
+  The 2D square-marker duplication was also removed.
+- **Nonlethal contact:** ghosts gently obstruct movement and do not
+  deduct lives or score. No ghost collision can end a run or halt AI.
+  R remains an optional manual restart.
 - **2D wave gradient:** wave colors use logarithmic display-only
   exposure, not the old aggressive tanh saturation that made broad
   flat-color bands. **9/0** adjust *display* brightness without
@@ -77,9 +124,9 @@ real-world listening check:
   This is *HRTF-lite gameplay feedback*, not human binaural simulation.
 - **No mysterious artificial whole-level beacon:** the older artificial
   O/I/W chimes have now been removed entirely. Instead the markers emit
-  quiet FDTD tones, subject to numerical propagation and reflections
-  (they can still be audible from far away). The optional direct F5/F6
-  aids are OFF by default; F6 only operates within 35cm.
+  short, close-only FDTD chirps, requiring a clear wall path before
+  emission. The optional direct F5/F6 aids are OFF by default;
+  F6 operates only within 35cm.
 
 If you want to isolate the FDTD sounds, toggle off the arcade with **F4**
 and leave F5/F6 off. Start headphone volume low. The project still needs
@@ -118,9 +165,9 @@ This branch recovers and modernizes the concept as a lightweight OpenGL
 
 There is now a sound-driven arcade game: three wandering enemies
 that chase nearby pings and act as dynamic CUDA wave reflectors, up to twelve
-golden shards that also reflect waves, three lives, scoring, an unlockable
-exit, collisions and victory sounds. Ghosts, shards and goal markers now
-also radiate quiet **physical pressure-field tones**. Optional direct
+golden shards that also reflect waves, **no death mechanic**, scoring,
+an unlockable exit, gentle ghost collisions and victory sounds. Ghosts,
+shards and goal markers emit quiet, gated **FDTD pressure-field chirps**. Optional direct
 non-FDTD proximity helpers are off by default. A new sample maze, **Ghost Circuit**, lives at
 [echo_arena.svg](echo_arena.svg).
 
@@ -215,7 +262,8 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 - B compares phased/isotropic FDTD player sources; N toggles world FDTD
   tones; J compares experimental direct-field subtraction (off by default).
 - 9/0 changes only the 2D wave display exposure, not physics.
-- R restarts all lives, shards, enemies, acoustic state and item pickups.
+- R restarts shards, enemies, acoustic state and item pickups; ghost
+  collisions do not remove lives.
 - Keys **1/2**: pulse interval; **3/4**: per-step wave decay;
   **5/6**: wall reflection; **7/8**: echolocation playback gain.
   Adjustable values are clamped.
@@ -243,11 +291,12 @@ remain unsupported. A warning is logged for transforms.
 
 A text element containing exactly O, I or W becomes a FDTD-emitting
 acoustic landmark with a distinct low-level characteristic frequency.
-The static sources remain in the simulated wave field until collected,
-and can be found by listening to their waves and reflections.
+The close-only sources emit short, gated tones in the FDTD field until
+collected, and can be found by their waves and reflections.
 Approaching to approximately 13 cm collects an item or activates the goal.
-The earlier artificial proximity chirps have been removed; these sources
-can in principle be heard beyond the old hard proximity cutoffs.
+The previous always-on spaceship hum and the separate artificial
+proximity chirps are both removed. Chirp emission requires proximity and
+clear sight; this gating is a gameplay approximation, not 3D acoustics.
 
 Load an example level:
 
