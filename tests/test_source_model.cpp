@@ -197,11 +197,11 @@ int main(){
     float lowestCandy=1e6f,highestCandy=0.0f;
     for(int id=echo::kShardFirst;id<=echo::kShardLast;++id) {
         const float f=echo::toneFrequency(id);
-        assert(f>ghostTone*2.0f && f<3300.0f);
+        assert(f>300.0f && f<ghostTone);
         lowestCandy=std::min(lowestCandy,f);
         highestCandy=std::max(highestCandy,f);
     }
-    assert(lowestCandy>=1760.0f && highestCandy<=2960.0f);
+    assert(lowestCandy>=329.0f && highestCandy<=588.0f);
     // Atmospheric spaceship drones were caused by persistent unmodulated
     // in-field oscillators. Only short, tapered pings may radiate now.
     int audible=0,silent=0;
