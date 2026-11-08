@@ -304,7 +304,8 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
                                const float* mask, float c2, int size, float reflection,
                                int sourceX, int sourceY, float amplitude,
                                unsigned long long step, int interval,
-                               int duration, float dt, float decay)
+                               int duration, float dt, float decay,
+                               bool automaticPulse, uint64_t manualPulseStart)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -336,12 +337,11 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
     float next = echo::impedanceWaveStep(center, previous, left, right,
                                         down, up, c2, damping);
 
-    if (x == sourceX && y == sourceY && step >= 1000ULL && interval > 0) {
-        const unsigned long long elapsed = step - 1000ULL;
-        const int pulseStep = (int)(elapsed % (unsigned long long)interval);
-        if (pulseStep < duration) {
-            next += amplitude * echo::clickSample(pulseStep, duration, dt);
-        }
+    if (x == sourceX && y == sourceY) {
+        const int pulseStep=echo::pulseIndex(
+            step,interval,duration,automaticPulse,manualPulseStart);
+        if(pulseStep>=0)
+            next+=amplitude*echo::clickSample(pulseStep,duration,dt);
     }
     p_next[idx] = next * decay;
 }
@@ -738,10 +738,13 @@ int main(int argc, char* argv[])
     int collectedItems = 0;
     double lastDebugTime = 0.0;
     unsigned long long simStep2=0;
+    uint64_t manualPulseAt=UINT64_MAX;
+    bool automaticPulse=true;
 
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
     std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
-    std::puts("[CONTROLS] 1/2 ping interval | 3/4 decay | 5/6 reflections | 7/8 volume");
+    std::puts("[CONTROLS] F manually click | T toggle auto-click/stealth | 1/2 interval");
+    std::puts("[CONTROLS] 3/4 decay | 5/6 reflections | 7/8 volume");
 
     while (!quit) {
         SDL_Event e;
@@ -788,12 +791,22 @@ int main(int argc, char* argv[])
                         show3D=true;full3D=!full3D;
                     } break;
                     case SDLK_F4: arcadeEnabled=!arcadeEnabled; break;
+                    case SDLK_t:
+                        if(!e.key.repeat)automaticPulse=!automaticPulse;
+                        break;
+                    case SDLK_f:
+                        if(!e.key.repeat) {
+                            manualPulseAt=simStep2;
+                            if(arcadeEnabled)arcade.hearClick(g_pulse_x,g_pulse_y);
+                        }
+                        break;
                     case SDLK_r:
                         arcade.reset();
                         for(const ToneMarker& tm:g_toneMarkers)if(tm.type=='W'){
                             arcade.setExit(tm.x,tm.y);break;
                         }
                         gameWon=false;collectedItems=0;simStep2=0;simTime=0;
+                        manualPulseAt=UINT64_MAX;automaticPulse=true;
                         g_player=Player{50.0f,150.0f,-PI/4.0f};
                         updatePlayerComponents(g_player);
                         for(ToneMarker &tm:g_toneMarkers)tm.collected=false;
@@ -1036,14 +1049,15 @@ int main(int argc, char* argv[])
         const int sourceX = (int)roundf(g_pulse_x);
         const int sourceY = (int)roundf(g_pulse_y);
         for (int i = 0; i < steps; ++i) {
-            if (arcadeEnabled && simStep2>=1000ULL &&
+            if (arcadeEnabled && automaticPulse && simStep2>=1000ULL &&
                 (simStep2-1000ULL)%(unsigned long long)g_pulseIntervalSteps==0ULL)
                 arcade.hearClick(g_pulse_x,g_pulse_y);
             updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev, d_mask,
                                          g_c2, SIZE, g_reflectionCoeff,
                                          sourceX, sourceY, PULSE_AMPLITUDE,
                                          simStep2, g_pulseIntervalSteps,
-                                         g_pulseDurationSteps, g_DT, g_decayFactor);
+                                         g_pulseDurationSteps, g_DT, g_decayFactor,
+                                         automaticPulse,manualPulseAt);
             CUDA_CHECK(cudaGetLastError());
 
             captureAndReduce<<<1, 1>>>(d_p_next, g_mic_l_x, g_mic_l_y,
@@ -1060,6 +1074,10 @@ int main(int argc, char* argv[])
             d_p = d_p_next;
             d_p_next = tmp;
         }
+
+        if(manualPulseAt!=UINT64_MAX &&
+           simStep2>=manualPulseAt+(uint64_t)g_pulseDurationSteps)
+            manualPulseAt=UINT64_MAX;
 
         if (audioBatchIndex > 0) {
             CUDA_CHECK(cudaMemcpy(h_audioL.data(), d_audioL,
