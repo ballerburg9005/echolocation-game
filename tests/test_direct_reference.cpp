@@ -86,5 +86,33 @@ int main(){
         }
         assert(mE>0.000001f && aE/mE<0.30f);
     }
-    std::puts("scattered-field monitoring: true rear ears suppress direct pressure, FDTD subtraction preserves echoes");
+    // The J-key reference must include EVERY source in the narrower beam,
+    // otherwise subtraction leaves a fake six-emitter direct click.
+    const auto tight=echo::shieldedReceivers(82,82,0.0f);
+    const auto beam=echo::playerBeam(N,empty.data(),82,82,0.0f,true);
+    const auto monoBeam=echo::playerBeam(N,empty.data(),82,82,0.0f,false);
+    assert(beam.valid && beam.directional && monoBeam.valid);
+    const auto focused=echo::freeFieldDirect(beam,
+        tight.leftX,tight.leftY,tight.rightX,tight.rightY,
+        duration,echo::kStepSeconds,echo::kCourantSquared,0.9995f,
+        750.0f,0.01f,true);
+    const auto single=echo::freeFieldDirect(monoBeam,
+        tight.leftX,tight.leftY,tight.rightX,tight.rightY,
+        duration,echo::kStepSeconds,echo::kCourantSquared,0.9995f,
+        750.0f,0.01f,false);
+    assert(focused.left.size()==158 && single.left.size()==158);
+    double focusedEnergy=0.0,singleEnergy=0.0;
+    for(size_t i=0;i<focused.left.size();++i) {
+        const float residual=echo::subtractDirect(
+            focused.left[i],focused.left,1000,1000+i);
+        assert(std::fabs(residual)<1e-6f);
+        focusedEnergy+=focused.left[i]*focused.left[i]+
+                       focused.right[i]*focused.right[i];
+        singleEnergy+=single.left[i]*single.left[i]+
+                      single.right[i]*single.right[i];
+    }
+    std::printf("six-source array direct ear energy ratio %.5f\n",
+                 focusedEnergy/singleEnergy);
+    assert(singleEnergy>1e-6 && focusedEnergy<singleEnergy*0.20);
+    std::puts("scattered-field monitoring: real 6-source FDTD direct reference preserves echoes and shields rear ears");
 }
