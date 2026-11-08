@@ -75,6 +75,7 @@ struct Enemy {
     float alert=0.0f;
     float wanderTimer=0.0f;
     unsigned direction=0;
+    float visualSpin=0.0f; // fast visual rotation; FDTD polygon remains stable
     // Arcade archetypes: 0 tracker, 1 sprinter, 2 sentinel.
     unsigned archetype=0;
     bool eaten=false;
@@ -203,11 +204,17 @@ public:
         for(Enemy &enemy:enemies) {
             const int enemyNode=nodeAt(enemy.x,enemy.y);
             const int distanceCells=soundField[enemyNode];
-            const float maxRange=enemy.archetype==1?125.0f:
-                                 enemy.archetype==2?230.0f:180.0f;
+            // Ghosts only react to relatively close clicks; a distant
+            // player should not be pursued across a 5m room.
+            const float maxRange=enemy.archetype==1?85.0f:
+                                 enemy.archetype==2?110.0f:95.0f;
             if(distanceCells<0 || distanceCells*kNavStep>maxRange)continue;
+            // Less than the default 1-second interval between player
+            // clicks: a ghost must give up and resume wandering between
+            // pings instead of remaining stuck in permanent chase.
             enemy.alert=std::max(enemy.alert,
-                enemy.archetype==1?3.2f:enemy.archetype==2?6.0f:4.5f);
+                enemy.archetype==1?0.65f:
+                enemy.archetype==2?0.80f:0.70f);
             enemy.lastHeardX=x;
             enemy.lastHeardY=y;
             enemy.pursuitDistances=soundField;
@@ -260,6 +267,12 @@ public:
         }
         for(Enemy &e:enemies) {
             if(e.eaten)continue;
+            // High-speed orientation animation; do not rotate binary FDTD
+            // solid cells, which would recreate the old pressure whipping.
+            const float spinRate=e.archetype==1?-5.7f:
+                                 e.archetype==2?4.8f:6.2f;
+            e.visualSpin=std::fmod(e.visualSpin+dt*spinRate,
+                                   2.0f*kPi);
             if(overdrive>0.0f) {
                 // Catching a ghost earns a Pac-Man-style increasing combo,
                 // instead of taking damage. It disappears until overdrive ends.
@@ -297,10 +310,12 @@ public:
             } else {
                 e.wanderTimer-=dt;
                 if(e.wanderTimer<=0) {
-                    e.direction=nextRand()%4;
-                    e.wanderTimer=1.0f+(nextRand()%150)/100.0f;
+                    e.direction=nextRand()%8;
+                    e.wanderTimer=0.20f+(nextRand()%35)/100.0f;
                 }
-                const float directions[4][2]={{1,0},{-1,0},{0,1},{0,-1}};
+                const float directions[8][2]={{
+                    1,0},{-1,0},{0,1},{0,-1},
+                    {1,1},{-1,1},{-1,-1},{1,-1}};
                 tx=directions[e.direction][0]; ty=directions[e.direction][1];
             }
             float norm=std::hypot(tx,ty);
@@ -309,7 +324,8 @@ public:
                 const auto next=slideCircle(grid_,side_,e.x,e.y,
                         tx/norm*speed*dt,ty/norm*speed*dt,kAgentRadius);
                 e.x=next.x;e.y=next.y;
-                if(next.collided && !next.slid && e.alert<=0)e.wanderTimer=0;
+                if(next.collided && !next.slid && e.alert<=0)
+                    e.wanderTimer=0;
             }
             // A ghost is a gentle solid bumper, NOT an enemy that can
             // end the game. Never decrement lives, scores or disable pickups.
