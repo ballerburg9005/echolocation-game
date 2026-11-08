@@ -110,8 +110,8 @@ static float g_pulse_x, g_pulse_y;
 
 static void updatePlayerComponents(Player &p)
 {
-    float c = cosf(p.angle), s = sinf(p.angle);
-    float wx = -1.f, wy = 1.f, px = 4.f, py = -4.f;
+    const float heading=p.angle-PI/4.0f;
+    const float c=cosf(heading),s=sinf(heading);
     // The microphones used to sit transverse to the phased click,
     // amplifying its near-field impulse. Move them behind the emitters.
     // Both remain <13cm from pivot and safe from hard SVG walls.
@@ -120,11 +120,12 @@ static void updatePlayerComponents(Player &p)
     g_mic_l_x=ears.leftX;g_mic_l_y=ears.leftY;
     g_mic_r_x=ears.rightX;g_mic_r_y=ears.rightY;
 
-    g_wedge_x = p.pivot_x + wx * c - wy * s;
-    g_wedge_y = p.pivot_y + wx * s + wy * c;
-
-    g_pulse_x = p.pivot_x + px * c - py * s;
-    g_pulse_y = p.pivot_y + px * s + py * c;
+    // 4.5cm-behind-pivot wedge apex is only 2cm in front of the
+    // tighter rear microphones. Central emitted pressure is 6cm ahead.
+    g_wedge_x=p.pivot_x-4.5f*c;
+    g_wedge_y=p.pivot_y-4.5f*s;
+    g_pulse_x=p.pivot_x+6.0f*c;
+    g_pulse_y=p.pivot_y+6.0f*s;
 }
 
 // SVG stroke/fill parsing for basic shapes. Full cascading CSS, inheritance,
@@ -293,8 +294,7 @@ static void updateDynamicMask(const float* staticMask,float* dynamicMask) {
 __global__ void updatePressure(float* p_next, const float* p, const float* p_prev,
                                const float* mask, const float* worldEmitters,
                                float c2, int size, float reflection,
-                               int sourceX, int sourceY,
-                               int rearX, int rearY, int rearDelay,
+                               echo::BeamArray beam,
                                float amplitude,
                                unsigned long long step, int interval,
                                int duration, float dt, float decay,
@@ -337,23 +337,34 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
     float next = echo::impedanceWaveStep(center, previous, left, right,
                                         down, up, c2, damping);
 
-    if (x == sourceX && y == sourceY) {
-        const int pulseStep=echo::pulseIndex(
-            step,interval,duration,automaticPulse,manualPulseStart);
-        if(pulseStep>=0)
-            next+=amplitude*echo::phasedPlayerClick(
-                pulseStep,duration,dt,false,rearDelay);
-    }
-    // Delayed rear canceling source: backward-field interference without a
-    // moving solid/head. Reflected energy remains in the SAME wave field.
-    if (x == rearX && y == rearY && rearDelay>0 &&
-        step >= (uint64_t)rearDelay) {
-        const int backStep=echo::pulseIndex(
-            step-(uint64_t)rearDelay,interval,duration,
-            automaticPulse,manualPulseStart);
-        if(backStep>=0)
-            next+=amplitude*echo::phasedPlayerClick(
-                backStep,duration,dt,true,0);
+    // Three parallel pairs form a physically narrower acoustic aperture.
+    // The front wave from each pair is summed INSIDE the pressure field;
+    // each rear element adds its delayed anti-phase wave to suppress sound
+    // toward the ears. This does not turn off waves to the side by ray test.
+    // No solid rotating wedge is inserted into the FDTD grid.
+    if(beam.valid) {
+        for(int k=0;k<3;++k) {
+            const float weight=beam.weights[k];
+            if(weight<=0.0f)continue;
+            const echo::PhasedSource& e=beam.elements[k];
+            if(x==e.frontX && y==e.frontY) {
+                const int pulseStep=echo::pulseIndex(
+                    step,interval,duration,automaticPulse,manualPulseStart);
+                if(pulseStep>=0)
+                    next+=weight*amplitude*
+                          echo::clickSample(pulseStep,duration,dt);
+            }
+            if(beam.directional && e.enabled && e.backDelay>0 &&
+               x==e.backX && y==e.backY &&
+               step>=(uint64_t)e.backDelay) {
+                const int backStep=echo::pulseIndex(
+                    step-(uint64_t)e.backDelay,interval,duration,
+                    automaticPulse,manualPulseStart);
+                if(backStep>=0)
+                    next-=weight*amplitude*
+                          echo::clickSample(backStep,duration,dt);
+            }
+        }
     }
     // An actual remote source in the *same* FDTD solver: the decoy is
     // not merely a stereo UI chirp or visually painted distraction.
@@ -862,9 +873,9 @@ int main(int argc, char* argv[])
     uint64_t directPulseStart=UINT64_MAX;
 
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
-    std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
+    std::puts("[CONTROLS] W/S forward/back | A/D STRAFE left/right | Q/E or Left/Right TURN");
     std::puts("[CONTROLS] F click | T auto-pings/stealth | G FDTD decoy (9s cooldown)");
-    std::puts("[CONTROLS] B phased/isotropic FDTD click | N world tones | J echo-only monitor (experimental)");
+    std::puts("[CONTROLS] B narrow 6-source / isotropic click | N world chirps | J echo-only (experimental)");
     std::puts("[CONTROLS] C obstacle scan | H spend charge for 5s ghost overdrive");
     std::puts("[CONTROLS] 1/2 pulse interval");
     std::puts("[CONTROLS] F5 short-range threat aid | F6 nearby-target aid (both OFF by default)");
@@ -929,7 +940,7 @@ int main(int argc, char* argv[])
                     case SDLK_b:
                         if(!e.key.repeat)phasedClick=!phasedClick;
                         printf("[SOURCE] %s FDTD player click\n",
-                                phasedClick?"forward-phased":"isotropic");
+                                phasedClick?"narrow 3-column phased beam":"single isotropic source");
                         break;
                     case SDLK_n:
                         if(!e.key.repeat)worldTones=!worldTones;
@@ -1028,8 +1039,10 @@ int main(int argc, char* argv[])
         float rotSpeed = PI / 2.f;
         float strafeSpeed = moveSpeed;
 
-        if (ks[SDL_SCANCODE_LEFT] || ks[SDL_SCANCODE_A]) newP.angle += rotSpeed * dtFrame;
-        if (ks[SDL_SCANCODE_RIGHT] || ks[SDL_SCANCODE_D]) newP.angle -= rotSpeed * dtFrame;
+        if (ks[SDL_SCANCODE_LEFT] || ks[SDL_SCANCODE_Q])
+            newP.angle += rotSpeed * dtFrame;
+        if (ks[SDL_SCANCODE_RIGHT] || ks[SDL_SCANCODE_E])
+            newP.angle -= rotSpeed * dtFrame;
 
         updatePlayerComponents(newP);
 
@@ -1049,11 +1062,11 @@ int main(int argc, char* argv[])
 
         float sx = -fy;
         float sy = fx;
-        if (ks[SDL_SCANCODE_Q] || ks[SDL_SCANCODE_RCTRL]) {
+        if (ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_RCTRL]) {
             dx += strafeSpeed * dtFrame * sx;
             dy += strafeSpeed * dtFrame * sy;
         }
-        if (ks[SDL_SCANCODE_E] || ks[SDL_SCANCODE_KP_0]) {
+        if (ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_KP_0]) {
             dx -= strafeSpeed * dtFrame * sx;
             dy -= strafeSpeed * dtFrame * sy;
         }
@@ -1308,14 +1321,9 @@ int main(int argc, char* argv[])
             (int)ceil((missingFrames + (missingFrames ? 2 : 0)) /
                       (g_sampleRate * (double)g_DT))));
 
-        const auto pair=echo::phasedSource(SIZE,h_mask,
+        const auto beam=echo::playerBeam(SIZE,h_mask,
             g_player.pivot_x,g_player.pivot_y,
-            g_player.angle-PI/4.0f);
-        const int sourceX=pair.enabled?pair.frontX:(int)lroundf(g_pulse_x);
-        const int sourceY=pair.enabled?pair.frontY:(int)lroundf(g_pulse_y);
-        const int rearX=(pair.enabled && phasedClick)?pair.backX:-1;
-        const int rearY=(pair.enabled && phasedClick)?pair.backY:-1;
-        const int rearDelay=(pair.enabled && phasedClick)?pair.backDelay:0;
+            g_player.angle-PI/4.0f,phasedClick);
         for (int i = 0; i < steps; ++i) {
             const float alpha=(float)(i+1)/(float)steps;
             const float micLX=previousMicLX+(g_mic_l_x-previousMicLX)*alpha;
@@ -1329,16 +1337,11 @@ int main(int argc, char* argv[])
             if(echoOnlyMonitor && echo::pulseIndex(
                 simStep2,g_pulseIntervalSteps,g_pulseDurationSteps,
                 automaticPulse,manualPulseAt)==0) {
-                echo::PhasedSource refSource;
-                refSource.frontX=sourceX;refSource.frontY=sourceY;
-                refSource.backX=rearX;refSource.backY=rearY;
-                refSource.backDelay=rearDelay;
-                refSource.enabled=rearDelay>0;
                 lastDirect=echo::freeFieldDirect(
-                    refSource,micLX,micLY,micRX,micRY,
+                    beam,micLX,micLY,micRX,micRY,
                     g_pulseDurationSteps,g_DT,g_c2,g_decayFactor,
                     PULSE_AMPLITUDE,g_waveVolumeScale,
-                    phasedClick && pair.enabled);
+                    phasedClick);
                 directPulseStart=simStep2;
             }
             if (arcadeEnabled && automaticPulse && simStep2>=1000ULL &&
@@ -1347,8 +1350,7 @@ int main(int argc, char* argv[])
             updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev,
                                          d_mask,d_worldEmitters,
                                          g_c2, SIZE, g_reflectionCoeff,
-                                         sourceX, sourceY,
-                                         rearX,rearY,rearDelay,PULSE_AMPLITUDE,
+                                         beam,PULSE_AMPLITUDE,
                                          simStep2, g_pulseIntervalSteps,
                                          g_pulseDurationSteps, g_DT, g_decayFactor,
                                          automaticPulse,manualPulseAt,
