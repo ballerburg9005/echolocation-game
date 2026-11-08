@@ -17,6 +17,7 @@
 #include "echo_arcade.h"
 #include "virtual_cane.h"
 #include "contact_audio.h"
+#include "proximity_audio.h"
 #include "view3d.h"
 #include <climits>
 #include <ctype.h>
@@ -705,6 +706,7 @@ int main(int argc, char* argv[])
     updatePlayerComponents(g_player);
 
     g_numToneMarkers = g_toneMarkers.size();
+    std::vector<echo::ProximityGate> markerGates(g_numToneMarkers);
     if (g_numToneMarkers > 0) {
         CUDA_CHECK(cudaMalloc(&d_toneMarkers, g_numToneMarkers * sizeof(ToneMarker)));
         CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(), 
@@ -750,7 +752,9 @@ int main(int argc, char* argv[])
     double lastArcadeMessage=0.0;
     double lastThreatCue=0.0;
     double lastGuidanceCue=0.0;
-    bool dangerAudio=true, guidanceAudio=true;
+    // Large-range artificial beacons were confusing and sounded through walls.
+    // Opt-in aids are quiet by default; short-range SVG discoveries still work.
+    bool dangerAudio=false, guidanceAudio=false;
     std::printf("[ARCADE] %d ghosts, %d shards; reach the exit after collecting all.\n",
                 (int)arcade.enemies.size(),arcade.remaining);
 
@@ -812,7 +816,8 @@ int main(int argc, char* argv[])
     std::puts("[CONTROLS] F click | T auto-pings/stealth | G throw wall-blocked decoy (9s cooldown)");
     std::puts("[CONTROLS] C obstacle scan | H spend charge for 5s ghost overdrive");
     std::puts("[CONTROLS] 1/2 pulse interval");
-    std::puts("[CONTROLS] F5 enemy heartbeat | F6 target beacon | 3/4 decay | 5/6 reflections | 7/8 volume");
+    std::puts("[CONTROLS] F5 short-range threat aid | F6 nearby-target aid (both OFF by default)");
+    std::puts("[CONTROLS] 3/4 decay | 5/6 reflections | 7/8 volume");
 
     while (!quit) {
         SDL_Event e;
@@ -913,6 +918,7 @@ int main(int argc, char* argv[])
                         g_player=initialPlayer;
                         updatePlayerComponents(g_player);
                         for(ToneMarker &tm:g_toneMarkers)tm.collected=false;
+                        markerGates.assign(g_numToneMarkers,echo::ProximityGate{});
                         if(g_numToneMarkers>0)CUDA_CHECK(cudaMemcpy(
                             d_toneMarkers,g_toneMarkers.data(),
                             g_numToneMarkers*sizeof(ToneMarker),cudaMemcpyHostToDevice));
@@ -1035,6 +1041,7 @@ int main(int argc, char* argv[])
             echo::ThreatCue nearest;
             float bestDistance=1.0e9f;
             for(const echo::Enemy &en:arcade.enemies) {
+                if(en.eaten)continue;
                 const float d=std::hypot(en.x-g_player.pivot_x,
                                          en.y-g_player.pivot_y);
                 if(d<bestDistance) {
@@ -1068,11 +1075,15 @@ int main(int argc, char* argv[])
         // navigation without vision. It is game UI (direct stereo bearing),
         // not a simulated sound propagation source; F6 disables the aid.
         if(arcadeEnabled&&guidanceAudio&&!arcade.won&&!arcade.lost &&
-           nowT-lastGuidanceCue>=1.20 &&
+           nowT-lastGuidanceCue>=4.5 &&
            SDL_GetQueuedAudioSize(beepDev) <
                (Uint32)(0.15*g_sampleRate*2*sizeof(float))) {
             const echo::GuidanceTarget target=arcade.guidanceTarget();
-            if(target.available) {
+            if(target.available &&
+               std::hypot(target.x-g_player.pivot_x,
+                          target.y-g_player.pivot_y)<35.0f &&
+               echo::hasClearSight(h_mask,SIZE,g_player.pivot_x,
+                        g_player.pivot_y,target.x,target.y)) {
                 const float dx=target.x-g_player.pivot_x;
                 const float dy=target.y-g_player.pivot_y;
                 const float bearing=atan2f(dy,dx)-
@@ -1084,9 +1095,7 @@ int main(int argc, char* argv[])
                 const int n=(int)(notes*0.13f*g_sampleRate);
                 std::vector<float> beacon(2*n,0.0f);
                 const float distance=std::hypot(dx,dy);
-                // Deliberately broad distance law, unlike physical room audio.
-                const float gain=0.045f+0.07f*
-                    fmaxf(0.0f,1.0f-fminf(distance,500.0f)/500.0f);
+                const float gain=0.09f*echo::proximityStrength(distance,35.0f);
                 for(int j=0;j<n;++j) {
                     const float t=(float)j/g_sampleRate;
                     const int note=std::min(notes-1,(int)(t/0.13f));
@@ -1122,94 +1131,55 @@ int main(int argc, char* argv[])
                                (Uint32)(tap.size()*sizeof(float)));
         }
 
-        // Continuous, directional rhythms distinguish obstacle/collectible/goal
-        // without relying on the screen. Global clock avoids phase resets.
-        const int cueSamples = std::max(0, (int)lroundf(dtFrame * g_sampleRate));
-        std::vector<float> markerMix(cueSamples * 2, 0.0f);
-        bool markersAudible = false;
-        for (int i = 0; i < g_numToneMarkers; ++i) {
-            ToneMarker &tm = g_toneMarkers[i];
-            if (tm.collected) continue;
-            const float deltaX = tm.x - g_player.pivot_x;
-            const float deltaY = tm.y - g_player.pivot_y;
-            const float dist = sqrtf(deltaX*deltaX + deltaY*deltaY);
-            if (dist < 13.0f && tm.type == 'I') {
-                tm.collected = true;
+        // Legacy O/I/W discovery sounds are NOT simulated echoes. They
+        // should chime only when discovering something right beside the
+        // player, with path occlusion, and never beep from a distant pillar.
+        // Entry-triggered chirps get a rare 4.5-second reminder when nearby.
+        for(int i=0;i<g_numToneMarkers;++i) {
+            ToneMarker &tm=g_toneMarkers[i];
+            if(tm.collected)continue;
+            const float deltaX=tm.x-g_player.pivot_x;
+            const float deltaY=tm.y-g_player.pivot_y;
+            const float dist=std::hypot(deltaX,deltaY);
+            if(dist<13.0f && tm.type=='I') {
+                tm.collected=true;
                 ++collectedItems;
-                printf("[GAME] Item collected! Total: %d\n", collectedItems);
-                CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(),
-                          g_numToneMarkers * sizeof(ToneMarker), cudaMemcpyHostToDevice));
-                // Two ascending notes confirm a collectible without vision.
-                const int n = (int)(0.35f * g_sampleRate);
-                std::vector<float> tune(n*2);
-                for (int j = 0; j < n; ++j) {
-                    const float within = fmodf((float)j / g_sampleRate, 0.175f);
-                    const float freq = j < n/2 ? 650.0f : 900.0f;
-                    const float envelope = sinf(PI * within / 0.175f);
-                    const float s = 0.16f * envelope * envelope *
-                                    sinf(2.0f * PI * freq * within);
-                    tune[2*j] = s; tune[2*j+1] = s;
-                }
-                SDL_QueueAudio(beepDev, tune.data(),
-                               (Uint32)(tune.size()*sizeof(float)));
+                printf("[GAME] SVG item collected: %d\n",collectedItems);
+                CUDA_CHECK(cudaMemcpy(d_toneMarkers,g_toneMarkers.data(),
+                    g_numToneMarkers*sizeof(ToneMarker),cudaMemcpyHostToDevice));
+                playArcadeFeedback(beepDev,g_sampleRate,0);
                 continue;
             }
-            if (dist < 13.0f && tm.type == 'W' && !gameWon &&
-                (!arcadeEnabled || arcade.remaining==0)) {
-                gameWon = true;
-                printf("[GAME] Goal reached! Items collected: %d\n", collectedItems);
-                SDL_SetWindowTitle(gfx.window, "Echolocation - Goal reached!");
-                const int n = (int)(0.60f * g_sampleRate);
-                std::vector<float> tune(n*2);
-                for (int j = 0; j < n; ++j) {
-                    const int note = (int)((3LL * j) / n);
-                    const float within = fmodf((float)j / g_sampleRate, 0.20f);
-                    const float envelope = sinf(PI * within / 0.20f);
-                    const float freq = note == 0 ? 660.0f :
-                                       note == 1 ? 880.0f : 1320.0f;
-                    const float s = 0.20f * envelope * envelope *
-                                    sinf(2.0f * PI * freq * within);
-                    tune[2*j] = s; tune[2*j+1] = s;
-                }
-                SDL_QueueAudio(beepDev, tune.data(),
-                               (Uint32)(tune.size()*sizeof(float)));
+            if(dist<13.0f && tm.type=='W' && !gameWon &&
+               (!arcadeEnabled || arcade.remaining==0)) {
+                gameWon=true;
+                printf("[GAME] SVG goal reached\n");
+                // Arcade's separate win event already plays its own jingle.
+                if(!arcadeEnabled)playArcadeFeedback(beepDev,g_sampleRate,2);
             }
-            if (dist >= 85.0f) {
-                tm.isPlaying = false;
+            const float radius=echo::markerRadiusCm(tm.type);
+            const bool nearby=dist<radius &&
+                echo::hasClearSight(h_mask,SIZE,g_player.pivot_x,
+                                    g_player.pivot_y,tm.x,tm.y);
+            if(!nearby) {
+                tm.isPlaying=false;
+                markerGates[i].shouldChime(radius+7.0f,radius,nowT);
                 continue;
             }
-            tm.isPlaying = true;
-            markersAudible = true;
-            const float angle = atan2f(deltaY, deltaX) -
-                                (g_player.angle - PI/4.0f);
-            const float pan = sinf(angle);
-            const float leftGain = sqrtf(0.5f * (1.0f + pan));
-            const float rightGain = sqrtf(0.5f * (1.0f - pan));
-            const float rangeGain = 0.16f * powf(1.0f - dist / 85.0f, 2.0f);
-            const float frequency = tm.type == 'O' ? 360.0f :
-                                    tm.type == 'I' ? 720.0f : 1080.0f;
-            const int count = tm.type == 'O' ? 1 : tm.type == 'I' ? 2 : 3;
-            for (int j = 0; j < cueSamples; ++j) {
-                const double t = nowT + (double)j / g_sampleRate;
-                const double cycle = fmod(t, 0.75);
-                const int event = (int)(cycle / 0.15);
-                const double within = cycle - event*0.15;
-                if (event >= count || within >= 0.09) continue;
-                const float envelope = sinf(PI * (float)(within/0.09));
-                const float sample = rangeGain * envelope * envelope *
-                               sinf(2.0f * PI * frequency * (float)within);
-                markerMix[2*j] += sample * leftGain;
-                markerMix[2*j+1] += sample * rightGain;
+            tm.isPlaying=true;
+            if(SDL_GetQueuedAudioSize(beepDev) <
+                  (Uint32)(0.10f*g_sampleRate*2*sizeof(float)) &&
+               markerGates[i].shouldChime(dist,radius,nowT)) {
+                const auto gains=echo::localBearing(g_player.pivot_x,
+                    g_player.pivot_y,g_player.angle-PI/4.0f,
+                    tm.x,tm.y,echo::proximityStrength(dist,radius));
+                const auto cue=echo::localChime(g_sampleRate,tm.type,
+                                               gains.left,gains.right,gains.rear);
+                if(!cue.empty())
+                    SDL_QueueAudio(beepDev,cue.data(),
+                                   (Uint32)(cue.size()*sizeof(float)));
             }
         }
-        if (markersAudible && !markerMix.empty() &&
-            SDL_GetQueuedAudioSize(beepDev) <
-                (Uint32)(0.10 * g_sampleRate * 2 * sizeof(float))) {
-            for (float &sample : markerMix) sample = 0.75f * tanhf(sample);
-            SDL_QueueAudio(beepDev, markerMix.data(),
-                           (Uint32)(markerMix.size() * sizeof(float)));
-        }
-
 
         // SDL's output clock, not render-frame delta or an arbitrary fudge
         // factor, determines how many real physical FDTD steps are needed.
