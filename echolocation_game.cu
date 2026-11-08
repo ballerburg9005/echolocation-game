@@ -13,6 +13,8 @@
 #include <algorithm>
 #include "acoustics.h"
 #include "collision.h"
+#include "svg_raster.h"
+#include <ctype.h>
 
 #ifndef PI
 #define PI 3.14159265358979323846f
@@ -115,86 +117,119 @@ static void updatePlayerComponents(Player &p)
     g_pulse_y = p.pivot_y + px * s + py * c;
 }
 
+// SVG stroke/fill parsing for basic shapes. Full cascading CSS, inheritance,
+// transforms and path tessellation are deliberately not emulated here.
+static bool svgFilled(const tinyxml2::XMLElement* elem) {
+    const char* fill = elem->Attribute("fill");
+    bool filled = !fill || strcmp(fill, "none") != 0;
+    const char* style = elem->Attribute("style");
+    if (style) {
+        const char* v = strstr(style, "fill:");
+        if (v) filled = strncmp(v + 5, "none", 4) != 0;
+    }
+    return filled;
+}
+
+static float svgStrokeWidth(const tinyxml2::XMLElement* elem) {
+    const char* stroke = elem->Attribute("stroke");
+    bool stroked = stroke && strcmp(stroke, "none") != 0;
+    const char* style = elem->Attribute("style");
+    if (style) {
+        const char* v = strstr(style, "stroke:");
+        if (v) stroked = strncmp(v + 7, "none", 4) != 0;
+    }
+    if (!stroked) return 0.0f;
+    float width = 1.0f;
+    elem->QueryFloatAttribute("stroke-width", &width);
+    if (style) {
+        const char* v = strstr(style, "stroke-width:");
+        if (v) width = strtof(v + 13, nullptr);
+    }
+    return fmaxf(0.0f, fminf(50.0f, width));
+}
+
 static void parseSVGElement(tinyxml2::XMLElement* elem, float* h_mask)
 {
     using namespace tinyxml2;
+    static bool warnedTransforms = false;
     while (elem) {
         const char* name = elem->Name();
+        // Definitions are not objects in the drawing.
+        if (strcmp(name, "defs") == 0 || strcmp(name, "metadata") == 0) {
+            elem = elem->NextSiblingElement();
+            continue;
+        }
+        if (elem->Attribute("transform") && !warnedTransforms) {
+            fprintf(stderr, "[SVG] WARNING: transforms are unsupported and ignored\n");
+            warnedTransforms = true;
+        }
         if (strcmp(name, "rect") == 0) {
-            Rect r;
+            Rect r{};
             elem->QueryFloatAttribute("x", &r.x);
             elem->QueryFloatAttribute("y", &r.y);
             elem->QueryFloatAttribute("width", &r.width);
             elem->QueryFloatAttribute("height", &r.height);
-            
-            float y_top = SIZE - (r.y + r.height);
-            float y_bottom = SIZE - r.y;
-            
-            int x0 = (int)floorf(r.x);
-            int y0 = (int)floorf(y_top);
-            int x1 = (int)ceilf(r.x + r.width);
-            int y1 = (int)ceilf(y_bottom);
-
-            printf("[SVG] Rect: x=%.1f, y=%.1f, w=%.1f, h=%.1f (grid: %d,%d to %d,%d)\n",
-                   r.x, r.y, r.width, r.height, x0, y0, x1, y1);
-
-            for (int y = y0; y <= y1; y++) {
-                for (int x = x0; x <= x1; x++) {
-                    if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
-                        h_mask[y * SIZE + x] = 1.f;
+            const int count = echo::rasterRect(h_mask, SIZE, r.x, r.y,
+                r.width, r.height, svgStrokeWidth(elem), svgFilled(elem));
+            if (count > 0) {
+                printf("[SVG] Rect x=%.2f y=%.2f w=%.2f h=%.2f (%d cells)\n",
+                       r.x, r.y, r.width, r.height, count);
+                r.y = SIZE - (r.y + r.height);
+                g_rects.push_back(r);
+            }
+        } else if (strcmp(name, "circle") == 0 || strcmp(name, "ellipse") == 0 ||
+                   strcmp(name, "path") == 0) {
+            const bool nativeCircle = strcmp(name, "circle") == 0;
+            const bool nativeEllipse = strcmp(name, "ellipse") == 0;
+            const bool inkscapeArc = strcmp(name, "path") == 0 &&
+                elem->Attribute("sodipodi:type") &&
+                strcmp(elem->Attribute("sodipodi:type"), "arc") == 0;
+            if (nativeCircle || nativeEllipse || inkscapeArc) {
+                float cx = 0.0f, cy = 0.0f, rx = 0.0f, ry = 0.0f;
+                if (inkscapeArc) {
+                    elem->QueryFloatAttribute("sodipodi:cx", &cx);
+                    elem->QueryFloatAttribute("sodipodi:cy", &cy);
+                    elem->QueryFloatAttribute("sodipodi:rx", &rx);
+                    elem->QueryFloatAttribute("sodipodi:ry", &ry);
+                } else {
+                    elem->QueryFloatAttribute("cx", &cx);
+                    elem->QueryFloatAttribute("cy", &cy);
+                    if (nativeCircle) {
+                        elem->QueryFloatAttribute("r", &rx);
+                        ry = rx;
+                    } else {
+                        elem->QueryFloatAttribute("rx", &rx);
+                        elem->QueryFloatAttribute("ry", &ry);
                     }
                 }
-            }
-            r.y = y_top;
-            g_rects.push_back(r);
-        }
-        else if (strcmp(name, "path") == 0) {
-            const char* type = elem->Attribute("sodipodi:type");
-            if (type && (strcmp(type, "arc") == 0 || strcmp(type, "circle") == 0)) {
-                Circle c;
-                elem->QueryFloatAttribute("sodipodi:cx", &c.cx);
-                elem->QueryFloatAttribute("sodipodi:cy", &c.cy);
-                elem->QueryFloatAttribute("sodipodi:rx", &c.r);
-                
-                c.cy = SIZE - c.cy;
-                
-                int cx = (int)roundf(c.cx);
-                int cy = (int)roundf(c.cy);
-                int r = (int)ceilf(c.r);
-                
-                printf("[SVG] Circle: cx=%.1f, cy=%.1f, r=%.1f\n", c.cx, c.cy, c.r);
-
-                for (int y = cy - r; y <= cy + r; y++) {
-                    for (int x = cx - r; x <= cx + r; x++) {
-                        float dx = x - c.cx;
-                        float dy = y - c.cy;
-                        if (dx * dx + dy * dy <= c.r * c.r) {
-                            if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
-                                h_mask[y * SIZE + x] = 1.f;
-                            }
-                        }
-                    }
+                if (inkscapeArc && ry <= 0.0f) ry = rx;
+                const int count = echo::rasterEllipse(h_mask, SIZE, cx, cy,
+                    rx, ry, svgStrokeWidth(elem), svgFilled(elem));
+                if (count > 0) {
+                    g_circles.push_back(Circle{cx, SIZE - cy, fmaxf(rx, ry)});
+                    printf("[SVG] Ellipse cx=%.2f cy=%.2f rx=%.2f ry=%.2f (%d cells)\n",
+                           cx, cy, rx, ry, count);
                 }
-                g_circles.push_back(c);
             }
-        }
-        else if (strcmp(name, "text") == 0) {
+        } else if (strcmp(name, "text") == 0) {
             XMLElement* tspan = elem->FirstChildElement("tspan");
-            const char* text = tspan ? tspan->GetText() : elem->GetText();
-            if (text && (strstr(text, "O") || strstr(text, "W") || strstr(text, "I"))) {
-                ToneMarker tm{};
-                elem->QueryFloatAttribute("x", &tm.x);
-                elem->QueryFloatAttribute("y", &tm.y);
-                tm.y = SIZE - tm.y;
-                if (strstr(text, "O")) tm.type = 'O';
-                else if (strstr(text, "W")) tm.type = 'W';
-                else if (strstr(text, "I")) tm.type = 'I';
-                tm.isPlaying = false;
-                printf("[SVG] Tone Marker (%c): x=%.1f, y=%.1f\n", tm.type, tm.x, tm.y);
-                g_toneMarkers.push_back(tm);
+            const char* t = tspan ? tspan->GetText() : elem->GetText();
+            if (t) {
+                while (*t && isspace((unsigned char)*t)) ++t;
+                const char type = *t;
+                // Text is a marker only when its content is a single code.
+                if ((type == 'O' || type == 'I' || type == 'W') &&
+                    (t[1] == '\0' || isspace((unsigned char)t[1]))) {
+                    ToneMarker tm{};
+                    elem->QueryFloatAttribute("x", &tm.x);
+                    elem->QueryFloatAttribute("y", &tm.y);
+                    tm.y = SIZE - tm.y;
+                    tm.type = type;
+                    g_toneMarkers.push_back(tm);
+                    printf("[SVG] %c marker x=%.1f y=%.1f\n", tm.type, tm.x, tm.y);
+                }
             }
         }
-
         parseSVGElement(elem->FirstChildElement(), h_mask);
         elem = elem->NextSiblingElement();
     }
