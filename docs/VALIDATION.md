@@ -78,7 +78,7 @@ They do not establish perceptual fidelity.
 The new first-person mode is a perspective rendering of walls extruded from
 the 2D SVG raster mask; the numerical acoustic solver stays 2D. Enemies and
 shards are stamped into the *dynamic* wave mask as special reflective cells.
-Enemy reflection (0.82) and shard reflection (0.62) are approximate local
+Enemy/coin rotating impedance and static wall reflection are local
 material boundary coefficients. Neither is a calibrated measurement.
 
 Enemy sound-attraction decisions, optional stereo threat heartbeat/target
@@ -201,7 +201,7 @@ signal artifacts. Computing the reference on CPU at a pulse start may
 delay frames, hence J is deliberately OFF by default.
 
 Game acoustic models use **hexagonal 10cm-radius ghosts** and now
-much **smaller octagonal 4cm-radius candies**, with matching spinning
+**octagonal 5.5cm-radius candies**, with matching spinning
 3D models. The candy collection radius remains a forgiving 15cm.
 Ghosts spin at about 4.8–6.2 radians/sec and choose a new
 wandering heading every 0.20–0.55s. Alert lasts only 0.65–0.8s
@@ -215,7 +215,7 @@ float mask per cell: negative values between -1 and 0 encode ghost
 coverage, whereas values between -2 and -1 encode spinning candy
 coverage. Static SVG walls stay positive hard materials. The CUDA
 stencil blends fluid-neighbor coupling toward the ~98% reflecting
-ghost condition, or a gentler ~82% reflecting candy condition,
+ghost condition, or the SAME ~98% reflecting candy condition,
 continuously. This does not allocate an additional GPU grid buffer
 or launch a separate device kernel. Two extra CPU-side target/smoothed
 coverage arrays do add an O(grid size) update once per display frame. The field retains pressure history even *inside*
@@ -227,11 +227,14 @@ top of each reflector, making coins appear misshapen. Those duplicate
 squares are removed. Ghost hits now cause an at-most-1.5cm bump and a
 tiny contact signal, with neither death nor score loss. The game
 cannot lose lives or freeze its AI from repeated ghost contact.
-The candy octagons rotate more quickly than ghosts (10.5–12.4rad/s,
-with 8-fold symmetry) but retain their pressure history; collection
-fades out the soft occupancy. They emit separate high-register
-FDTD notes selected from ~1.76–2.96kHz pentatonic pitches, inside
-the roughly resolved 1cm-cell acoustic band. This is a deliberately
+The candy octagons now rotate at a more visible 5.2–6.1rad/s,
+with 8-fold symmetry, retaining their pressure history; collection
+fades out soft occupancy. The FDTD reflectivity is the same as
+ghosts', not reduced. The 11cm-diameter candies have bright
+lime silhouettes and a white rotating marker in both 2D panels and
+3D. Their infrequent, distance-gated in-FDTD notes have been
+lowered to 330–587Hz with a moderate source-amplitude increase
+from 0.15 to 1.2 pressure units at full strength. This is a deliberately
 small, friendlier cue and may be less audible farther away than
 the larger ghost scatterers. Numerical moving-medium momentum,
 energy-conserving subcell impedance and hardware listening tests
@@ -313,3 +316,45 @@ simulation load; a *preloaded* short mono sample accessed at one
 spatial source adds modest arithmetic without another full-grid
 kernel, but **requires actual GPU profiling**. See
 [WAV source design](RECORDED_AUDIO_FDTD.md).
+
+
+## Angular-source anti-whip changes and distinctive room
+
+The six pressure emitters were previously rounded to integer 1cm
+grid positions at each video frame and their delayed negative
+elements used rounded integer travel time. Turning through a cell
+boundary could produce sudden differences in the direct wave.
+The FDTD pressure update now injects the identical tapered
+click using **normalized bilinear 2x2 source weights** at continuous
+player-relative coordinates, and interpolates the rear anti-phase
+sample at a fractional travel-time delay. These changes preserve
+the same 1cm grid, Courant number, source spectrum, and reflected
+pressure field. On CUDA, the computation is gated to within 1 grid
+cell of each emitter so every other pressure cell avoids the expensive
+floating-point work. The optional J-mode CPU direct reference
+also uses exactly those fractional positions and delays.
+
+The 360-degree source tests confirm continuous placement without
+1cm teleporting. The CPU free-field FDTD sweep across 24 heading
+angles observed near-ear peaks 0.185–0.192 (with 750-unit
+input and 0.01 playback gain), rather than significant
+orientation-dependent amplification. This does **not** prove all
+hardware cracks are eliminated; GPU scheduling, spatial-microphone
+motion or residual moving-impedance artifacts still need listening.
+The output samples are NOT high-cut or muted to hide these sounds.
+The diagnostic log now includes raw inter-sample MaxJump, SharpJumps
+and the angle of the worst sample jump, alongside peak, limiter
+and SDL underrun counts.
+
+The new five-step zig-zag in the lower-right room is rasterized
+as a set of static reflecting SVG rectangles. A CPU route test
+uses the true 13cm player collision and checks that the corridor
+remains traversable. The outer 2cm wall boundary is a separate
+material (mask value 4) with fixed broad-band pressure-reflection
+coefficient 0.32, using the same centered-time impedance boundary
+calculation as inner walls. Maze walls retain adjustable reflection.
+A material regression tests the loss difference and that zero-
+velocity/uniform pressure fields stay unchanged without numerical
+injection. The muted-blue outer ring is visually distinguishable
+from inner walls in both 2D and 3D. This is rubber-*like loss*,
+not a calibrated viscoelastic frequency-dependent surface.
