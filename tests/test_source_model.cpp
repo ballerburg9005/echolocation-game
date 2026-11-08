@@ -1,4 +1,5 @@
 #include "../source_model.h"
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -36,6 +37,42 @@ static float freeFieldEnergy(bool paired,bool rearProbe) {
     return energy;
 }
 
+// Numerical polar test at a 42cm observation ring. A plain front/back
+// pair rejects the back but radiates strongly sideways; the new three-across
+// aperture must actually reduce SIDE energy in the same FDTD stencil.
+static std::array<double,3> directionalEnergies(
+    const echo::BeamArray& beam) {
+    constexpr int N=180,steps=173;
+    std::vector<float> old(N*N,0),now(N*N,0),next(N*N,0);
+    const int duration=(int)std::lround(
+        echo::kClickDurationSeconds/echo::kStepSeconds);
+    std::array<double,3> energy={0.0,0.0,0.0};
+    for(int step=0;step<steps;++step) {
+        for(int y=1;y<N-1;++y)for(int x=1;x<N-1;++x) {
+            const int i=y*N+x;
+            next[i]=echo::waveStep(now[i],old[i],
+                now[i-1],now[i+1],now[i-N],now[i+N],
+                echo::kCourantSquared)*0.9995f;
+        }
+        for(int k=0;k<3;++k) {
+            if(beam.weights[k]<=0)continue;
+            const auto& e=beam.elements[k];
+            next[e.frontY*N+e.frontX]+=
+                beam.weights[k]*echo::clickSample(
+                    step,duration,echo::kStepSeconds);
+            if(beam.directional)
+                next[e.backY*N+e.backX]-=
+                    beam.weights[k]*echo::clickSample(
+                        step-e.backDelay,duration,echo::kStepSeconds);
+        }
+        energy[0]+=next[90*N+132]*next[90*N+132]; // forward
+        energy[1]+=next[132*N+90]*next[132*N+90]; // 90-degree side
+        energy[2]+=next[90*N+48]*next[90*N+48]; // rear
+        old.swap(now);now.swap(next);
+    }
+    return energy;
+}
+
 int main(){
     const int N=180;
     std::vector<float> mask(N*N,0);
@@ -49,6 +86,44 @@ int main(){
     assert(echo::phasedPlayerClick(30,100,echo::kStepSeconds,false,9)>-1.1f);
     mask[east.frontY*N+east.frontX]=1;
     assert(!echo::phasedSource(N,mask.data(),90,90,0).enabled);
+
+    // The six actual source cells must fit in a 13cm player collision
+    // radius and be bilaterally symmetric, even when rotated.
+    const auto narrow=echo::playerBeam(N,mask.data(),90,90,0,true);
+    const auto mono=echo::playerBeam(N,mask.data(),90,90,0,false);
+    assert(narrow.valid && narrow.directional);
+    assert(mono.valid && !mono.directional);
+    assert(narrow.weights[0]==0.25f&&narrow.weights[1]==0.50f&&
+           narrow.weights[2]==0.25f);
+    assert(mono.weights[1]==1.0f);
+    for(int k=0;k<3;++k) {
+        const auto& e=narrow.elements[k];
+        assert(e.enabled && e.backDelay>0);
+        assert(std::hypot(e.frontX-90.0f,e.frontY-90.0f)<13.0f);
+        assert(std::hypot(e.backX-90.0f,e.backY-90.0f)<13.0f);
+    }
+    assert(narrow.elements[0].frontY<narrow.elements[1].frontY);
+    assert(narrow.elements[2].frontY>narrow.elements[1].frontY);
+    auto twoElement=narrow;
+    twoElement.weights[0]=twoElement.weights[2]=0.0f;
+    twoElement.weights[1]=1.0f;
+    const auto focused=directionalEnergies(narrow);
+    const auto wide=directionalEnergies(twoElement);
+    std::printf("FDTD 42cm angular energy: narrow front=%g side=%g rear=%g; 2-source side=%g\n",
+        focused[0],focused[1],focused[2],wide[1]);
+    assert(focused[0]>1e-5);
+    assert(focused[1]/focused[0]<0.18); // genuine side cancellation
+    assert(focused[1]<wide[1]*0.30);
+    assert(focused[2]<focused[0]*0.06);
+    assert(focused[0]>wide[0]*0.70);
+    // Avoid a clipped aperture when one of the outer sources would
+    // be embedded in an SVG solid; fallback to safe central pair.
+    auto obstructed=mask;
+    obstructed[narrow.elements[0].frontY*N+
+               narrow.elements[0].frontX]=1.0f;
+    const auto fallback=echo::playerBeam(N,obstructed.data(),90,90,0,true);
+    assert(fallback.valid && fallback.directional);
+    assert(fallback.weights[1]==1.0f && fallback.weights[0]==0.0f);
 
     const float monoBack=freeFieldEnergy(false,true);
     const float phasedBack=freeFieldEnergy(true,true);
