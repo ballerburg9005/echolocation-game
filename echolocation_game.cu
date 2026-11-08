@@ -47,6 +47,7 @@ static int   g_pulseIntervalSteps;
 static int   g_pulseDurationSteps;
 
 static float g_waveVolumeScale = 0.01f; // start quietly with headphones
+static float g_visualScale=0.018f; // shader only, never pressure physics
 
 static const float SPEED_OF_SOUND = echo::kSpeedOfSound;
 static const int   SIZE = 500;
@@ -378,6 +379,7 @@ __global__ void captureAndReduce(const float* p, float lx, float ly,
 }
 
 __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int showObj, int t,
+                          float visualScale,
                           float mlx, float mly, float mrx, float mry,
                           float px, float py, float wx, float wy,
                           float player_x, float player_y, float player_angle,
@@ -443,7 +445,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         } else if (showObj && mask[idx] > 0.f) {
                             vbo_data[vbo_idx + 2] = -1.f;
                         } else {
-                            vbo_data[vbo_idx + 2] = tanhf(wave * 0.01f);
+                            vbo_data[vbo_idx + 2] = wave * visualScale;
                         }
                     }
                 }
@@ -492,7 +494,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         } else if (showObj && mask[idx] > 0.f) {
                             vbo_data[fp_idx + 2] = -1.f;
                         } else {
-                            vbo_data[fp_idx + 2] = tanhf(wave * 0.01f);
+                            vbo_data[fp_idx + 2] = wave * visualScale;
                         }
                     }
                 }
@@ -528,9 +530,14 @@ void main(){
     else if (pressure < -1.5) color = vec3(0, 1, 0);       // Green (mic)
     else if (pressure < -0.5) color = vec3(1, 1, 0);       // Yellow (objects)
     else {
-        float r = (pressure > 0 ? pressure : 0);
-        float b = (pressure < 0 ? -pressure : 0);
-        color = vec3(r, 0, b);
+        // Display-only logarithmic exposure restores a broad gradation of
+        // visible wave strengths. The old tanh clipped most large pulses
+        // to identical saturated red/blue, causing hard contour bands.
+        float v=clamp(log(1.0+5.0*abs(pressure))/log(51.0),0.0,1.0);
+        float middle=0.13*sqrt(v);
+        color=pressure>=0.0 ?
+            vec3(v,middle,0.055*v) :
+            vec3(0.055*v,middle,v);
     }
 }
 )";
@@ -851,7 +858,7 @@ int main(int argc, char* argv[])
     std::puts("[CONTROLS] C obstacle scan | H spend charge for 5s ghost overdrive");
     std::puts("[CONTROLS] 1/2 pulse interval");
     std::puts("[CONTROLS] F5 short-range threat aid | F6 nearby-target aid (both OFF by default)");
-    std::puts("[CONTROLS] 3/4 decay | 5/6 reflections | 7/8 volume");
+    std::puts("[CONTROLS] 3/4 decay | 5/6 reflections | 7/8 volume | 9/0 wave DISPLAY exposure");
 
     while (!quit) {
         SDL_Event e;
@@ -892,6 +899,12 @@ int main(int argc, char* argv[])
                     } break;
                     case SDLK_7: g_waveVolumeScale -= 0.002f; recalcDerivedParams(); break;
                     case SDLK_8: g_waveVolumeScale += 0.002f; recalcDerivedParams(); break;
+                    case SDLK_9:
+                        g_visualScale=fmaxf(0.001f,g_visualScale/1.25f);
+                        break;
+                    case SDLK_0:
+                        g_visualScale=fminf(0.08f,g_visualScale*1.25f);
+                        break;
                     case SDLK_SPACE: showObjects = !showObjects; break;
                     case SDLK_F2: if(has3D){show3D=!show3D;full3D=false;} break;
                     case SDLK_F3: if(has3D) {
@@ -1367,6 +1380,7 @@ int main(int argc, char* argv[])
         CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&vbo_data, &vbo_size, gfx.cuda_vbo_resource));
 
         updateVBO<<<blk, thr>>>(vbo_data, d_p, d_mask, SIZE, showObjects, simStep2,
+                                g_visualScale,
                                 g_mic_l_x, g_mic_l_y, g_mic_r_x, g_mic_r_y,
                                 g_pulse_x, g_pulse_y, g_wedge_x, g_wedge_y,
                                 g_player.pivot_x, g_player.pivot_y, g_player.angle,
