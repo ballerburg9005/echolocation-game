@@ -54,6 +54,14 @@ int main() {
     assert(echo::pulseIndex(1100,500,100,false,1000)==-1);
     assert(echo::pulseIndex(1001,500,100,true,1000)==1);
 
+    // Funnel is only a visual outline, not a moving binary acoustic wall:
+    // exact ray points render as edges; the back/side of the cone do not.
+    assert(echo::visualFunnelPixel(5,5,0,0,10,0,0,0)==false);
+    const float halfAngle=38.0f*echo::kPi/180.0f;
+    assert(echo::visualFunnelPixel(5.0f*std::cos(halfAngle),
+        5.0f*std::sin(halfAngle),0,0,10,0,0,0));
+    assert(!echo::visualFunnelPixel(-5,0,0,0,10,0,0,0));
+
     // One second of 48.5 kHz FDTD must become 48 kHz stereo without drifting.
     echo::StereoLinearResampler resampler(echo::kStepSeconds, 48000);
     std::vector<float> rendered;
