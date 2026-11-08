@@ -146,12 +146,24 @@ int main(){
         game.invulnerability=0;
         auto hit=game.update(0,23,25);
         assert(hit.hit);
+        assert(hit.bounced && hit.recoilX>0 && hit.recoilY>0);
         assert(game.lives==2-collision);
         assert(hit.gameOver==(collision==2));
         auto repeat=game.update(0,23,25);
         assert(!repeat.hit);
     }
     assert(game.lost);
+    // Even after the third collision the world must not go silent/blank:
+    // all remaining candy and ghosts stay in the FDTD acoustic mask.
+    std::vector<float> afterLoss=mask;
+    game.stampEnemies(afterLoss.data());
+    game.stampShards(afterLoss.data());
+    int livingGhostMask=0,livingShardMask=0;
+    for(float cell:afterLoss) {
+        if(cell==2.0f)++livingGhostMask;
+        if(cell==3.0f)++livingShardMask;
+    }
+    assert(livingGhostMask>0 && livingShardMask>0);
     game.reset();
     assert(!game.lost && game.lives==3);
     std::puts("echo arcade tests passed: deterministic reachable spawns, audio attraction, pickups, exit, reset and reflectors");
