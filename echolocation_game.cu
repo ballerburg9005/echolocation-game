@@ -16,6 +16,7 @@
 #include "svg_raster.h"
 #include "echo_arcade.h"
 #include "source_model.h"
+#include "soft_ghost.h"
 #include "direct_reference.h"
 #include "virtual_cane.h"
 #include "contact_audio.h"
@@ -315,23 +316,27 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
     const bool wallR = mask[idx + 1] > 0.0f;
     const bool wallD = mask[idx - size] > 0.0f;
     const bool wallU = mask[idx + size] > 0.0f;
-    const float left  = wallL ? center : p[idx - 1];
-    const float right = wallR ? center : p[idx + 1];
-    const float down  = wallD ? center : p[idx - size];
-    const float up    = wallU ? center : p[idx + size];
+    // Ghost polygons are encoded as NEGATIVE fractional coverage in
+    // the shared mask, never as abruptly changing solid walls (>0).
+    // Smooth edge permeability reflects pressure from rotating hexagons
+    // without zeroing pressure cells every frame.
+    const float ghostHere=fmaxf(0.0f,-mask[idx]);
+    const float left=wallL?center:echo::softGhostNeighbour(
+        center,p[idx-1],ghostHere,fmaxf(0.0f,-mask[idx-1]));
+    const float right=wallR?center:echo::softGhostNeighbour(
+        center,p[idx+1],ghostHere,fmaxf(0.0f,-mask[idx+1]));
+    const float down=wallD?center:echo::softGhostNeighbour(
+        center,p[idx-size],ghostHere,fmaxf(0.0f,-mask[idx-size]));
+    const float up=wallU?center:echo::softGhostNeighbour(
+        center,p[idx+size],ghostHere,fmaxf(0.0f,-mask[idx+size]));
     const int adjacentWalls = (int)wallL + (int)wallR + (int)wallD + (int)wallU;
-    // Ghosts are moving pressure-reflecting boundaries with a distinct local
-    // coefficient; the static SVG wall coefficient remains player-adjustable.
+    // Static SVG walls and collectible shards remain hard cells.
+    // Rotating ghosts instead reflect via subcell soft edge couplings.
     const bool touchesShard=(wallL && mask[idx-1]>2.5f) ||
                             (wallR && mask[idx+1]>2.5f) ||
                             (wallD && mask[idx-size]>2.5f) ||
                             (wallU && mask[idx+size]>2.5f);
-    const bool touchesGhost=(wallL && mask[idx-1]>1.5f) ||
-                            (wallR && mask[idx+1]>1.5f) ||
-                            (wallD && mask[idx-size]>1.5f) ||
-                            (wallU && mask[idx+size]>1.5f);
-    const float localReflection=touchesShard?0.62f:
-                                touchesGhost?0.82f:reflection;
+    const float localReflection=touchesShard?0.62f:reflection;
     const float damping = echo::wallDamping(localReflection,
                                              sqrtf(c2),adjacentWalls);
     float next = echo::impedanceWaveStep(center, previous, left, right,
@@ -449,14 +454,18 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (displayFunnel) {
-                            vbo_data[vbo_idx + 2] = -4.f;
-                        } else if (showObj && mask[idx] > 2.5f) {
+                        // Walls always win over the wedge outline. Its
+                        // whole 11.5cm guide fits inside the player's
+                        // 13cm collision radius, and cannot clip into a
+                        // wall or masquerade as a solid mouth.
+                        if (showObj && mask[idx] > 2.5f) {
                             vbo_data[vbo_idx + 2] = -7.f;
-                        } else if (showObj && mask[idx] > 1.5f) {
+                        } else if (mask[idx] > 0.f) {
+                            vbo_data[vbo_idx + 2] = showObj?-1.f:0.f;
+                        } else if (showObj && mask[idx] < -0.32f) {
                             vbo_data[vbo_idx + 2] = -8.f;
-                        } else if (showObj && mask[idx] > 0.f) {
-                            vbo_data[vbo_idx + 2] = -1.f;
+                        } else if (displayFunnel && mask[idx]==0.0f) {
+                            vbo_data[vbo_idx + 2] = -4.f;
                         } else {
                             vbo_data[vbo_idx + 2] = echo::displayPressure(wave, visualScale);
                         }
@@ -498,14 +507,14 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (displayFunnel) {
-                            vbo_data[fp_idx + 2] = -4.f;
-                        } else if (showObj && mask[idx] > 2.5f) {
+                        if (showObj && mask[idx] > 2.5f) {
                             vbo_data[fp_idx + 2] = -7.f;
-                        } else if (showObj && mask[idx] > 1.5f) {
+                        } else if (mask[idx] > 0.f) {
+                            vbo_data[fp_idx + 2] = showObj?-1.f:0.f;
+                        } else if (showObj && mask[idx] < -0.32f) {
                             vbo_data[fp_idx + 2] = -8.f;
-                        } else if (showObj && mask[idx] > 0.f) {
-                            vbo_data[fp_idx + 2] = -1.f;
+                        } else if (displayFunnel && mask[idx]==0.0f) {
+                            vbo_data[fp_idx + 2] = -4.f;
                         } else {
                             vbo_data[fp_idx + 2] = echo::displayPressure(wave, visualScale);
                         }
@@ -866,6 +875,10 @@ int main(int argc, char* argv[])
     int decoyPulseX=0,decoyPulseY=0;
     double lastDecoySimTime=-100.0;
     constexpr double decoyCooldownSeconds=9.0;
+    // Positive subcell coverage: smoothed before encoding as a
+    // negative fractional ghost material into the solver mask.
+    std::vector<float> h_ghostTarget(SIZE*SIZE,0.0f);
+    std::vector<float> h_ghostCoverage(SIZE*SIZE,0.0f);
     bool automaticPulse=true;
     bool phasedClick=true, worldTones=true;
     bool echoOnlyMonitor=false; // opt-in until on-hardware listening tests
@@ -1108,11 +1121,17 @@ int main(int argc, char* argv[])
             }
         }
         updateDynamicMask(h_mask,h_dynamic);
-        // Moving enemies really alter the *CUDA wave boundary*, not merely
-        // the visuals. Static maze remains unchanged for CPU collisions.
-        if(arcadeEnabled) {
-            arcade.stampEnemies(h_dynamic);
-            arcade.stampShards(h_dynamic);
+        // Reflective shards remain hard materials, but spinning ghosts
+        // have fractional acoustic coverage smoothed over ~55ms. Unlike
+        // hard 0/2 masks, their pressure histories are never erased.
+        if(arcadeEnabled)arcade.stampShards(h_dynamic);
+        std::fill(h_ghostTarget.begin(),h_ghostTarget.end(),0.0f);
+        if(arcadeEnabled)arcade.stampGhostCoverage(h_ghostTarget.data());
+        for(size_t j=0;j<h_ghostCoverage.size();++j) {
+            h_ghostCoverage[j]=echo::smoothGhostCoverage(
+                h_ghostCoverage[j],h_ghostTarget[j],dtFrame);
+            if(h_dynamic[j]==0.0f && h_ghostCoverage[j]>0.002f)
+                h_dynamic[j]=-h_ghostCoverage[j];
         }
         CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float),
                               cudaMemcpyHostToDevice));
