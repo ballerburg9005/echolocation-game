@@ -16,6 +16,7 @@
 #include "svg_raster.h"
 #include "echo_arcade.h"
 #include "source_model.h"
+#include "direct_reference.h"
 #include "virtual_cane.h"
 #include "contact_audio.h"
 #include "proximity_audio.h"
@@ -851,11 +852,14 @@ int main(int argc, char* argv[])
     constexpr double decoyCooldownSeconds=9.0;
     bool automaticPulse=true;
     bool phasedClick=true, worldTones=true;
+    bool echoOnlyMonitor=false; // opt-in until on-hardware listening tests
+    echo::DirectResponse lastDirect;
+    uint64_t directPulseStart=UINT64_MAX;
 
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
     std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
     std::puts("[CONTROLS] F click | T auto-pings/stealth | G FDTD decoy (9s cooldown)");
-    std::puts("[CONTROLS] B directional/isotropic FDTD player click | N FDTD world tones");
+    std::puts("[CONTROLS] B phased/isotropic FDTD click | N world tones | J echo-only monitor (experimental)");
     std::puts("[CONTROLS] C obstacle scan | H spend charge for 5s ghost overdrive");
     std::puts("[CONTROLS] 1/2 pulse interval");
     std::puts("[CONTROLS] F5 short-range threat aid | F6 nearby-target aid (both OFF by default)");
@@ -927,6 +931,15 @@ int main(int argc, char* argv[])
                         printf("[SOURCES] Room-object FDTD tones %s\n",
                                 worldTones?"ON":"OFF");
                         break;
+                    case SDLK_j:
+                        if(!e.key.repeat) {
+                            echoOnlyMonitor=!echoOnlyMonitor;
+                            directPulseStart=UINT64_MAX;
+                            lastDirect={};
+                            printf("[MONITOR] %s direct-field subtraction (experimental)\n",
+                                echoOnlyMonitor?"Echo-only":"Full pressure");
+                        }
+                        break;
                     case SDLK_f:
                         if(!e.key.repeat) {
                             manualPulseAt=simStep2;
@@ -972,6 +985,8 @@ int main(int argc, char* argv[])
                         }
                         gameWon=false;collectedItems=0;simStep2=0;simTime=0;
                         manualPulseAt=UINT64_MAX;decoyPulseAt=UINT64_MAX;
+                        directPulseStart=UINT64_MAX;
+                        lastDirect={};
                         lastDecoySimTime=-100;automaticPulse=true;
                         g_player=initialPlayer;
                         updatePlayerComponents(g_player);
@@ -1275,6 +1290,30 @@ int main(int argc, char* argv[])
         const int rearY=(pair.enabled && phasedClick)?pair.backY:-1;
         const int rearDelay=(pair.enabled && phasedClick)?pair.backDelay:0;
         for (int i = 0; i < steps; ++i) {
+            const float alpha=(float)(i+1)/(float)steps;
+            const float micLX=previousMicLX+(g_mic_l_x-previousMicLX)*alpha;
+            const float micLY=previousMicLY+(g_mic_l_y-previousMicLY)*alpha;
+            const float micRX=previousMicRX+(g_mic_r_x-previousMicRX)*alpha;
+            const float micRY=previousMicRY+(g_mic_r_y-previousMicRY)*alpha;
+            // Keep the actual wave grid intact. Option J subtracts an
+            // independently FDTD-simulated homogeneous incident field
+            // ONLY from the headphones, after GPU sampling. It therefore
+            // leaves reflections to be generated normally by the grid.
+            if(echoOnlyMonitor && echo::pulseIndex(
+                simStep2,g_pulseIntervalSteps,g_pulseDurationSteps,
+                automaticPulse,manualPulseAt)==0) {
+                echo::PhasedSource refSource;
+                refSource.frontX=sourceX;refSource.frontY=sourceY;
+                refSource.backX=rearX;refSource.backY=rearY;
+                refSource.backDelay=rearDelay;
+                refSource.enabled=rearDelay>0;
+                lastDirect=echo::freeFieldDirect(
+                    refSource,micLX,micLY,micRX,micRY,
+                    g_pulseDurationSteps,g_DT,g_c2,g_decayFactor,
+                    PULSE_AMPLITUDE,g_waveVolumeScale,
+                    phasedClick && pair.enabled);
+                directPulseStart=simStep2;
+            }
             if (arcadeEnabled && automaticPulse && simStep2>=1000ULL &&
                 (simStep2-1000ULL)%(unsigned long long)g_pulseIntervalSteps==0ULL)
                 arcade.hearClick(g_pulse_x,g_pulse_y);
@@ -1289,11 +1328,6 @@ int main(int argc, char* argv[])
                                          decoyPulseX,decoyPulseY,decoyPulseAt);
             CUDA_CHECK(cudaGetLastError());
 
-            const float alpha=(float)(i+1)/(float)steps;
-            const float micLX=previousMicLX+(g_mic_l_x-previousMicLX)*alpha;
-            const float micLY=previousMicLY+(g_mic_l_y-previousMicLY)*alpha;
-            const float micRX=previousMicRX+(g_mic_r_x-previousMicRX)*alpha;
-            const float micRY=previousMicRY+(g_mic_r_y-previousMicRY)*alpha;
             captureAndReduce<<<1, 1>>>(d_p_next, micLX, micLY,
                                        micRX, micRY, audioBatchIndex,
                                        d_audioL, d_audioR, g_waveVolumeScale);
@@ -1326,8 +1360,18 @@ int main(int argc, char* argv[])
             CUDA_CHECK(cudaMemcpy(h_audioR.data(), d_audioR,
                                   audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
             h_audioOut.clear();
+            const uint64_t firstStep=simStep2-(uint64_t)audioBatchIndex;
             for (int k = 0; k < audioBatchIndex; ++k) {
-                audioResampler.push(h_audioL[k], h_audioR[k], h_audioOut);
+                const uint64_t physicalStep=firstStep+(uint64_t)k;
+                const float l=echoOnlyMonitor?
+                    echo::subtractDirect(h_audioL[k],lastDirect.left,
+                                         directPulseStart,physicalStep):
+                    h_audioL[k];
+                const float r=echoOnlyMonitor?
+                    echo::subtractDirect(h_audioR[k],lastDirect.right,
+                                         directPulseStart,physicalStep):
+                    h_audioR[k];
+                audioResampler.push(l,r,h_audioOut);
             }
             // A soft limiter prevents a numerical transient from delivering
             // arbitrary full-scale peaks to headphones.
