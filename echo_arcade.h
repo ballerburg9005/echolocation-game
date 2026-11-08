@@ -50,6 +50,7 @@ struct Shard {
     float x=0, y=0;
     bool collected=false;
 };
+struct GuidanceTarget { float x=0,y=0; bool exit=false,available=false; };
 struct ArcadeEvent {
     int pickups=0;
     bool hit=false;
@@ -203,6 +204,26 @@ public:
 
     // When a map supplies an explicit W landmark, make it the arcade exit.
     // Invalid or blocked marker positions leave the generated exit in place.
+    // Optional arcade guidance: select the *reachable* nearest shard by
+    // shortest-path cost in the collision-grid BFS. This cue is not physical
+    // acoustics and can be disabled with F6 to play by raw echoes.
+    GuidanceTarget guidanceTarget() const {
+        if(won||lost)return {};
+        if(remaining==0)return GuidanceTarget{exitX,exitY,true,true};
+        int bestDistance=std::numeric_limits<int>::max();
+        const Shard* closest=nullptr;
+        for(const Shard& shard:shards) {
+            if(shard.collected)continue;
+            int n=nodeAt(shard.x,shard.y);
+            if(distances_[n]>=0 && distances_[n]<bestDistance) {
+                bestDistance=distances_[n];
+                closest=&shard;
+            }
+        }
+        if(!closest)return {};
+        return GuidanceTarget{closest->x,closest->y,false,true};
+    }
+
     void setExit(float x,float y) {
         if(x>=1 && y>=1 && x<side_-1 && y<side_-1 &&
            !circleGridContact(grid_,side_,x,y,kAgentRadius).hit) {
