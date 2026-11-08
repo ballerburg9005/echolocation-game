@@ -120,6 +120,8 @@ struct ArcadeEvent {
     int chargesGained=0;
     int ghostsCaught=0;
     bool hit=false;
+    bool bounced=false;
+    float recoilX=0,recoilY=0;
     bool gameOver=false;
     bool cleared=false;
     bool enemyAlert=false;
@@ -311,12 +313,26 @@ public:
             }
             if(invulnerability<=0 && std::hypot(e.x-x,e.y-y)<24.0f){
                 --lives;result.hit=true;score=std::max(0,score-150);
-                invulnerability=2.0f;
+                invulnerability=3.0f;
                 if(lives<=0) {lost=true;result.gameOver=true;}
-                // Ghosts retreat to spawn, so the player has room to react.
+                // Recoil the *player* away from the contact; do not teleport
+                // moving FDTD reflecting ghosts halfway across the level
+                // instantaneously (a strong acoustic pressure transient).
+                float awayX=x-e.x,awayY=y-e.y;
+                const float distance=std::hypot(awayX,awayY);
+                if(distance<0.001f) {
+                    awayX=x-homeX_; awayY=y-homeY_;
+                    if(std::hypot(awayX,awayY)<0.001f)awayX=1.0f;
+                }
+                const float length=std::hypot(awayX,awayY);
+                const auto bounced=slideCircle(grid_,side_,x,y,
+                    16.0f*awayX/length,16.0f*awayY/length,13.0f);
+                result.bounced=true;
+                result.recoilX=bounced.x;
+                result.recoilY=bounced.y;
                 for(Enemy& other:enemies) {
-                    other.x=other.spawnX;other.y=other.spawnY;
                     other.alert=0;
+                    other.wanderTimer=0;
                     other.pursuitDistances.clear();
                 }
                 break;
