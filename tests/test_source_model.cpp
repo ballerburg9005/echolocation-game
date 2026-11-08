@@ -66,6 +66,19 @@ int main(){
     assert(echo::insideNgon(0,0,8,16));
     assert(!echo::insideNgon(9,0,8,16));
     assert(!echo::insideNgon(0,8,8,16,echo::kPi/16));
+    // At 1cm pixel resolution a 16-sided, 16cm target looked circular.
+    // A 20cm hexagon must show distinct flat edges and true 6-fold
+    // rotational symmetry (not a shifted circle/square composite).
+    assert(echo::insideNgon(10,0,10,6,0));
+    assert(echo::insideNgon(0,8,10,6,0));
+    assert(!echo::insideNgon(0,10,10,6,0));
+    for(int y=-8;y<=8;++y)for(int x=-8;x<=8;++x) {
+        const bool a=echo::insideNgon((float)x,(float)y,7.0f,8,
+                                      echo::kPi/8.0f);
+        const bool opposite=echo::insideNgon((float)-x,(float)-y,
+                                      7.0f,8,echo::kPi/8.0f);
+        assert(a==opposite);
+    }
     for(int y=0;y<80;++y)for(int x=0;x<80;++x)
         if(echo::insideNgon(x-40,y-40,8,16))
             materials[y*80+x]=2;
