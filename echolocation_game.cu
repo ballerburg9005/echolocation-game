@@ -640,7 +640,7 @@ static void initGraphics(GraphicsContext &gfx)
 // They indicate game rules; they should not be interpreted as 3D acoustics.
 static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
 {
-    const float duration=kind==5?0.52f:kind==6?0.24f:kind==7?0.32f:
+    const float duration=kind==8?0.07f:kind==5?0.52f:kind==6?0.24f:kind==7?0.32f:
                          kind==4?0.24f:kind==2?0.66f:
                          kind==3?0.60f:kind==1?0.34f:0.20f;
     const int count=(int)(duration*sampleRate);
@@ -651,7 +651,8 @@ static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
                        kind==2?(int)(t/0.22f):
                        kind==3?(int)(t/0.20f):
                        kind==1?(int)(t/0.17f):0;
-        const float frequency=kind==5?(460.0f+1080.0f*t/duration):
+        const float frequency=kind==8?570.0f:
+                              kind==5?(460.0f+1080.0f*t/duration):
                               kind==6?(1130.0f-540.0f*t/duration):
                               kind==7?(930.0f+240.0f*(float)note):
                               kind==4?(1040.0f+800.0f*t/duration):
@@ -662,7 +663,8 @@ static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
                                kind==3?0.20f:kind==1?0.17f:duration;
         const float phase=fmodf(t,noteLength)/noteLength;
         const float envelope=sinf(PI*phase);
-        const float v=0.18f*envelope*envelope*sinf(2.0f*PI*frequency*t);
+        const float v=(kind==8?0.045f:0.18f)*
+                      envelope*envelope*sinf(2.0f*PI*frequency*t);
         samples[2*i]=v;samples[2*i+1]=v;
     }
     SDL_QueueAudio(device,samples.data(),(Uint32)(samples.size()*sizeof(float)));
@@ -1107,17 +1109,33 @@ int main(int argc, char* argv[])
             if(arcadeEnabled) {
                 for(const echo::Enemy& en:arcade.enemies) {
                     if(en.eaten)continue;
-                    echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
-                        en.x,en.y,(int)en.archetype+echo::kGhostTracker,9.0f);
+                    const float proximity=echo::localEmitterGain(
+                        h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                        en.x,en.y,48.0f);
+                    if(proximity>0.01f)
+                        echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                            en.x,en.y,
+                            (int)en.archetype+echo::kGhostTracker,
+                            11.0f,proximity);
                 }
                 for(size_t n=0;n<arcade.shards.size();++n) {
                     const auto &sh=arcade.shards[n];
                     if(sh.collected)continue;
-                    echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
-                        sh.x,sh.y,echo::kShardFirst+(int)(n%12),6.0f);
+                    const float proximity=echo::localEmitterGain(
+                        h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                        sh.x,sh.y,42.0f);
+                    if(proximity>0.01f)
+                        echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                            sh.x,sh.y,echo::kShardFirst+(int)(n%12),
+                            8.0f,proximity);
                 }
-                echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
-                    arcade.exitX,arcade.exitY,echo::kArcadeExit,0.0f);
+                const float exitGain=echo::localEmitterGain(
+                    h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                    arcade.exitX,arcade.exitY,50.0f);
+                if(exitGain>0.01f)
+                    echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                        arcade.exitX,arcade.exitY,echo::kArcadeExit,
+                        0.0f,exitGain);
             }
             for(const ToneMarker &tm:g_toneMarkers) {
                 if(tm.collected)continue;
@@ -1125,8 +1143,14 @@ int main(int argc, char* argv[])
                 const int id=tm.type=='W'?echo::kSvgGoal:
                          tm.type=='I'?echo::kSvgItem:
                          echo::kSvgObstacle;
-                echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
-                                       tm.x,tm.y,id,0.0f);
+                const float maximum=tm.type=='O'?35.0f:
+                                    tm.type=='I'?42.0f:50.0f;
+                const float proximity=echo::localEmitterGain(
+                    h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                    tm.x,tm.y,maximum);
+                if(proximity>0.01f)
+                    echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                                           tm.x,tm.y,id,0.0f,proximity);
             }
         }
         CUDA_CHECK(cudaMemcpy(d_worldEmitters,h_worldEmitters.data(),
@@ -1137,16 +1161,15 @@ int main(int argc, char* argv[])
             if(arcadeEvent.pickups>0)playArcadeFeedback(beepDev,g_sampleRate,0);
             if(arcadeEvent.chargesGained>0)playArcadeFeedback(beepDev,g_sampleRate,7);
             if(arcadeEvent.ghostsCaught>0)playArcadeFeedback(beepDev,g_sampleRate,6);
-            if(arcadeEvent.hit)playArcadeFeedback(beepDev,g_sampleRate,
-                                                   arcadeEvent.gameOver?3:1);
+            if(arcadeEvent.hit)playArcadeFeedback(beepDev,g_sampleRate,8);
             if(arcadeEvent.cleared)playArcadeFeedback(beepDev,g_sampleRate,2);
             if(nowT-lastArcadeMessage>0.35) {
                 char title[256];
                 std::snprintf(title,sizeof(title),
-                    "ECHO ARCADE | %s | Score %d | Lives %d | Shards %d | Charges %d | R restart | B beam N tones",
-                    arcade.won?"LEVEL CLEAR":arcade.lost?"GAME OVER":
-                    arcade.overdrive>0?"GHOSTS FROZEN":"HUNT THE ECHO",
-                    arcade.score,arcade.lives,arcade.remaining,arcade.charges);
+                    "ECHO ARCADE | %s | Score %d | Shards %d | Charges %d | No deaths | B beam N cues",
+                    arcade.won?"LEVEL CLEAR":
+                    arcade.overdrive>0?"OVERDRIVE":"EXPLORE",
+                    arcade.score,arcade.remaining,arcade.charges);
                 SDL_SetWindowTitle(gfx.window,title);
                 lastArcadeMessage=nowT;
             }
@@ -1425,11 +1448,11 @@ int main(int argc, char* argv[])
                     mapGlyphs.push_back(2*y/SIZE-1);
                     mapGlyphs.push_back(code);
                 };
-                for(const echo::Enemy &en:arcade.enemies)
-                    if(!en.eaten)
-                        addGlyph(en.x,en.y,arcade.overdrive>0?-6.0f:-8.0f);
-                for(const echo::Shard &shard:arcade.shards)
-                    if(!shard.collected)addGlyph(shard.x,shard.y,-7.0f);
+                // No GL_POINT squares over ghost/shard masks. Previously
+                // their 8px square overlays stuck out of the curved
+                // rasterized polygons (the reported 'quarter-square coin').
+                // Let the same actual faceted FDTD occupancy define the
+                // silhouettes in this 2D view as well as acoustically.
                 addGlyph(arcade.exitX,arcade.exitY,-6.0f);
                 if(lastDecoySimTime>=0 &&
                    simTime-lastDecoySimTime<1.2)
