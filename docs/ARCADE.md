@@ -21,9 +21,14 @@ The maze has three wandering ghosts and up to twelve echo shards.
 Ghost contact is nonlethal; there is no lives-based game-over state.
 The room measures 5×5 metres (500×500 cells at 1 cm per cell).
 
-- Find all shards. Their 7cm-radius **eight-sided** masks reflect wave
-  energy in FDTD. They emit quiet 85ms chirps only while within 42cm
-  in unobstructed maze space. Optional direct guidance is off by default.
+- Find all shards. They are now **4cm-radius eight-sided octagons**,
+  down from 7cm radius, and spin 10.5–12.4 radians/s in the
+  **actual FDTD reflector geometry** as well as the 3D view. The
+  same sub-cell smoothing used for ghost rattles gives a softer
+  and lighter candy reflection. Brief 85ms FDTD notes use friendly
+  1.76–2.96kHz pentatonic pitches when within 42cm and unobstructed.
+  The coin pickup distance stays an easy 15cm for blind play.
+  Optional direct guidance is off by default.
 - Ghosts are **nonlethal solid bumpers**, not hazards. Their 10cm-radius,
   six-sided reflective bodies change the wave mask and move through
   accessible paths. Close, unobstructed encounters trigger distinct
@@ -101,7 +106,10 @@ This is NOT an impenetrable head or a calibrated bat beam.
 
 The tracker/sprinter/sentinel and candy have different *actual pressure
 field emitters*, placed in nearby fluid cells just outside their
-reflective polygon outlines. Generated exits and SVG O/I/W markers also
+rotating reflective polygon outlines. The candy audio is intentionally
+higher and softer than the ghosts', with a gentle upper-register
+pentatonic note as well as the smaller octagon's motion-induced
+scattering. Generated exits and SVG O/I/W markers also
 have distinct frequencies. Emission is a short 85ms Hann-tapered chirp
 rather than a continuously driven spaceship-like oscillator, spaced
 approximately 2.15s apart. The CPU enables a source only while the
@@ -112,7 +120,9 @@ is an intentional gameplay heuristic: it does NOT simulate correct
 3D distance attenuation or diffraction. Once emitted, the chirp
 propagates and reflects in the genuine 2D FDTD pressure field.
 N disables the optional room emitters to isolate physical clicks.
-Static walls and 6/8-sided moving objects are genuine mask materials.
+Static SVG walls remain hard mask materials; moving 6/8-sided
+ghosts/coins are smoothed, fractionally reflective FDTD materials.
+They do not abruptly zero pressure when rotating or being collected.
 
 **Game-only synthetic audio:** brief score/pickup/touch/victory event
 confirmations, optional F5/F6 UI assistance, C-key navigation cane, and
@@ -198,8 +208,9 @@ This version restores the idea with a new smaller and testable mesh pipeline.
   and acoustic propagation. Walls therefore occupy the same planar cells.
 - OpenGL 3.3 draws a right-handed perspective camera, directional
   lighting, subtle procedural materials and glowing 3D entities.
-  Ghost meshes use obvious six-sided contours and candy eight-sided contours,
-  matching their planar reflector mask facets.
+  Ghost meshes use obvious six-sided contours and the smaller candies
+  use eight-sided contours; both spin with their planar FDTD
+  reflector geometry.
   Grid +Y maps to GL -Z, so player turns match the 2D view. The
   ceiling is separated from obstacle roofs to prevent coplanar
   z-fighting stripes on round shapes; curved orbs use smoother shading.
@@ -223,13 +234,13 @@ application; it cannot exercise real GPU audio playback.
 
 - Real-time throughput and actual audio-device latency need profiling on
   representative NVIDIA hardware.
-- Ghosts now use rotating six-sided **fractional impedance** rather than
-  abrupt moving hard solids in the FDTD stencil; their sub-cell
-  coverage is exponentially smoothed across frames. This reduces
-  nonphysical pressure resets but still does not reproduce rigid-body
-  scattering or moving-boundary fluid momentum. The old moving wedge
-  mask remains absent. Moving hard candy/shard mask changes can
-  still generate pressure artifacts when collected or moved.
+- Ghosts and now the smaller eight-sided candies use rotating
+  **fractional impedance** instead of abrupt moving hard solids.
+  Their 2x2 sub-cell coverage is smoothed over ~55ms, avoiding
+  abrupt pressure resets on rotation and collection. Candy has
+  deliberately lower effective reflection strength than a ghost.
+  This is not yet true rigid-body scattering or a conservative
+  moving-boundary solver. The old moving wedge remains absent.
 - The optional J incident-field reference uses CPU time per click. Under
   load it could cause audio underruns; A/B test with J off and on before
   considering a default-on echo-only mode.
@@ -240,3 +251,20 @@ application; it cannot exercise real GPU audio playback.
   navigational sonification.
 - Accessible onboarding, spoken instruction, remappable keys and evaluation
   with blind players are not implemented yet.
+
+
+## Recorded audio inside FDTD (feasibility only)
+
+The same pressure solver could inject arbitrary bandlimited samples
+from an actual WAV recording instead of only synthesized pulses.
+At 1cm cells, roughly ten spatial samples per wavelength imply an
+upper reasonably resolved band near 3.4kHz, so a first experiment
+would filter to 2.5–3kHz, preload mono samples into GPU memory,
+move the source position smoothly, and read the resulting sound from
+the existing two virtual microphones. Source motion left/right of
+the listener would then be FDTD, not external stereo panning.
+A 2x2m floor-plan room at 1cm cells would cost roughly one-sixth of
+the current 5x5m planar grid. No ceiling, floor, real head scattering
+or individualized HRTFs are modeled; power draw alone does not
+validate performance on weaker GPUs. This is not implemented yet.
+See [WAV-in-FDTD design](RECORDED_AUDIO_FDTD.md).
