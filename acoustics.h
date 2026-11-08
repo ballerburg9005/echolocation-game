@@ -38,6 +38,35 @@ ECHO_HD inline float wallDamping(float reflection, float courant,
     return 0.5f * courant * impedance * adjacentWalls;
 }
 
+// The outer perimeter is a distinct HARD geometry material with a
+// softer acoustic impedance (rubber-like loss), not a perfectly rigid
+// or painted wall. Keep the 2-cell collision boundary unchanged.
+// Interior walls continue to use the player's adjustable R coefficient.
+constexpr float kOuterBoundaryMaterial=4.0f;
+constexpr float kOuterBoundaryReflection=0.32f;
+ECHO_HD inline float mixedWallDamping(float leftMaterial,
+    float rightMaterial,float downMaterial,float upMaterial,
+    float interiorReflection,float courant) {
+    const bool solidL=leftMaterial>0.0f;
+    const bool solidR=rightMaterial>0.0f;
+    const bool solidD=downMaterial>0.0f;
+    const bool solidU=upMaterial>0.0f;
+    const int soft=(int)(solidL&&leftMaterial>=3.5f)+
+                   (int)(solidR&&rightMaterial>=3.5f)+
+                   (int)(solidD&&downMaterial>=3.5f)+
+                   (int)(solidU&&upMaterial>=3.5f);
+    const int solid=(int)solidL+(int)solidR+(int)solidD+(int)solidU;
+    return wallDamping(interiorReflection,courant,solid-soft)+
+           wallDamping(kOuterBoundaryReflection,courant,soft);
+}
+inline void stampOuterBoundary(float* mask,int side,int thickness=2) {
+    if(!mask||side<=0||thickness<=0)return;
+    for(int y=0;y<side;++y)for(int x=0;x<side;++x)
+        if(x<thickness||y<thickness||
+           x>=side-thickness||y>=side-thickness)
+            mask[y*side+x]=kOuterBoundaryMaterial;
+}
+
 ECHO_HD inline float waveStep(float p, float prev, float left, float right,
                               float down, float up, float courantSq) {
     return 2.0f * p - prev +
