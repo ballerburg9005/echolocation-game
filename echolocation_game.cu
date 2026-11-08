@@ -622,7 +622,11 @@ int main(int argc, char* argv[])
     float *d_audioL, *d_audioR;
     CUDA_CHECK(cudaMalloc(&d_audioL, AUDIO_BATCH * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_audioR, AUDIO_BATCH * sizeof(float)));
-    float* h_audioBuffer = (float*)malloc(AUDIO_BATCH * 2 * sizeof(float));
+    std::vector<float> h_audioL(AUDIO_BATCH), h_audioR(AUDIO_BATCH);
+    std::vector<float> h_audioOut;
+    h_audioOut.reserve(AUDIO_BATCH * 2 + 8);
+    float* h_dynamic = (float*)malloc(SIZE * SIZE * sizeof(float));
+    if (!h_dynamic) { fprintf(stderr, "Out of host memory\n"); exit(1); }
 
     GraphicsContext gfx;
     initGraphics(gfx);
@@ -655,6 +659,8 @@ int main(int argc, char* argv[])
 
     g_sampleRate = have.freq;
     recalcDerivedParams();
+    echo::StereoLinearResampler audioResampler(g_DT, g_sampleRate);
+    updatePlayerComponents(g_player);
 
     dim3 thr(32, 32);
     dim3 blk((SIZE + 31) / 32, (SIZE + 31) / 32);
@@ -714,21 +720,17 @@ int main(int argc, char* argv[])
                         g_reflectionCoeff = 1.f - diff;
                         recalcDerivedParams();
                     } break;
-                    case SDLK_7: g_timeFudgeFactor -= 0.001f; recalcDerivedParams(); break;
-                    case SDLK_8: g_timeFudgeFactor += 0.001f; recalcDerivedParams(); break;
+                    case SDLK_7: g_waveVolumeScale -= 0.002f; recalcDerivedParams(); break;
+                    case SDLK_8: g_waveVolumeScale += 0.002f; recalcDerivedParams(); break;
                     case SDLK_SPACE: showObjects = !showObjects; break;
                 }
             }
         }
 
         uint64_t now = SDL_GetPerformanceCounter();
-        float dtFrame = (float)((now - lastCount) / (double)perfFreq);
+        // Bound interaction movement after stalls; simulation remains audio-paced.
+        float dtFrame = fminf(0.05f, (float)((now - lastCount) / (double)perfFreq));
         lastCount = now;
-
-        float* h_dynamic = (float*)malloc(SIZE * SIZE * sizeof(float));
-        updateDynamicMask(h_mask, h_dynamic, g_wedge_x, g_wedge_y, g_player.pivot_x, g_player.pivot_y);
-        CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float), cudaMemcpyHostToDevice));
-        free(h_dynamic);
 
         const Uint8* ks = SDL_GetKeyboardState(NULL);
         Player newP = g_player;
@@ -839,8 +841,13 @@ int main(int argc, char* argv[])
         updatePlayerComponents(newP);
         g_player = newP;
         updatePlayerComponents(g_player);
+        // The previous version rasterized the funnel from the previous frame.
+        updateDynamicMask(h_mask, h_dynamic, g_wedge_x, g_wedge_y,
+                          g_player.pivot_x, g_player.pivot_y);
+        CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float),
+                              cudaMemcpyHostToDevice));
 
-        double nowT = simTime;
+        double nowT = now / (double)perfFreq;
         if (!wasSliding && collided && nowT - lastBeep > beepGap) {
             float pan = sinf(collisionAngle);
             float lv = 0.5f + 0.5f * pan;
@@ -909,73 +916,72 @@ int main(int argc, char* argv[])
 
         wasSliding = sliding;
 
-        int rawSteps = (int)ceilf(dtFrame / g_DT);
-        int steps = (int)(rawSteps * g_timeFudgeFactor);
-        if (steps < 1) steps = 1;
-        if (steps > 1000) steps = 1000;
+        // SDL's output clock, not render-frame delta or an arbitrary fudge
+        // factor, determines how many real physical FDTD steps are needed.
+        const int queuedFrames = (int)(SDL_GetQueuedAudioSize(simDev) /
+                                       (2 * sizeof(float)));
+        const int targetFrames = (int)(0.060 * g_sampleRate);
+        const int missingFrames = std::max(0, targetFrames - queuedFrames);
+        const int steps = std::min(1024, std::min(AUDIO_BATCH,
+            (int)ceil((missingFrames + (missingFrames ? 2 : 0)) /
+                      (g_sampleRate * (double)g_DT))));
 
-        static unsigned long simStep2 = 0;
-        for (int i = 0; i < steps; i++) {
+        static unsigned long long simStep2 = 0;
+        for (int i = 0; i < steps; ++i) {
             updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev, d_mask,
                                          g_c2, SIZE, g_reflectionCoeff);
             CUDA_CHECK(cudaGetLastError());
 
-            addPulse<<<1, 1>>>(d_p_next, g_pulse_x, g_pulse_y, PULSE_AMPLITUDE,
-                               simStep2, g_pulseIntervalSteps, g_pulseDurationSteps,
-                               g_DT);
+            addPulse<<<1, 1>>>(d_p_next, d_mask, g_pulse_x, g_pulse_y,
+                              PULSE_AMPLITUDE, simStep2, g_pulseIntervalSteps,
+                              g_pulseDurationSteps, g_DT);
             CUDA_CHECK(cudaGetLastError());
 
             applyDecay<<<blocks1d, threads1d>>>(d_p_next, g_decayFactor);
             CUDA_CHECK(cudaGetLastError());
 
-            captureAndReduce<<<1, 32>>>(d_p_next, g_mic_l_x, g_mic_l_y,
-                                      g_mic_r_x, g_mic_r_y, audioBatchIndex,
-                                      d_audioL, d_audioR, g_waveVolumeScale);
+            captureAndReduce<<<1, 1>>>(d_p_next, g_mic_l_x, g_mic_l_y,
+                                       g_mic_r_x, g_mic_r_y, audioBatchIndex,
+                                       d_audioL, d_audioR, g_waveVolumeScale);
             CUDA_CHECK(cudaGetLastError());
 
-            audioBatchIndex++;
-            simStep2++;
+            ++audioBatchIndex;
+            ++simStep2;
             simTime += g_DT;
 
             float* tmp = d_p_prev;
             d_p_prev = d_p;
             d_p = d_p_next;
             d_p_next = tmp;
-
-            if (audioBatchIndex >= AUDIO_BATCH) break;
         }
 
         if (audioBatchIndex > 0) {
-            float* hostL = (float*)malloc(audioBatchIndex * sizeof(float));
-            float* hostR = (float*)malloc(audioBatchIndex * sizeof(float));
-            CUDA_CHECK(cudaMemcpy(hostL, d_audioL, audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
-            CUDA_CHECK(cudaMemcpy(hostR, d_audioR, audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
-
-            for (int k = 0; k < audioBatchIndex; k++) {
-                h_audioBuffer[2 * k] = hostL[k];
-                h_audioBuffer[2 * k + 1] = hostR[k];
+            CUDA_CHECK(cudaMemcpy(h_audioL.data(), d_audioL,
+                                  audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
+            CUDA_CHECK(cudaMemcpy(h_audioR.data(), d_audioR,
+                                  audioBatchIndex * sizeof(float), cudaMemcpyDeviceToHost));
+            h_audioOut.clear();
+            for (int k = 0; k < audioBatchIndex; ++k) {
+                audioResampler.push(h_audioL[k], h_audioR[k], h_audioOut);
             }
-            SDL_QueueAudio(simDev, h_audioBuffer, audioBatchIndex * 2 * sizeof(float));
-            CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(), 
-                                g_numToneMarkers * sizeof(ToneMarker), 
-                                cudaMemcpyHostToDevice));
-            free(hostL);
-            free(hostR);
+            // A soft limiter prevents a numerical transient from delivering
+            // arbitrary full-scale peaks to headphones.
+            for (float &sample : h_audioOut) {
+                sample = 0.8f * tanhf(sample);
+            }
+            if (!h_audioOut.empty() &&
+                SDL_QueueAudio(simDev, h_audioOut.data(),
+                               (Uint32)(h_audioOut.size() * sizeof(float))) != 0) {
+                fprintf(stderr, "SDL_QueueAudio error: %s\n", SDL_GetError());
+            }
             audioBatchIndex = 0;
-
-            const float BYTES_PER_FRAME = (float)(sizeof(float) * 2);
-            Uint32 queued = SDL_GetQueuedAudioSize(simDev);
-            float queuedSec = (float)queued / (BYTES_PER_FRAME * (float)g_sampleRate);
-
-            if (queuedSec > 0.06f) {
-                SDL_ClearQueuedAudio(simDev);
-                printf("Queue reset to avoid lag. (%.2f s)\n", queuedSec);
-            }
-
-            if (simTime - lastDebugTime >= 5.0) {
-                printf("[DEBUG] SimTime=%.2f  Steps=%d  QueuedSec=%.3f\n", simTime, steps, queuedSec);
-                lastDebugTime = simTime;
-            }
+        }
+        if (simTime - lastDebugTime >= 5.0) {
+            float queuedSeconds = SDL_GetQueuedAudioSize(simDev) /
+                                  (2.0f * sizeof(float) * g_sampleRate);
+            printf("[DEBUG] SimTime=%.2f Steps=%d AudioQueue=%.3fs\n",
+                   simTime, steps, queuedSeconds);
+            lastDebugTime = simTime;
         }
 
         float* vbo_data; size_t vbo_size;
@@ -1009,7 +1015,7 @@ int main(int argc, char* argv[])
     CUDA_CHECK(cudaFree(d_audioL));
     CUDA_CHECK(cudaFree(d_audioR));
     free(h_mask);
-    free(h_audioBuffer);
+    free(h_dynamic);
     free(beepBuf);
 
     glDeleteBuffers(1, &gfx.vbo);
