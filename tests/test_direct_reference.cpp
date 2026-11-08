@@ -114,5 +114,41 @@ int main(){
     std::printf("six-source array direct ear energy ratio %.5f\n",
                  focusedEnergy/singleEnergy);
     assert(singleEnergy>1e-6 && focusedEnergy<singleEnergy*0.20);
+    // Turn in place with continuous 6-source aperture. Unlike the old
+    // rounded 1cm sources, the direct waveform should not undergo
+    // huge discontinuities with orientation. This is the *actual*
+    // free-field pressure stencil and rear ear layout, not an HRTF.
+    float minPulsePeak=1.0e20f,maxPulsePeak=0.0f;
+    float minPulseEnergy=1.0e20f,maxPulseEnergy=0.0f;
+    for(int bearing=0;bearing<24;++bearing) {
+        const float heading=2.0f*echo::kPi*bearing/24.0f;
+        const auto rotated=echo::playerBeam(
+            N,empty.data(),82,82,heading,true);
+        const auto rotatedEars=echo::shieldedReceivers(
+            82,82,heading);
+        const auto response=echo::freeFieldDirect(
+            rotated,rotatedEars.leftX,rotatedEars.leftY,
+            rotatedEars.rightX,rotatedEars.rightY,duration,
+            echo::kStepSeconds,echo::kCourantSquared,
+            0.9995f,750.0f,0.01f,true);
+        assert(response.left.size()==158);
+        float peak=0.0f,energy=0.0f;
+        for(size_t k=0;k<response.left.size();++k) {
+            assert(std::isfinite(response.left[k]));
+            assert(std::isfinite(response.right[k]));
+            peak=std::max(peak,std::fabs(response.left[k]));
+            peak=std::max(peak,std::fabs(response.right[k]));
+            energy+=response.left[k]*response.left[k]+
+                    response.right[k]*response.right[k];
+        }
+        assert(energy>1e-9f);
+        minPulsePeak=std::min(minPulsePeak,peak);
+        maxPulsePeak=std::max(maxPulsePeak,peak);
+        minPulseEnergy=std::min(minPulseEnergy,energy);
+        maxPulseEnergy=std::max(maxPulseEnergy,energy);
+    }
+    std::printf("360-degree direct click: peak %.5f..%.5f energy %.5f..%.5f\\n",
+                 minPulsePeak,maxPulsePeak,minPulseEnergy,maxPulseEnergy);
+    assert(maxPulsePeak<minPulsePeak*4.0f);
     std::puts("scattered-field monitoring: real 6-source FDTD direct reference preserves echoes and shields rear ears");
 }
