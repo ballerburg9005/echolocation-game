@@ -14,6 +14,9 @@
 #include "acoustics.h"
 #include "collision.h"
 #include "svg_raster.h"
+#include "echo_arcade.h"
+#include "view3d.h"
+#include <climits>
 #include <ctype.h>
 
 #ifndef PI
@@ -400,7 +403,9 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 0.f) {
+                        if (showObj && mask[idx] > 1.5f) {
+                            vbo_data[vbo_idx + 2] = -8.f;
+                        } else if (showObj && mask[idx] > 0.f) {
                             vbo_data[vbo_idx + 2] = -1.f;
                         } else {
                             vbo_data[vbo_idx + 2] = tanhf(wave * 0.01f);
@@ -443,7 +448,9 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                         }
                     }
                     if (!toneMarker) {
-                        if (showObj && mask[idx] > 0.f) {
+                        if (showObj && mask[idx] > 1.5f) {
+                            vbo_data[fp_idx + 2] = -8.f;
+                        } else if (showObj && mask[idx] > 0.f) {
                             vbo_data[fp_idx + 2] = -1.f;
                         } else {
                             vbo_data[fp_idx + 2] = tanhf(wave * 0.01f);
@@ -461,6 +468,7 @@ struct GraphicsContext {
     SDL_Window* window;
     SDL_GLContext gl_context;
     GLuint vbo, vao, shader;
+    GLuint glyphVAO, glyphVBO;
     cudaGraphicsResource* cuda_vbo_resource;
 };
 
@@ -472,6 +480,7 @@ out vec3 color;
 void main(){
     gl_Position = vec4(pos, 0, 1);
     if (pressure < -9.0)      color = vec3(0, 0, 0);       // Black (invisible)
+    else if (pressure < -7.5) color = vec3(1, 0.18, 0.42); // Ghost reflector
     else if (pressure < -6.5) color = vec3(1, 1, 0);       // Gold for 'I'
     else if (pressure < -5.5) color = vec3(0, 1, 1);       // Cyan for 'W'
     else if (pressure < -4.5) color = vec3(1, 0, 1);       // Purple for 'O'
@@ -560,6 +569,21 @@ static void initGraphics(GraphicsContext &gfx)
     glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
+
+    // Small CPU-drawn map glyphs do not alter the acoustic occupancy mask.
+    // They show collectible shards/exit without creating fake reflectors.
+    glGenVertexArrays(1, &gfx.glyphVAO);
+    glGenBuffers(1, &gfx.glyphVBO);
+    glBindVertexArray(gfx.glyphVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, gfx.glyphVBO);
+    glBufferData(GL_ARRAY_BUFFER, 128 * 3 * sizeof(float), nullptr,
+                 GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3*sizeof(float),
+                          (void*)(2*sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
 }
 
 int main(int argc, char* argv[])
