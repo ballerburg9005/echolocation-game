@@ -258,11 +258,14 @@ static void updateDynamicMask(const float* h_static, float* h_dynamic, float wed
     }
 }
 
-// No block-level barriers: partial tiles in a 500x500 grid cannot deadlock.
-// Solids are excluded from the pressure field; neighboring fluid cells use a
-// rigid/impedance ghost pressure, rather than a sign-flipped "wall pressure".
+// Fused pressure / source / damping kernel. 2 launches rather than 4 per
+// 20.6us step removes substantial driver overhead on consumer GPUs.
+// This barrier-free stencil also works on partial CUDA blocks (SIZE=500).
 __global__ void updatePressure(float* p_next, const float* p, const float* p_prev,
-                               const float* mask, float c2, int size, float reflection)
+                               const float* mask, float c2, int size, float reflection,
+                               int sourceX, int sourceY, float amplitude,
+                               unsigned long long step, int interval,
+                               int duration, float dt, float decay)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -279,30 +282,16 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
     const float right = mask[idx + 1]    > 0.0f ? ghost : p[idx + 1];
     const float down  = mask[idx - size] > 0.0f ? ghost : p[idx - size];
     const float up    = mask[idx + size] > 0.0f ? ghost : p[idx + size];
-    p_next[idx] = echo::waveStep(center, previous, left, right, down, up, c2);
-}
+    float next = echo::waveStep(center, previous, left, right, down, up, c2);
 
-__global__ void applyDecay(float* p, float decay)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < SIZE * SIZE) {
-        p[idx] *= decay;
+    if (x == sourceX && y == sourceY && step >= 1000ULL && interval > 0) {
+        const unsigned long long elapsed = step - 1000ULL;
+        const int pulseStep = (int)(elapsed % (unsigned long long)interval);
+        if (pulseStep < duration) {
+            next += amplitude * echo::clickSample(pulseStep, duration, dt);
+        }
     }
-}
-
-__global__ void addPulse(float* p, const float* mask, float sx, float sy,
-                         float amplitude, unsigned long long t,
-                         int interval, int duration, float dt)
-{
-    if (blockIdx.x || threadIdx.x || t < 1000ULL || interval < 1) return;
-    const unsigned long long elapsed = t - 1000ULL;
-    const int pulseStep = (int)(elapsed % (unsigned long long)interval);
-    if (pulseStep >= duration) return;
-    const int ix = (int)roundf(sx), iy = (int)roundf(sy);
-    if (ix < 1 || ix >= SIZE - 1 || iy < 1 || iy >= SIZE - 1) return;
-    const int idx = iy * SIZE + ix;
-    if (mask[idx] > 0.0f) return;
-    p[idx] += amplitude * echo::clickSample(pulseStep, duration, dt);
+    p_next[idx] = next * decay;
 }
 
 __global__ void captureAndReduce(const float* p, float lx, float ly,
@@ -617,8 +606,6 @@ int main(int argc, char* argv[])
 
     dim3 thr(32, 32);
     dim3 blk((SIZE + 31) / 32, (SIZE + 31) / 32);
-    int threads1d = 1024;
-    int blocks1d = (SIZE * SIZE + threads1d - 1) / threads1d;
 
     uint64_t perfFreq = SDL_GetPerformanceFrequency();
     uint64_t lastCount = SDL_GetPerformanceCounter();
@@ -877,17 +864,14 @@ int main(int argc, char* argv[])
                       (g_sampleRate * (double)g_DT))));
 
         static unsigned long long simStep2 = 0;
+        const int sourceX = (int)roundf(g_pulse_x);
+        const int sourceY = (int)roundf(g_pulse_y);
         for (int i = 0; i < steps; ++i) {
             updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev, d_mask,
-                                         g_c2, SIZE, g_reflectionCoeff);
-            CUDA_CHECK(cudaGetLastError());
-
-            addPulse<<<1, 1>>>(d_p_next, d_mask, g_pulse_x, g_pulse_y,
-                              PULSE_AMPLITUDE, simStep2, g_pulseIntervalSteps,
-                              g_pulseDurationSteps, g_DT);
-            CUDA_CHECK(cudaGetLastError());
-
-            applyDecay<<<blocks1d, threads1d>>>(d_p_next, g_decayFactor);
+                                         g_c2, SIZE, g_reflectionCoeff,
+                                         sourceX, sourceY, PULSE_AMPLITUDE,
+                                         simStep2, g_pulseIntervalSteps,
+                                         g_pulseDurationSteps, g_DT, g_decayFactor);
             CUDA_CHECK(cudaGetLastError());
 
             captureAndReduce<<<1, 1>>>(d_p_next, g_mic_l_x, g_mic_l_y,
