@@ -62,5 +62,29 @@ int main(){
                 phasedEnergy/monoEnergy);
     assert(monoEnergy>0.00001f);
     assert(phasedEnergy<monoEnergy*0.30f);
+    // Validate the real ear positions when turning as well as facing
+    // along a grid axis. FDTD grid anisotropy / source quantization
+    // must not turn a diagonal heading into an amplified direct click.
+    for(float heading: {echo::kPi/8,echo::kPi/4,echo::kPi/2}) {
+        const auto oriented=echo::phasedSource(N,empty.data(),82,82,heading);
+        assert(oriented.enabled);
+        const auto layout=echo::shieldedReceivers(82,82,heading);
+        const auto aimed=echo::freeFieldDirect(oriented,
+            layout.leftX,layout.leftY,layout.rightX,layout.rightY,
+            duration,echo::kStepSeconds,echo::kCourantSquared,
+            0.9995f,750.0f,0.01f,true);
+        const auto plain=echo::freeFieldDirect(oriented,
+            layout.leftX,layout.leftY,layout.rightX,layout.rightY,
+            duration,echo::kStepSeconds,echo::kCourantSquared,
+            0.9995f,750.0f,0.01f,false);
+        float aE=0.0f,mE=0.0f;
+        for(size_t i=0;i<aimed.left.size();++i) {
+            aE+=aimed.left[i]*aimed.left[i]+
+                aimed.right[i]*aimed.right[i];
+            mE+=plain.left[i]*plain.left[i]+
+                plain.right[i]*plain.right[i];
+        }
+        assert(mE>0.000001f && aE/mE<0.30f);
+    }
     std::puts("scattered-field monitoring: true rear ears suppress direct pressure, FDTD subtraction preserves echoes");
 }
