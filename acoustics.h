@@ -75,6 +75,16 @@ ECHO_HD inline float clickSample(int index, int duration, float dt) {
     return envelope * sinf(2.0f * kPi * kClickFrequencyHz * index * dt);
 }
 
+// Logarithmic DISPLAY-only pressure encoding. Negative values below -1
+// are reserved for SDL/OpenGL glyph metadata; never let a strong wave
+// become an invisible sentinel or a ghost marker. Wave physics unchanged.
+ECHO_HD inline float displayPressure(float pressure,float exposure) {
+    const float magnitude=fabsf(pressure)*fmaxf(0.000001f,exposure);
+    const float mapped=log1pf(5.0f*magnitude)/logf(51.0f);
+    const float limit=fminf(0.98f,mapped);
+    return copysignf(limit,pressure);
+}
+
 // The visible sound funnel is an overlay, not a moving solid obstacle.
 // Rotating/translating a binary funnel mask each frame abruptly changes
 // boundary conditions and creates spurious rattling in a wave solver.
