@@ -46,8 +46,18 @@ Launch the new level with:
     ./build/echolocation_game echo_arena.svg
 
 Important new controls: **F** manual ping, **T** toggle automatic pulses
-(stealth), **F2** swap 2D/3D view, **F3** immersive 3D, **F4** arcade on/off,
-**F5** ghost heartbeat on/off, **F6** guidance beacon on/off, **R** restart.
+(stealth), **G** throw an FDTD sound decoy (9-second cooldown), **C** three-ray
+virtual cane scan, **F2** swap 2D/3D view, **F3** immersive 3D,
+**F4** arcade on/off, **F5** ghost heartbeat on/off,
+**F6** guidance beacon on/off, **R** restart.
+
+Enemies now have distinct tracker/sprinter/sentinel personalities, with
+different speeds, hearing ranges and audio/visual identities. They hear
+through reachable maze passages rather than a simple straight-line radius,
+and pursue where the last ping occurred instead of knowing your live position.
+A thrown decoy excites the same FDTD wave grid as a real click; the virtual
+cane's measured obstacle taps are explicitly a separate synthetic audio aid.
+The game finds a legal starting spot on each level and restarts there.
 The original WASD/arrows/QE movement, Space visibility and numeric wave
 parameter controls are retained. See [arcade guide](docs/ARCADE.md).
 
@@ -105,6 +115,7 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 - W/S or Up/Down: move. A/D or Left/Right: rotate. Q/E: strafe.
 - Space: toggle visualization of reflective objects. Escape: quit.
 - F manually generates a click; T enables/disables automatic pulses (stealth).
+- G projects a sound decoy into a legal point ahead; C emits stereo left/center/right virtual cane taps.
 - F2 toggles right viewport 2D/3D; F3 toggles full-window first-person 3D.
 - F4 toggles Ghost Circuit game mode; F5 enemy heartbeat, F6 target beacons.
 - R restarts all lives, shards, enemies, acoustic state and item pickups.
@@ -116,8 +127,10 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 - Ghosts and shards are distinguishable in 3D, in 2D, and acoustically.
 - Generated shard/exit guidance and threat heartbeats are nonphysical game
   audio cues and are optional. They are not part of the 2D wave simulation.
-- The virtual cane remains unimplemented. There is no speech tutorial,
-  key remapping, or true 3D binaural HRTF rendering.
+- The C-key virtual cane is a three-ray obstacle sonification aid, not a
+  physical cane or acoustic scattering model. The old mouse-driven cane
+  remains unimplemented. There is no speech tutorial, key remapping,
+  or true 3D binaural HRTF rendering.
 - Real-time output requires a sufficiently fast CUDA GPU. If a GPU cannot
   keep up, audio may underrun rather than silently using incorrect time.
 
