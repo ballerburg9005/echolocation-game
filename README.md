@@ -4,6 +4,55 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 # Echolocation Game
 
+## FDTD-only world acoustics and echo-first listening (experimental)
+
+The original wedge was a makeshift impenetrable shield protecting the ears
+from the direct click. Replacing it with a mere visual outline removed
+movement-induced mask pressure artifacts, but also removed its acoustical
+shield. This branch now includes two **optional A/B listening experiments**:
+
+- **B — phased vs. isotropic FDTD click.** The default click uses two
+  pressure sources separated by about 6cm: the rear element has opposite
+  sign and is delayed by the sound transit time, interfering destructively
+  behind the player. It DOES NOT turn the player into an impenetrable body,
+  nor does it guarantee no direct sound at the ears. In a free-field CPU
+  FDTD regression using the same stencil, backward receiver energy was
+  reduced by about 98% relative to a single point source; that is a
+  numerical bench test, NOT a perceptual calibration.
+- **J — experimental echo-only headphone monitor (OFF by default).**
+  Independently FDTD-simulates the same click in an empty room and
+  subtracts that "incident" waveform from the receiver samples *before
+  resampling*. The world pressure still contains ALL sound and reflects
+  normally. This is a finite-difference incident/scattered field
+  decomposition, not a physically impossible "sound reflects but never
+  propagates until it hits something" shortcut. It is approximate when
+  the player moves during an emitted pulse and adds CPU work, so use J
+  to compare rather than assuming it is already more accurate.
+- **N — disable/enable quiet FDTD world sounds.** Ghosts, generated candy
+  shards, exits, and legacy SVG O/I/W landmarks emit distinct, gently
+  modulated tones directly into the pressure field. Propagation, room
+  occlusion and 2D reflections are therefore handled by FDTD.
+  They are intentionally quiet but may still resonate in small rooms;
+  toggle N when testing echo-only navigation. Collision taps and short
+  game-rule reward sounds remain direct UI feedback, not FDTD.
+- **Faceted acoustic objects:** ghosts are **16-gon reflectors** and
+  candy shards are octagons, instead of smooth solid disks. This makes
+  physical contours available to the grid but does not guarantee that
+  facets will sound perceptually distinct at the current wavelength.
+- **Collision and game-over bug fix:** enemy hits push the player away
+  (with three seconds of protection) instead of instantly teleporting
+  every ghost FDTD reflector back to spawn. After game over, enemies
+  and remaining shards stay visible and acoustically present; **R**
+  restarts the round.
+- **2D wave gradient:** wave colors use logarithmic display-only
+  exposure, not the old aggressive tanh saturation that made broad
+  flat-color bands. **9/0** adjust *display* brightness without
+  changing the simulated pressures or audio gain.
+
+Both CUDA compilation and CPU numerical tests are useful, but none of this
+replaces a headphone experiment on the intended NVIDIA GPU. Keep volume
+low when testing J, B or the new in-field tones.
+
 ## Listening and camera corrections (following real-player feedback)
 
 The latest iteration addresses issues observed on hardware in an earlier
@@ -57,9 +106,9 @@ fixes important correctness and usability issues.
   microphones use bilinear sampling and audio has a soft limiter.
 - **Navigation:** substepped, test-covered wall sliding and collision
   prevents tunneling on slow frames.
-- **Blind-play cues:** close-only obstacle/item/goal discoveries chime
-  briefly without broadcasting across the level; item pickups and the goal
-  play unique melodies.
+- **Blind-play cues:** objects radiate their own deliberately quiet FDTD
+  tones, with distinct frequencies and geometry; contact and short
+  score/collection announcements are separate UI feedback.
 - **SVG:** native circles, ellipses and rectangles, Inkscape elliptical
   arcs, basic fill/stroke handling and clipped rasterization.
 
@@ -69,12 +118,12 @@ The old experimental branch already contained a separate 3D rendering idea.
 This branch recovers and modernizes the concept as a lightweight OpenGL
 **first-person 2.5D view built from the same acoustically reflective grid**.
 
-There is now an actual sound-driven arcade game: three wandering enemies
+There is now a sound-driven arcade game: three wandering enemies
 that chase nearby pings and act as dynamic CUDA wave reflectors, up to twelve
 golden shards that also reflect waves, three lives, scoring, an unlockable
-exit, collisions and victory sounds. The optional high-pitched target beacon
-and low-pitched ghost heartbeat can be enabled to help blind players
-navigate nearby targets; **both are off by default**. A new sample maze, **Ghost Circuit**, lives at
+exit, collisions and victory sounds. Ghosts, shards and goal markers now
+also radiate quiet **physical pressure-field tones**. Optional direct
+non-FDTD proximity helpers are off by default. A new sample maze, **Ghost Circuit**, lives at
 [echo_arena.svg](echo_arena.svg).
 
 Launch the new level with:
@@ -165,6 +214,9 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 - F2 toggles right viewport 2D/3D; F3 toggles full-window first-person 3D.
 - F4 toggles Ghost Circuit game mode; F5 nearby enemy heartbeat,
   F6 nearby target beacon. F5/F6 are OFF initially.
+- B compares phased/isotropic FDTD player sources; N toggles world FDTD
+  tones; J compares experimental direct-field subtraction (off by default).
+- 9/0 changes only the 2D wave display exposure, not physics.
 - R restarts all lives, shards, enemies, acoustic state and item pickups.
 - Keys **1/2**: pulse interval; **3/4**: per-step wave decay;
   **5/6**: wall reflection; **7/8**: echolocation playback gain.
@@ -191,10 +243,13 @@ Inkscape elliptical-arc paths. It rasterizes basic fill/stroke geometry;
 arbitrary paths, transforms, CSS inheritance and complex viewBox scaling
 remain unsupported. A warning is logged for transforms.
 
-A text element containing exactly O, I or W becomes a directional audible
-landmark. Short unobstructed-range chimes activate within 24 cm (O),
-30 cm (I), or 35 cm (W), with no constant global beeping. Approaching to
-approximately 13 cm collects an item or activates the goal.
+A text element containing exactly O, I or W becomes a FDTD-emitting
+acoustic landmark with a distinct low-level characteristic frequency.
+The static sources remain in the simulated wave field until collected,
+and can be found by listening to their waves and reflections.
+Approaching to approximately 13 cm collects an item or activates the goal.
+The earlier artificial proximity chirps have been removed; these sources
+can in principle be heard beyond the old hard proximity cutoffs.
 
 Load an example level:
 
