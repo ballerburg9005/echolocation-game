@@ -34,6 +34,10 @@ int main(){
     int reflectors=0;
     for(float value:dynamic)if(value==2.0f)++reflectors;
     assert(reflectors>0);
+    game.stampShards(dynamic.data());
+    int shardReflectors=0;
+    for(float value:dynamic)if(value==3.0f)++shardReflectors;
+    assert(shardReflectors>0);
     game.hearClick(game.enemies[0].x,game.enemies[0].y);
     assert(game.enemies[0].alert>0.0f);
     // Items collect exactly once.
