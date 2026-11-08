@@ -38,6 +38,13 @@ int main(){
     const auto front=echo::contactEars(0,13,48000);
     const auto back=echo::contactEars(3.14159265358979f,13,48000);
     assert(!front.behind && back.behind);
+    // The cue's ear coordinates now agree with FDTD sampling:
+    // -6.5cm behind pivot, 4.5cm lateral (9cm ear spacing).
+    const float expectedFront=std::hypot(13.0f+6.5f,4.5f);
+    const float expectedRear=std::hypot(-13.0f+6.5f,4.5f);
+    assert(std::fabs(front.leftDistanceCm-expectedFront)<0.001f);
+    assert(std::fabs(back.leftDistanceCm-expectedRear)<0.001f);
+    assert(front.leftDistanceCm>back.leftDistanceCm*2.0f);
     assert(std::fabs(front.leftGain-front.rightGain)<1e-5f);
     assert(std::fabs(back.leftGain-back.rightGain)<1e-5f);
     const auto frontAudio=echo::renderContactTap(front,48000);
