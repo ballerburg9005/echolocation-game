@@ -20,6 +20,21 @@
 #endif
 
 namespace echo {
+// The original microphones sat almost exactly left/right of the source.
+// A two-element forward beam has poor lateral suppression there; worse,
+// near-field interference can INCREASE direct pressure at those positions.
+// Keep the ears behind both source elements, still inside the player's
+// 13cm collision circle: 8cm backwards, 6cm lateral (10cm radial).
+// This is not rigid head scattering; it is deliberate receiver placement.
+struct ReceiverLayout {
+    float leftX=0,leftY=0,rightX=0,rightY=0;
+};
+inline ReceiverLayout shieldedReceivers(float x,float y,float heading) {
+    const float fx=std::cos(heading),fy=std::sin(heading);
+    const float lx=-fy,ly=fx;
+    return {x-8.0f*fx+6.0f*lx,y-8.0f*fy+6.0f*ly,
+            x-8.0f*fx-6.0f*lx,y-8.0f*fy-6.0f*ly};
+}
 struct PhasedSource {
     int frontX=0,frontY=0,backX=0,backY=0,backDelay=0;
     bool enabled=false;
