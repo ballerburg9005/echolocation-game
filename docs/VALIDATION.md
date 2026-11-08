@@ -200,8 +200,9 @@ moving obstacles and GPU/CPU precision differences may leave direct
 signal artifacts. Computing the reference on CPU at a pulse start may
 delay frames, hence J is deliberately OFF by default.
 
-Game acoustic models now use clearly visible **hexagonal 10cm-radius
-ghosts** and **octagonal 7cm-radius shards**, with matching 3D models.
+Game acoustic models use **hexagonal 10cm-radius ghosts** and now
+much **smaller octagonal 4cm-radius candies**, with matching spinning
+3D models. The candy collection radius remains a forgiving 15cm.
 Ghosts spin at about 4.8–6.2 radians/sec and choose a new
 wandering heading every 0.20–0.55s. Alert lasts only 0.65–0.8s
 following a nearby click. Their REAL FDTD reflector polygons
@@ -209,11 +210,15 @@ now rotate at the same rate as the visuals. Instead of writing a
 binary wall-id 2 then zeroing every newly solid cell's pressure,
 a separate 2×2 subcell coverage map records 0..1 material fraction
 and an exponential ~55ms filter limits how much each cell changes
-per display frame. The fractional reflectivity is stored as
-NEGATIVE mask coverage while SVG walls and candy remain positive
-hard materials. The CUDA pressure stencil blends fluid-neighbor
-coupling toward the 98% reflecting, zero-gradient condition
-continuously. The field retains pressure history even *inside*
+per display frame. Fractional reflectivity is now stored in a single existing CUDA
+float mask per cell: negative values between -1 and 0 encode ghost
+coverage, whereas values between -2 and -1 encode spinning candy
+coverage. Static SVG walls stay positive hard materials. The CUDA
+stencil blends fluid-neighbor coupling toward the ~98% reflecting
+ghost condition, or a gentler ~82% reflecting candy condition,
+continuously. This does not allocate an additional GPU grid buffer
+or launch a separate device kernel. Two extra CPU-side target/smoothed
+coverage arrays do add an O(grid size) update once per display frame. The field retains pressure history even *inside*
 the ghost. This is NOT a fully physical moving rigid-boundary
 solver: time-dependent impedance may still alter energy, so
 listen for transients and benchmark numerical stability.
@@ -222,10 +227,15 @@ top of each reflector, making coins appear misshapen. Those duplicate
 squares are removed. Ghost hits now cause an at-most-1.5cm bump and a
 tiny contact signal, with neither death nor score loss. The game
 cannot lose lives or freeze its AI from repeated ghost contact.
-Moving binary reflectors CAN STILL introduce pressure discontinuities
-as their boundaries cross grid cells. Numerical moving-medium treatment,
-subcell geometry/impedance interpolation and real hardware artifact
-tests remain future work.
+The candy octagons rotate more quickly than ghosts (10.5–12.4rad/s,
+with 8-fold symmetry) but retain their pressure history; collection
+fades out the soft occupancy. They emit separate high-register
+FDTD notes selected from ~1.76–2.96kHz pentatonic pitches, inside
+the roughly resolved 1cm-cell acoustic band. This is a deliberately
+small, friendlier cue and may be less audible farther away than
+the larger ghost scatterers. Numerical moving-medium momentum,
+energy-conserving subcell impedance and hardware listening tests
+remain future work.
 
 The previous **continuous oscillating sources** were a design regression:
 with 2D geometric spreading and bounded-room resonances, they could
@@ -282,3 +292,24 @@ frontness. There is no loud forward-only pang. A full 16-point compass
 regression tests contact localization, front/back pitch consistency,
 and sound gating by world contact direction. This is not pinna/HRTF
 rendering; ambiguous front/back localization may remain.
+
+
+## Arbitrary recorded audio: possible, not yet implemented
+
+A wave-source term is not limited to oscillators, clicks, or preset
+frequency bands. Feed an arbitrary PCM sequence (for example decoded
+from a WAV), resampled onto the ~48.5kHz simulation time grid and
+bandlimited according to the 1cm **spatial** grid, directly into the
+existing pressure kernel at a fluid source cell. The headphones
+then sample that field at two independently located virtual ears.
+Source motion from one side of the head to the other must be smoothed
+and bilinearly distributed to nearby fluid cells to avoid new pops.
+With 343m/s sound speed, 10 cells/wavelength corresponds to ~3.4kHz;
+a conservative first test should low-pass to 2.5–3kHz. 2D propagation,
+missing floor/ceiling and no HRTF prevent true room- or human-ear
+fidelity, but the mechanism is physically meaningful as a 2D demo.
+The 500² × ~48.5k pressure-cell updates/s are already the primary
+simulation load; a *preloaded* short mono sample accessed at one
+spatial source adds modest arithmetic without another full-grid
+kernel, but **requires actual GPU profiling**. See
+[WAV source design](RECORDED_AUDIO_FDTD.md).
