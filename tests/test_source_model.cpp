@@ -41,7 +41,7 @@ static float freeFieldEnergy(bool paired,bool rearProbe) {
 // pair rejects the back but radiates strongly sideways; the new three-across
 // aperture must actually reduce SIDE energy in the same FDTD stencil.
 static std::array<double,3> directionalEnergies(
-    const echo::BeamArray& beam) {
+    const echo::BeamArray& beam,float heading=0.0f) {
     constexpr int N=180,steps=173;
     std::vector<float> old(N*N,0),now(N*N,0),next(N*N,0);
     const int duration=(int)std::lround(
@@ -65,9 +65,16 @@ static std::array<double,3> directionalEnergies(
                     beam.weights[k]*echo::clickSample(
                         step-e.backDelay,duration,echo::kStepSeconds);
         }
-        energy[0]+=next[90*N+132]*next[90*N+132]; // forward
-        energy[1]+=next[132*N+90]*next[132*N+90]; // 90-degree side
-        energy[2]+=next[90*N+48]*next[90*N+48]; // rear
+        for(int angleIndex=0;angleIndex<3;++angleIndex) {
+            const float angle=heading+
+                (angleIndex==1?echo::kPi/2.0f:
+                 angleIndex==2?echo::kPi:0.0f);
+            const float sx=90.0f+42.0f*std::cos(angle);
+            const float sy=90.0f+42.0f*std::sin(angle);
+            const double pressure=echo::bilinearSample(
+                next.data(),N,sx,sy);
+            energy[angleIndex]+=pressure*pressure;
+        }
         old.swap(now);now.swap(next);
     }
     return energy;
@@ -117,6 +124,18 @@ int main(){
     assert(focused[1]<wide[1]*0.30);
     assert(focused[2]<focused[0]*0.06);
     assert(focused[0]>wide[0]*0.70);
+    // Rotating the player should rotate the *acoustic beam*, not leave
+    // a fixed-forward visual shape with a broad sideways actual wave.
+    for(float heading:{echo::kPi/8.0f,echo::kPi/4.0f,
+                       echo::kPi/2.0f,3.0f*echo::kPi/4.0f}) {
+        const auto turned=echo::playerBeam(
+            N,mask.data(),90.0f,90.0f,heading,true);
+        assert(turned.valid && turned.directional);
+        const auto energy=directionalEnergies(turned,heading);
+        assert(energy[0]>1e-5);
+        assert(energy[1]/energy[0]<0.22);
+        assert(energy[2]/energy[0]<0.08);
+    }
     // Avoid a clipped aperture when one of the outer sources would
     // be embedded in an SVG solid; fallback to safe central pair.
     auto obstructed=mask;
