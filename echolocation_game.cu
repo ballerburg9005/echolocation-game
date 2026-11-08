@@ -15,6 +15,7 @@
 #include "collision.h"
 #include "svg_raster.h"
 #include "echo_arcade.h"
+#include "source_model.h"
 #include "virtual_cane.h"
 #include "contact_audio.h"
 #include "proximity_audio.h"
@@ -287,8 +288,11 @@ static void updateDynamicMask(const float* staticMask,float* dynamicMask) {
 // 20.6us step removes substantial driver overhead on consumer GPUs.
 // This barrier-free stencil also works on partial CUDA blocks (SIZE=500).
 __global__ void updatePressure(float* p_next, const float* p, const float* p_prev,
-                               const float* mask, float c2, int size, float reflection,
-                               int sourceX, int sourceY, float amplitude,
+                               const float* mask, const float* worldEmitters,
+                               float c2, int size, float reflection,
+                               int sourceX, int sourceY,
+                               int rearX, int rearY, int rearDelay,
+                               float amplitude,
                                unsigned long long step, int interval,
                                int duration, float dt, float decay,
                                bool automaticPulse, uint64_t manualPulseStart,
@@ -334,7 +338,19 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
         const int pulseStep=echo::pulseIndex(
             step,interval,duration,automaticPulse,manualPulseStart);
         if(pulseStep>=0)
-            next+=amplitude*echo::clickSample(pulseStep,duration,dt);
+            next+=amplitude*echo::phasedPlayerClick(
+                pulseStep,duration,dt,false,rearDelay);
+    }
+    // Delayed rear canceling source: backward-field interference without a
+    // moving solid/head. Reflected energy remains in the SAME wave field.
+    if (x == rearX && y == rearY && rearDelay>0 &&
+        step >= (uint64_t)rearDelay) {
+        const int backStep=echo::pulseIndex(
+            step-(uint64_t)rearDelay,interval,duration,
+            automaticPulse,manualPulseStart);
+        if(backStep>=0)
+            next+=amplitude*echo::phasedPlayerClick(
+                backStep,duration,dt,true,0);
     }
     // An actual remote source in the *same* FDTD solver: the decoy is
     // not merely a stereo UI chirp or visually painted distraction.
@@ -344,6 +360,11 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
         const int decoyStep=(int)(step-decoyStart);
         next+=amplitude*0.95f*echo::clickSample(decoyStep,duration,dt);
     }
+    // Continuous room-object sources travel through/refelect from the
+    // same FDTD geometry as clicks, unlike the old global UI beacons.
+    const float emitter=worldEmitters[idx];
+    if(emitter>=1.0f)
+        next+=echo::fdtdWorldTone(emitter,step,dt);
     p_next[idx] = next * decay;
 }
 
@@ -719,6 +740,9 @@ int main(int argc, char* argv[])
 
     float *d_mask;
     CUDA_CHECK(cudaMalloc(&d_mask, SIZE * SIZE * sizeof(float)));
+    float *d_worldEmitters;
+    CUDA_CHECK(cudaMalloc(&d_worldEmitters,SIZE*SIZE*sizeof(float)));
+    std::vector<float> h_worldEmitters(SIZE*SIZE,0.0f);
 
     float *d_p, *d_p_prev, *d_p_next;
     CUDA_CHECK(cudaMalloc(&d_p, SIZE * SIZE * sizeof(float)));
@@ -818,10 +842,12 @@ int main(int argc, char* argv[])
     double lastDecoySimTime=-100.0;
     constexpr double decoyCooldownSeconds=9.0;
     bool automaticPulse=true;
+    bool phasedClick=true, worldTones=true;
 
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
     std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
-    std::puts("[CONTROLS] F click | T auto-pings/stealth | G throw wall-blocked decoy (9s cooldown)");
+    std::puts("[CONTROLS] F click | T auto-pings/stealth | G FDTD decoy (9s cooldown)");
+    std::puts("[CONTROLS] B directional/isotropic FDTD player click | N FDTD world tones");
     std::puts("[CONTROLS] C obstacle scan | H spend charge for 5s ghost overdrive");
     std::puts("[CONTROLS] 1/2 pulse interval");
     std::puts("[CONTROLS] F5 short-range threat aid | F6 nearby-target aid (both OFF by default)");
@@ -876,6 +902,16 @@ int main(int argc, char* argv[])
                     case SDLK_F6: guidanceAudio=!guidanceAudio; break;
                     case SDLK_t:
                         if(!e.key.repeat)automaticPulse=!automaticPulse;
+                        break;
+                    case SDLK_b:
+                        if(!e.key.repeat)phasedClick=!phasedClick;
+                        printf("[SOURCE] %s FDTD player click\n",
+                                phasedClick?"forward-phased":"isotropic");
+                        break;
+                    case SDLK_n:
+                        if(!e.key.repeat)worldTones=!worldTones;
+                        printf("[SOURCES] Room-object FDTD tones %s\n",
+                                worldTones?"ON":"OFF");
                         break;
                     case SDLK_f:
                         if(!e.key.repeat) {
@@ -1024,6 +1060,38 @@ int main(int argc, char* argv[])
         }
         CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float),
                               cudaMemcpyHostToDevice));
+        // CPU builds only the sparse FDTD source map once per *frame*.
+        // The pressure kernel sees O(1) map access, not O(object count)
+        // comparisons for every one of ~48,500 steps each second.
+        std::fill(h_worldEmitters.begin(),h_worldEmitters.end(),0.0f);
+        if(worldTones) {
+            if(arcadeEnabled) {
+                for(const echo::Enemy& en:arcade.enemies) {
+                    if(en.eaten)continue;
+                    echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                        en.x,en.y,(int)en.archetype+echo::kGhostTracker,9.0f);
+                }
+                for(size_t n=0;n<arcade.shards.size();++n) {
+                    const auto &sh=arcade.shards[n];
+                    if(sh.collected)continue;
+                    echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                        sh.x,sh.y,echo::kShardFirst+(int)(n%12),6.0f);
+                }
+                echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                    arcade.exitX,arcade.exitY,echo::kArcadeExit,0.0f);
+            }
+            for(const ToneMarker &tm:g_toneMarkers) {
+                if(tm.collected)continue;
+                if(arcadeEnabled && tm.type=='W')continue;
+                const int id=tm.type=='W'?echo::kSvgGoal:
+                         tm.type=='I'?echo::kSvgItem:
+                         echo::kSvgObstacle;
+                echo::placeWorldEmitter(h_worldEmitters,h_dynamic,SIZE,
+                                       tm.x,tm.y,id,0.0f);
+            }
+        }
+        CUDA_CHECK(cudaMemcpy(d_worldEmitters,h_worldEmitters.data(),
+            SIZE*SIZE*sizeof(float),cudaMemcpyHostToDevice));
 
         double nowT = now / (double)perfFreq;
         if(arcadeEnabled) {
@@ -1201,15 +1269,23 @@ int main(int argc, char* argv[])
             (int)ceil((missingFrames + (missingFrames ? 2 : 0)) /
                       (g_sampleRate * (double)g_DT))));
 
-        const int sourceX = (int)roundf(g_pulse_x);
-        const int sourceY = (int)roundf(g_pulse_y);
+        const auto pair=echo::phasedSource(SIZE,h_mask,
+            g_player.pivot_x,g_player.pivot_y,
+            g_player.angle-PI/4.0f);
+        const int sourceX=pair.enabled?pair.frontX:(int)lroundf(g_pulse_x);
+        const int sourceY=pair.enabled?pair.frontY:(int)lroundf(g_pulse_y);
+        const int rearX=(pair.enabled && phasedClick)?pair.backX:-1;
+        const int rearY=(pair.enabled && phasedClick)?pair.backY:-1;
+        const int rearDelay=(pair.enabled && phasedClick)?pair.backDelay:0;
         for (int i = 0; i < steps; ++i) {
             if (arcadeEnabled && automaticPulse && simStep2>=1000ULL &&
                 (simStep2-1000ULL)%(unsigned long long)g_pulseIntervalSteps==0ULL)
                 arcade.hearClick(g_pulse_x,g_pulse_y);
-            updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev, d_mask,
+            updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev,
+                                         d_mask,d_worldEmitters,
                                          g_c2, SIZE, g_reflectionCoeff,
-                                         sourceX, sourceY, PULSE_AMPLITUDE,
+                                         sourceX, sourceY,
+                                         rearX,rearY,rearDelay,PULSE_AMPLITUDE,
                                          simStep2, g_pulseIntervalSteps,
                                          g_pulseDurationSteps, g_DT, g_decayFactor,
                                          automaticPulse,manualPulseAt,
@@ -1383,6 +1459,7 @@ int main(int argc, char* argv[])
     CUDA_CHECK(cudaFree(d_p_prev));
     CUDA_CHECK(cudaFree(d_p_next));
     CUDA_CHECK(cudaFree(d_mask));
+    CUDA_CHECK(cudaFree(d_worldEmitters));
     CUDA_CHECK(cudaFree(d_audioL));
     CUDA_CHECK(cudaFree(d_audioR));
     free(h_mask);
