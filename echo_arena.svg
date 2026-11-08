@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="500" height="500" viewBox="0 0 500 500" version="1.1">
+  <title>Echo Arcade - Ghost Circuit</title>
+  <desc>A five-metre maze with alternating doorways for a sound-only arcade game.</desc>
+  <!-- Geometry uses 1px = 1cm; the game adds solid outer boundaries. -->
+  <g fill="#166b91" stroke="none">
+    <!-- Three zigzag gates with 65-80cm doors, allowing 26cm player diameter. -->
+    <rect x="108" y="18" width="22" height="158"/>
+    <rect x="108" y="246" width="22" height="212"/>
+
+    <rect x="226" y="50" width="24" height="207"/>
+    <rect x="226" y="327" width="24" height="139"/>
+
+    <rect x="346" y="21" width="23" height="148"/>
+    <rect x="346" y="248" width="23" height="209"/>
+
+    <!-- More shapes to create acoustic corners and occlusion. -->
+    <rect x="146" y="80" width="64" height="17"/>
+    <rect x="149" y="370" width="60" height="18"/>
+    <rect x="264" y="184" width="66" height="18"/>
+    <rect x="272" y="387" width="56" height="18"/>
+    <rect x="382" y="80" width="65" height="19"/>
+    <rect x="387" y="312" width="61" height="19"/>
+  </g>
+  <g fill="#54b0d6" stroke="none">
+    <circle cx="48" cy="55" r="16"/>
+    <circle cx="183" cy="276" r="12"/>
+    <circle cx="288" cy="284" r="16"/>
+    <circle cx="427" cy="218" r="17"/>
+    <ellipse cx="60" cy="459" rx="13" ry="20"/>
+  </g>
+
+  <!-- Existing O/I/W text marker convention, distinct from generated shards. -->
+  <g fill="#f1ce6c" font-size="16" font-family="sans-serif">
+    <text x="48" y="267">O</text>
+    <text x="161" y="214">I</text>
+    <text x="315" y="78">I</text>
+    <text x="465" y="55">W</text>
+  </g>
+</svg>
