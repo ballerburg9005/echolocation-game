@@ -1482,6 +1482,24 @@ int main(int argc, char* argv[])
                     mapGlyphs.data(),GL_DYNAMIC_DRAW);
                 glPointSize(8.0f);
                 glDrawArrays(GL_POINTS,0,(GLsizei)(mapGlyphs.size()/3));
+                // A tiny revolving gold dot INSIDE each 20cm hexagon
+                // makes its fast spin visible in 2D, while the actual
+                // polygon outline remains the exact stable FDTD mask.
+                // In particular, do not reintroduce square overlays onto
+                // coins or spin solid FDTD cells every render frame.
+                mapGlyphs.clear();
+                for(const auto& en:arcade.enemies) {
+                    if(en.eaten)continue;
+                    addGlyph(en.x+5.0f*cosf(en.visualSpin),
+                             en.y+5.0f*sinf(en.visualSpin),-7.0f);
+                }
+                if(!mapGlyphs.empty()) {
+                    glBufferData(GL_ARRAY_BUFFER,
+                        (GLsizeiptr)(mapGlyphs.size()*sizeof(float)),
+                        mapGlyphs.data(),GL_DYNAMIC_DRAW);
+                    glPointSize(3.0f);
+                    glDrawArrays(GL_POINTS,0,(GLsizei)(mapGlyphs.size()/3));
+                }
                 glPointSize(1.0f);
             }
         }
@@ -1502,7 +1520,8 @@ int main(int argc, char* argv[])
                         arcade.overdrive>0?0.17f:alert?1.0f:idleR,
                         arcade.overdrive>0?0.90f:alert?0.12f:idleG,
                         arcade.overdrive>0?1.0f:alert?0.24f:idleB,
-                        arcade.overdrive>0?2.0f:alert?1.6f:0.8f,6});
+                        arcade.overdrive>0?2.0f:alert?1.6f:0.8f,
+                        6,en.visualSpin});
                 }
                 for(const echo::Shard &shard:arcade.shards) {
                     if(shard.collected)continue;
