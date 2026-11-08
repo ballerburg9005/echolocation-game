@@ -42,6 +42,10 @@ int main(){
     assert(echo::threatCue(0,0,0,200,200,false).audible==false);
     auto close=echo::threatCue(50,50,0.7853981634f,50,60,false);
     assert(close.interval<left.interval);
+    const auto sprinter=echo::threatCue(50,50,0.7853981634f,50,90,true,1);
+    const auto sentinel=echo::threatCue(50,50,0.7853981634f,50,90,true,2);
+    assert(sprinter.frequency>left.frequency);
+    assert(sentinel.frequency<left.frequency);
     echo::EchoArcade game(mask.data(),N,23,25,128);
     assert(!game.enemies.empty());
     assert(!game.shards.empty());
