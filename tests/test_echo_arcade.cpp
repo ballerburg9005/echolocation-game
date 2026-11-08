@@ -41,8 +41,28 @@ int main(){
     int shardReflectors=0;
     for(float value:dynamic)if(value==3.0f)++shardReflectors;
     assert(shardReflectors>0);
-    game.hearClick(game.enemies[0].x,game.enemies[0].y);
+    const float soundX=game.enemies[0].x;
+    const float soundY=game.enemies[0].y;
+    game.hearClick(soundX,soundY);
     assert(game.enemies[0].alert>0.0f);
+    assert(game.enemies[0].lastHeardX==soundX);
+    assert(game.enemies[0].lastHeardY==soundY);
+    assert(!game.enemies[0].pursuitDistances.empty());
+    // Moving the player must not magically update enemy hearing memory.
+    game.update(0.016f,23,25);
+    assert(game.enemies[0].lastHeardX==soundX);
+    assert(game.enemies[0].lastHeardY==soundY);
+    // A thick, fully sealed wall blocks arcade sound alerts even when
+    // the geometric distance is close. This is a passability heuristic.
+    std::vector<float> sealed=mask;
+    for(int y=1;y<N-1;++y)sealed[y*N+N/2]=1.0f;
+    echo::EchoArcade soundTest(sealed.data(),N,23,25,128);
+    assert(!soundTest.enemies.empty());
+    for(auto &enemy:soundTest.enemies) {
+        enemy.x=90;enemy.y=25;enemy.alert=0;enemy.pursuitDistances.clear();
+    }
+    soundTest.hearClick(23,25);
+    for(const auto &enemy:soundTest.enemies)assert(enemy.alert==0.0f);
     // Items collect exactly once.
     auto s=game.shards[0];
     auto ev=game.update(0.016f,s.x,s.y);
