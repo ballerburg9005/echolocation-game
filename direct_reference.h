@@ -22,27 +22,36 @@ namespace echo {
 struct DirectResponse {
     std::vector<float> left,right;
 };
-inline DirectResponse freeFieldDirect(const PhasedSource& source,
+inline DirectResponse freeFieldDirect(const BeamArray& beam,
     float micLx,float micLy,float micRx,float micRy,
     int duration,float inputStep,float c2,float decay,
     float amplitude,float playbackGain,bool phased,
     int frames=158) {
     DirectResponse out;
-    if(duration<2||frames<1||inputStep<=0)return out;
+    if(!beam.valid||duration<2||frames<1||inputStep<=0)return out;
     constexpr int N=164;
     constexpr int centre=N/2;
     // Translate world coordinates: place the *actual quantized* front source
     // at the center of the homogeneous reference grid.
-    const float sx=(float)centre-(float)source.frontX;
-    const float sy=(float)centre-(float)source.frontY;
+    const float sx=(float)centre-(float)beam.elements[1].frontX;
+    const float sy=(float)centre-(float)beam.elements[1].frontY;
     const float lx=micLx+sx,ly=micLy+sy;
     const float rx=micRx+sx,ry=micRy+sy;
-    const int rearX=source.backX+centre-source.frontX;
-    const int rearY=source.backY+centre-source.frontY;
     if(lx<5||ly<5||rx<5||ry<5||
-       lx>N-6||ly>N-6||rx>N-6||ry>N-6 ||
-       (phased&&(rearX<5||rearY<5||rearX>=N-5||rearY>=N-5)))
+       lx>N-6||ly>N-6||rx>N-6||ry>N-6)
         return out;
+    for(int k=0;k<3;++k) {
+        if(beam.weights[k]<=0.0f)continue;
+        const auto& e=beam.elements[k];
+        const int frontX=e.frontX+centre-beam.elements[1].frontX;
+        const int frontY=e.frontY+centre-beam.elements[1].frontY;
+        const int rearX=e.backX+centre-beam.elements[1].frontX;
+        const int rearY=e.backY+centre-beam.elements[1].frontY;
+        if(frontX<5||frontY<5||frontX>=N-5||frontY>=N-5||
+           (phased&&beam.directional&&
+            (rearX<5||rearY<5||rearX>=N-5||rearY>=N-5)))
+            return out;
+    }
     out.left.reserve(frames);out.right.reserve(frames);
     std::vector<float> previous(N*N,0),current(N*N,0),next(N*N,0);
     for(int t=0;t<frames;++t) {
@@ -52,12 +61,21 @@ inline DirectResponse freeFieldDirect(const PhasedSource& source,
                 current[idx-1],current[idx+1],
                 current[idx-N],current[idx+N],c2)*decay;
         }
-        next[centre*N+centre]+=
-            amplitude*clickSample(t,duration,inputStep)*decay;
-        if(phased && source.enabled) {
-            next[rearY*N+rearX]-=
-                amplitude*clickSample(t-source.backDelay,duration,
-                                      inputStep)*decay;
+        for(int k=0;k<3;++k) {
+            if(beam.weights[k]<=0.0f)continue;
+            const auto& e=beam.elements[k];
+            const int frontX=e.frontX+centre-beam.elements[1].frontX;
+            const int frontY=e.frontY+centre-beam.elements[1].frontY;
+            const int rearX=e.backX+centre-beam.elements[1].frontX;
+            const int rearY=e.backY+centre-beam.elements[1].frontY;
+            next[frontY*N+frontX]+=
+                beam.weights[k]*amplitude*
+                clickSample(t,duration,inputStep)*decay;
+            if(phased && beam.directional && e.enabled) {
+                next[rearY*N+rearX]-=
+                    beam.weights[k]*amplitude*
+                    clickSample(t-e.backDelay,duration,inputStep)*decay;
+            }
         }
         out.left.push_back(bilinearSample(next.data(),N,lx,ly)*playbackGain);
         out.right.push_back(bilinearSample(next.data(),N,rx,ry)*playbackGain);
@@ -65,6 +83,19 @@ inline DirectResponse freeFieldDirect(const PhasedSource& source,
         current.swap(next);
     }
     return out;
+}
+// Preserve the earlier two-element source for isolated numerical A/B tests.
+inline DirectResponse freeFieldDirect(const PhasedSource& source,
+    float micLx,float micLy,float micRx,float micRy,
+    int duration,float inputStep,float c2,float decay,
+    float amplitude,float playbackGain,bool phased,
+    int frames=158) {
+    BeamArray beam;
+    beam.elements[1]=source;
+    beam.valid=true;
+    beam.directional=phased&&source.enabled;
+    return freeFieldDirect(beam,micLx,micLy,micRx,micRy,duration,inputStep,
+                           c2,decay,amplitude,playbackGain,phased,frames);
 }
 // Subtraction is defined on the *simulation* timeline, before resampling;
 // this preserves exact step alignment and keeps UI/game tones unmodified.
