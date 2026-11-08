@@ -57,7 +57,8 @@ public:
             distances_[i]*kNavStep >= 65)
             choices.push_back({(float)distances_[i],i});
         std::sort(choices.begin(),choices.end(),[](const Node&a,const Node&b){
-            if(a.d!=b.d) return a.d>b.d; return a.idx<b.idx;
+            if(a.d!=b.d) return a.d>b.d;
+            return a.idx<b.idx;
         });
         // A generated exit always exists on open/reachable maps.
         if(!choices.empty()){
