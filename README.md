@@ -4,6 +4,30 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 # Echolocation Game
 
+## Smaller, friendlier rotating FDTD candy
+
+Candy coins are now **8 cm wide instead of 14 cm**, still eight-sided.
+They spin at 10.5–12.4 radians/second in both the 3D drawing and the
+**real FDTD reflection field**, using the same 2x2 subcell and ~55ms
+soft-impedance smoothing already used for the ghost rattles. The candy
+is slightly less reflective than a ghost so it produces a softer,
+distinctly lighter rattle; each also emits a brief, quiet
+**1.76–2.96 kHz pentatonic bell-like note** inside FDTD when nearby
+and unobstructed. There are no hard mask resets upon coin pickup.
+The pickup radius stays at a forgiving 15cm for blind navigation.
+
+**Real recorded audio inside FDTD is feasible.** The current solver is
+not restricted to procedural sines/clicks: it can inject a resampled
+and bandlimited WAV's sample stream into the same pressure update, and
+its virtual ears would capture acoustic left-to-right movement through
+the room. The 1cm acoustic grid, however, resolves roughly 3.4kHz at
+10 samples/wavelength; a conservative sample would low-pass to
+2.5–3kHz, not offer full-fidelity audio. A 2x2m *2D* room is
+computationally about 6.25x lighter than the current 5x5m room
+at the same spatial/time resolution. This is a **feasibility design,
+not a finished WAV playback feature**. For concrete engineering steps,
+see [recorded audio inside FDTD](docs/RECORDED_AUDIO_FDTD.md).
+
 ## Rotating FDTD ghost acoustics and consistent 360° wall taps
 
 Ghost hexagons **now rotate inside the actual CUDA pressure simulation**,
@@ -13,8 +37,8 @@ turning the old binary mask into hard walls that reset pressure to zero,
 the game supersamples each polygon cell at four subcell points, smooths
 reflectivity over ~55ms, and uses a continuously varying 0–98% reflecting
 edge coupling in the FDTD stencil. The ghost's pressure cells remain
-live; static walls and collectible shards retain their original hard
-reflective cells. This is an approximate moving-impedance model, **not
+live; static walls remain hard, while collectible candies now use
+smaller, softer rotating octagonal reflectors rather than hard cells. This is an approximate moving-impedance model, **not
 a validated moving rigid-body acoustic solver**, so GPU headphone testing
 still matters. Gameplay remains nonlethal and the wedge is not solid.
 
@@ -84,8 +108,8 @@ the room was only 50 cm wide.
   The optional H-key overdrive is still a deliberate gameplay power-up.
 - **Correct silhouettes:** an 8-pixel square was wrongly drawn *over*
   the FDTD coin, making a circle with an extraneous square corner.
-  That duplicate overlay is gone. Candy is now one centered 14 cm
-  octagon; ghosts are visibly faceted **20 cm hexagons**, not nearly
+  That duplicate overlay is gone. Candy is now one centered 8 cm
+  rotating octagon; ghosts are visibly faceted **20 cm hexagons**, not nearly
   circular 16-gons at low raster resolution. Both use the same
   acoustic material shapes and 3D representations.
 - **Actual ears behind the source:** the original microphones were
@@ -136,8 +160,9 @@ shield. This branch now includes two **optional A/B listening experiments**:
   when nearby with clear static-wall sight. The pulses still propagate
   through the solver; there is no longer a perpetual ambient drone.
   Wall-contact taps and brief game-rule sounds remain direct UI cues.
-- **Faceted acoustic objects:** ghosts are now clearly hexagonal 20 cm
-  reflectors and candy shards are clean centered 14 cm octagons.
+- **Faceted acoustic objects:** ghosts are clearly hexagonal 20 cm
+  reflectors, and candy shards are clean centered 8 cm octagons
+  that now rotate in the real FDTD field too.
   The 2D square-marker duplication was also removed.
 - **Nonlethal contact:** ghosts gently obstruct movement and do not
   deduct lives or score. No ghost collision can end a run or halt AI.
