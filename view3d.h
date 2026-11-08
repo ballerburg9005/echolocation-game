@@ -19,12 +19,14 @@ struct VisualOrb {
     float height=0.85f;   // vertical centre above floor (metres)
     float r=1,g=1,b=1;
     float glow=0.7f;
+    int sides=0; // 0 smooth, 8 faceted candy, 16 faceted ghost
 };
 struct View3D {
     GLuint program=0;
     GLuint wallsVAO=0,wallsVBO=0;
     GLuint sphereVAO=0,sphereVBO=0;
-    GLsizei wallVertices=0,sphereVertices=0;
+    GLuint facet8VAO=0,facet8VBO=0,facet16VAO=0,facet16VBO=0;
+    GLsizei wallVertices=0,sphereVertices=0,facet8Vertices=0,facet16Vertices=0;
     GLint uVP=-1,uOffset=-1,uScale=-1,uTint=-1,uGlow=-1,uEye=-1,uOrb=-1;
     bool ready=false;
 };
@@ -123,9 +125,8 @@ inline void upload3DMesh(GLuint& vao,GLuint& vbo,
     glEnableVertexAttribArray(2);
     glBindVertexArray(0);
 }
-inline std::vector<VisualVertex> orbMesh(){
+inline std::vector<VisualVertex> orbMesh(int around=40,int bands=24){
     std::vector<VisualVertex> v;
-    const int around=40,bands=24;
     for(int y=0;y<bands;++y)for(int x=0;x<around;++x){
         const float p0=3.14159265358979323846f*(float)y/bands;
         const float p1=3.14159265358979323846f*(float)(y+1)/bands;
@@ -169,10 +170,16 @@ inline bool init3D(View3D& out,const float* mask,int size){
     out.uOrb=glGetUniformLocation(out.program,"uOrb");
     const auto walls=extrudeMask(mask,size);
     const auto spheres=orbMesh();
+    const auto facets16=orbMesh(16,12);
+    const auto facets8=orbMesh(8,8);
     out.wallVertices=(GLsizei)walls.size();
     out.sphereVertices=(GLsizei)spheres.size();
+    out.facet16Vertices=(GLsizei)facets16.size();
+    out.facet8Vertices=(GLsizei)facets8.size();
     upload3DMesh(out.wallsVAO,out.wallsVBO,walls);
     upload3DMesh(out.sphereVAO,out.sphereVBO,spheres);
+    upload3DMesh(out.facet16VAO,out.facet16VBO,facets16);
+    upload3DMesh(out.facet8VAO,out.facet8VBO,facets8);
     out.ready=true;
     std::printf("[3D] Raster-extruded maze: %d triangles, orbs: %d triangles\n",
                 out.wallVertices/3,out.sphereVertices/3);
@@ -212,13 +219,17 @@ inline void render3D(const View3D& view,int viewportX,int viewportY,
     glDrawArrays(GL_TRIANGLES,0,view.wallVertices);
 
     glUniform1i(view.uOrb,1);
-    glBindVertexArray(view.sphereVAO);
     for(const VisualOrb& orb:orbs){
+        const GLuint vao=orb.sides==8?view.facet8VAO:
+                         orb.sides==16?view.facet16VAO:view.sphereVAO;
+        const GLsizei count=orb.sides==8?view.facet8Vertices:
+                           orb.sides==16?view.facet16Vertices:view.sphereVertices;
+        glBindVertexArray(vao);
         glUniform3f(view.uOffset,orb.x*.01f,orb.height,visualZFromGridY(orb.y));
         glUniform1f(view.uScale,orb.radius);
         glUniform3f(view.uTint,orb.r,orb.g,orb.b);
         glUniform1f(view.uGlow,orb.glow);
-        glDrawArrays(GL_TRIANGLES,0,view.sphereVertices);
+        glDrawArrays(GL_TRIANGLES,0,count);
     }
     glBindVertexArray(0);
     glUseProgram(0);
@@ -229,6 +240,10 @@ inline void release3D(View3D& view) {
     if(view.wallsVBO)glDeleteBuffers(1,&view.wallsVBO);
     if(view.sphereVAO)glDeleteVertexArrays(1,&view.sphereVAO);
     if(view.sphereVBO)glDeleteBuffers(1,&view.sphereVBO);
+    if(view.facet8VAO)glDeleteVertexArrays(1,&view.facet8VAO);
+    if(view.facet8VBO)glDeleteBuffers(1,&view.facet8VBO);
+    if(view.facet16VAO)glDeleteVertexArrays(1,&view.facet16VAO);
+    if(view.facet16VBO)glDeleteBuffers(1,&view.facet16VBO);
     if(view.program)glDeleteProgram(view.program);
     view=View3D{};
 }
