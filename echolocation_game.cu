@@ -1046,6 +1046,16 @@ int main(int argc, char* argv[])
         echo::ArcadeEvent arcadeEvent;
         if(arcadeEnabled) {
             arcadeEvent=arcade.update(dtFrame,g_player.pivot_x,g_player.pivot_y);
+            if(arcadeEvent.bounced) {
+                g_player.pivot_x=arcadeEvent.recoilX;
+                g_player.pivot_y=arcadeEvent.recoilY;
+                updatePlayerComponents(g_player);
+                // Recoil is a discrete game event, not ordinary continuous
+                // movement; reset the interpolation anchor rather than
+                // dragging microphones through a 16cm wall in one batch.
+                previousMicLX=g_mic_l_x;previousMicLY=g_mic_l_y;
+                previousMicRX=g_mic_r_x;previousMicRY=g_mic_r_y;
+            }
             if(arcade.reachExit(g_player.pivot_x,g_player.pivot_y)) {
                 arcadeEvent.cleared=true;
                 gameWon=true;
@@ -1104,7 +1114,7 @@ int main(int argc, char* argv[])
             if(nowT-lastArcadeMessage>0.35) {
                 char title[256];
                 std::snprintf(title,sizeof(title),
-                    "ECHO ARCADE | %s | Score %d | Lives %d | Shards %d | Charges %d | H overdrive G decoy C cane",
+                    "ECHO ARCADE | %s | Score %d | Lives %d | Shards %d | Charges %d | R restart | B beam N tones",
                     arcade.won?"LEVEL CLEAR":arcade.lost?"GAME OVER":
                     arcade.overdrive>0?"GHOSTS FROZEN":"HUNT THE ECHO",
                     arcade.score,arcade.lives,arcade.remaining,arcade.charges);
@@ -1384,7 +1394,7 @@ int main(int argc, char* argv[])
                     mapGlyphs.push_back(code);
                 };
                 for(const echo::Enemy &en:arcade.enemies)
-                    if(!arcade.won&&!arcade.lost&&!en.eaten)
+                    if(!en.eaten)
                         addGlyph(en.x,en.y,arcade.overdrive>0?-6.0f:-8.0f);
                 for(const echo::Shard &shard:arcade.shards)
                     if(!shard.collected)addGlyph(shard.x,shard.y,-7.0f);
@@ -1407,7 +1417,6 @@ int main(int argc, char* argv[])
             orbs.clear();
             if(arcadeEnabled) {
                 for(const echo::Enemy &en:arcade.enemies) {
-                    if(arcade.lost||arcade.won)break;
                     if(en.eaten)continue;
                     const bool alert=en.alert>0.0f;
                     const float idleR=en.archetype==0?0.67f:
