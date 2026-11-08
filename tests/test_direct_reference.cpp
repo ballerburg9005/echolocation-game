@@ -9,7 +9,12 @@ int main(){
     std::vector<float> empty(N*N,0);
     const auto pair=echo::phasedSource(N,empty.data(),82,82,0.0f);
     assert(pair.enabled);
-    const float lX=82,lY=90,rX=82,rY=74;
+    const auto ears=echo::shieldedReceivers(82,82,0);
+    const float lX=ears.leftX,lY=ears.leftY;
+    const float rX=ears.rightX,rY=ears.rightY;
+    assert(lX<82 && rX<82 && lY>82 && rY<82);
+    assert(std::hypot(lX-82,lY-82)<13);
+    assert(std::hypot(rX-82,rY-82)<13);
     const int duration=(int)std::lround(
         echo::kClickDurationSeconds/echo::kStepSeconds);
     const auto direct=echo::freeFieldDirect(pair,lX,lY,rX,rY,
@@ -43,5 +48,19 @@ int main(){
     for(size_t i=0;i<direct.left.size();++i)
         difference+=std::fabs(direct.left[i]-omni.left[i]);
     assert(difference>0.0001);
-    std::puts("scattered-field monitoring: FDTD direct path subtracts without erasing residual echoes");
+    // The earlier microphones were lateral to the phased array and saw
+    // essentially no suppression (even a direct-field increase). The
+    // player must keep its ears BEHIND both sources, not simply beside them.
+    float phasedEnergy=0,monoEnergy=0;
+    for(size_t i=0;i<direct.left.size();++i) {
+        phasedEnergy+=direct.left[i]*direct.left[i]+
+                      direct.right[i]*direct.right[i];
+        monoEnergy+=omni.left[i]*omni.left[i]+
+                    omni.right[i]*omni.right[i];
+    }
+    std::printf("actual-ear phased/mono direct pressure energy: %.4f\n",
+                phasedEnergy/monoEnergy);
+    assert(monoEnergy>0.00001f);
+    assert(phasedEnergy<monoEnergy*0.30f);
+    std::puts("scattered-field monitoring: true rear ears suppress direct pressure, FDTD subtraction preserves echoes");
 }
