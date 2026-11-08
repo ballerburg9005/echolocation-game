@@ -4,6 +4,29 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 # Echolocation Game
 
+## Rotating FDTD ghost acoustics and consistent 360° wall taps
+
+Ghost hexagons **now rotate inside the actual CUDA pressure simulation**,
+not just in the 2D/3D graphics. Their roughly 275–355°/sec spin changes
+the six-sided reflector's acoustic orientation. Instead of suddenly
+turning the old binary mask into hard walls that reset pressure to zero,
+the game supersamples each polygon cell at four subcell points, smooths
+reflectivity over ~55ms, and uses a continuously varying 0–98% reflecting
+edge coupling in the FDTD stencil. The ghost's pressure cells remain
+live; static walls and collectible shards retain their original hard
+reflective cells. This is an approximate moving-impedance model, **not
+a validated moving rigid-body acoustic solver**, so GPU headphone testing
+still matters. Gameplay remains nonlethal and the wedge is not solid.
+
+The collision sound has a **single 820Hz short beep** at every bearing
+around the player's full 360° collision disk. Left/right timing and
+volume reflect where the wall was actually touched; a mild continuous
+high-frequency change helps tell front from back, without a special
+loud forward "pang". Turning in place near the same wall no longer
+counts as a fresh hit. A 16-direction CPU regression tests this.
+The wedge is only a cyan aim overlay, entirely within the 13cm collision
+clearance, and renders behind real walls rather than clipping over them.
+
 ## Tighter beam, closer ears and easier ghost navigation
 
 - **A/D** now strafe left/right. **Q/E** rotate left/right, with
@@ -25,9 +48,9 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
   **0.2–0.55 seconds**) and abandon a click chase after
   **0.65–0.8 seconds** rather than 3–6 seconds. Their 3D
   hexagons spin at around 275–355° per second, with a small
-  rotating marker inside their 2D silhouette. The **FDTD solid
-  mask does not spin**: rotating hard cells every frame would
-  produce precisely the whipping artifacts under investigation.
+  rotating marker inside their 2D silhouette. Their **soft, fractional
+  FDTD reflectivity now spins too**, without snapping or resetting
+  hard pressure cells.
   Nonlethal collisions and collectibles behave as before.
 
 The wedge remains an *aim guide*, **not** an impenetrable physical
@@ -145,10 +168,11 @@ real-world listening check:
   exactly the same depth (previously causing z-fighting lines); rounded
   actors use higher-detail spheres, smoother material shading and MSAA
   where supported.
-- **Wall contact:** instead of repeated, identical 440/330Hz tones, find
-  the actual wall cell touched along the collision circle. One short
-  synthetic tap uses near/far-ear distance attenuation, relative ear delay,
-  and a distinct rear sound. No periodic tone while holding into a wall.
+- **Wall contact:** locate the real wall cell touched anywhere on the
+  13cm collision ring. One 820Hz beep is spatialized with the actual
+  9cm-ear timing and level differences, plus subtle continuously
+  varying front/rear spectral color. No separate wedge pang and no
+  periodic tone while holding or turning toward the same wall.
   This is *HRTF-lite gameplay feedback*, not human binaural simulation.
 - **No mysterious artificial whole-level beacon:** the older artificial
   O/I/W chimes have now been removed entirely. Instead the markers emit
@@ -280,7 +304,7 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 
 - Load a 500×500 pixel SVG level using a command such as
   ./echolocation_game drawing.svg.
-- W/S or Up/Down: move. A/D or Left/Right: rotate. Q/E: strafe.
+- W/S or Up/Down: move. A/D: strafe. Q/E or Left/Right: rotate.
 - Space: toggle visualization of reflective objects. Escape: quit.
 - F manually generates a click; T enables/disables automatic pulses (stealth).
 - G projects a sound decoy into a legal point ahead; C emits stereo left/center/right virtual cane taps.
