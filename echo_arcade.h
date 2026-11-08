@@ -192,7 +192,7 @@ public:
     // Euclidean range through thick maze walls. This is 5cm-grid geodesic
     // *gameplay*, not a measured sound pressure / diffraction prediction.
     void hearClick(float x,float y) {
-        if(won||lost) return;
+        if(won||lost||overdrive>0.0f) return;
         std::vector<int> soundField(walkable_.size(),-1);
         computeDistances(x,y,soundField);
         for(Enemy &enemy:enemies) {
@@ -213,7 +213,7 @@ public:
     // optional arcade power-up: enemy stun / capture are *game mechanics*,
     // while the caller also emits a normal physical FDTD click.
     bool activateOverdrive() {
-        if(won||lost||charges<=0)return false;
+        if(won||lost||charges<=0||overdrive>0.0f)return false;
         --charges;
         overdrive=5.0f;
         combo=0;
