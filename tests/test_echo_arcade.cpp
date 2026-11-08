@@ -96,7 +96,13 @@ int main(){
     assert(game.enemies[0].lastHeardX==soundX);
     assert(game.enemies[0].lastHeardY==soundY);
     const float angleBefore=game.enemies[0].visualSpin;
+    const float candySpinBefore=game.shards[0].spin;
+    const int reachableBefore=game.remaining;
     for(int i=0;i<5;++i)game.update(0.05f,23,25);
+    // Candy rotation is physical source geometry, but spinning must
+    // never collect a coin or change score without player proximity.
+    assert(game.shards[0].spin>candySpinBefore+2.0f);
+    assert(game.remaining==reachableBefore);
     // Check rotation BEFORE a complete 2*pi revolution; a fast-spinning
     // symmetrical shape naturally returns close to its original angle.
     assert(std::fabs(game.enemies[0].visualSpin-angleBefore)>1.0f);
