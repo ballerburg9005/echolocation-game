@@ -58,28 +58,39 @@ inline std::vector<VisualVertex> extrudeMask(const float* mask,int size,
         while(x<size) {
             if(!occupied(x,y)){++x;continue;}
             const int x0=x;
-            while(x<size&&occupied(x,y))++x;
+            const bool outer=mask[y*size+x]>=3.5f;
+            while(x<size&&occupied(x,y)&&
+                  (mask[y*size+x]>=3.5f)==outer)++x;
             const float a=x0*cellMetres,b=x*cellMetres;
             const float z0=y*cellMetres,z1=(y+1)*cellMetres;
             quad(out,a,H,z0,b,H,z0,b,H,z1,a,H,z1,
-                 0,1,0,0.35f,0.51f,0.66f);
+                 0,1,0,outer?0.20f:0.35f,
+                 outer?0.31f:0.51f,outer?0.48f:0.66f);
         }
         for(int x=0;x<size;++x) {
             if(!occupied(x,y))continue;
             const float a=x*cellMetres,b=(x+1)*cellMetres;
             const float c=y*cellMetres,d=(y+1)*cellMetres;
+            // Muted blue rubber-like outer ring, distinct from the
+            // bright, sharp interior masonry. The same mask material
+            // determines the actual FDTD boundary reflectivity.
+            const bool outer=mask[y*size+x]>=3.5f;
             if(!occupied(x-1,y))
                 quad(out,a,0,c,a,0,d,a,H,d,a,H,c,
-                     -1,0,0,0.25f,0.53f,0.65f);
+                     -1,0,0,outer?0.16f:0.25f,
+                     outer?0.32f:0.53f,outer?0.49f:0.65f);
             if(!occupied(x+1,y))
                 quad(out,b,0,d,b,0,c,b,H,c,b,H,d,
-                     1,0,0,0.25f,0.53f,0.65f);
+                     1,0,0,outer?0.16f:0.25f,
+                     outer?0.32f:0.53f,outer?0.49f:0.65f);
             if(!occupied(x,y-1))
                 quad(out,b,0,c,a,0,c,a,H,c,b,H,c,
-                     0,0,-1,0.29f,0.56f,0.68f);
+                     0,0,-1,outer?0.17f:0.29f,
+                     outer?0.34f:0.56f,outer?0.50f:0.68f);
             if(!occupied(x,y+1))
                 quad(out,a,0,d,b,0,d,b,H,d,a,H,d,
-                     0,0,1,0.29f,0.56f,0.68f);
+                     0,0,1,outer?0.17f:0.29f,
+                     outer?0.34f:0.56f,outer?0.50f:0.68f);
         }
     }
     // Mirror the horizontal grid axis into a right-handed GL world.
