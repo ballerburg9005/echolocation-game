@@ -8,7 +8,7 @@ LIBS ?= -lGLEW -lGL -lSDL2 -ltinyxml2 -lpthread
 
 build: build/echolocation_game
 
-build/echolocation_game: echolocation_game.cu acoustics.h collision.h svg_raster.h echo_arcade.h visual_mesh.h view3d.h
+build/echolocation_game: echolocation_game.cu acoustics.h collision.h svg_raster.h echo_arcade.h visual_mesh.h view3d.h virtual_cane.h
 	mkdir -p build
 	$(NVCC) $(NVCCFLAGS) -o $@ echolocation_game.cu $(LIBS)
 
