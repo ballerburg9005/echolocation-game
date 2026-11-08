@@ -59,23 +59,28 @@ struct EarContact {
     bool behind=false;
 };
 inline EarContact contactEars(float relative,float distanceCm,
-                              int sampleRate,float earHalfSpacingCm=8.0f) {
+                              int sampleRate,float earHalfSpacingCm=4.5f,
+                              float earBackCm=6.5f) {
     EarContact out;
     if(sampleRate<=0 || distanceCm<=0 || !std::isfinite(relative))return out;
-    // Ear positions are +/- 8cm around the head, within the collision ring.
-    const float side=std::sin(relative);
-    const float leftSq=distanceCm*distanceCm+earHalfSpacingCm*earHalfSpacingCm-
-                       2*distanceCm*earHalfSpacingCm*side;
-    const float rightSq=distanceCm*distanceCm+earHalfSpacingCm*earHalfSpacingCm+
-                        2*distanceCm*earHalfSpacingCm*side;
-    out.leftDistanceCm=std::sqrt(std::max(0.0f,leftSq));
-    out.rightDistanceCm=std::sqrt(std::max(0.0f,rightSq));
+    // Match the actual virtual microphones: 6.5cm BEHIND the pivot,
+    // +/-4.5cm sideways. The previous wall cue erroneously assumed
+    // ears at the pivot and 16cm interaural separation.
+    const float hitX=distanceCm*std::cos(relative);
+    const float hitY=distanceCm*std::sin(relative);
+    out.leftDistanceCm=std::hypot(hitX+earBackCm,
+                                 hitY-earHalfSpacingCm);
+    out.rightDistanceCm=std::hypot(hitX+earBackCm,
+                                  hitY+earHalfSpacingCm);
     const float nearDistance=std::min(out.leftDistanceCm,out.rightDistanceCm);
     // 5cm softening avoids an infinite gain at the virtual ear location.
-    out.leftGain=0.16f*(nearDistance+5.0f)/
-                 (out.leftDistanceCm+5.0f);
-    out.rightGain=0.16f*(nearDistance+5.0f)/
-                  (out.rightDistanceCm+5.0f);
+    // A modest perceptual exaggeration preserves useful left/right
+    // contrast despite the closer 9cm ear spacing. This is an intentional
+    // accessibility sound cue, NOT a calibrated inverse-distance HRTF.
+    out.leftGain=0.16f*std::pow(
+        (nearDistance+5.0f)/(out.leftDistanceCm+5.0f),1.65f);
+    out.rightGain=0.16f*std::pow(
+        (nearDistance+5.0f)/(out.rightDistanceCm+5.0f),1.65f);
     out.leftDelaySamples=(int)std::lround(
         ((out.leftDistanceCm-nearDistance)/34300.0f)*sampleRate);
     out.rightDelaySamples=(int)std::lround(
