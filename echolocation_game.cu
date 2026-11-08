@@ -1461,12 +1461,12 @@ int main(int argc, char* argv[])
                         arcade.overdrive>0?0.17f:alert?1.0f:idleR,
                         arcade.overdrive>0?0.90f:alert?0.12f:idleG,
                         arcade.overdrive>0?1.0f:alert?0.24f:idleB,
-                        arcade.overdrive>0?2.0f:alert?1.6f:0.8f});
+                        arcade.overdrive>0?2.0f:alert?1.6f:0.8f,16});
                 }
                 for(const echo::Shard &shard:arcade.shards) {
                     if(shard.collected)continue;
                     orbs.push_back(echo::VisualOrb{shard.x,shard.y,0.065f,0.85f,
-                        1.0f,0.78f,0.16f,1.1f});
+                        1.0f,0.78f,0.16f,1.1f,8});
                 }
                 if(lastDecoySimTime>=0 && simTime-lastDecoySimTime<1.2)
                     orbs.push_back(echo::VisualOrb{(float)decoyPulseX,
