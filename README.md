@@ -4,6 +4,37 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 # Echolocation Game
 
+## Tighter beam, closer ears and easier ghost navigation
+
+- **A/D** now strafe left/right. **Q/E** rotate left/right, with
+  **Left/Right arrows** also rotating. W/S and Up/Down move normally.
+- The visible wedge has a **32° full angle** instead of 76°. Its tip
+  starts 4.5cm behind the pivot and the microphones sit just 2cm
+  behind it, 9cm apart rather than 12cm.
+- The outgoing player wave is also genuinely narrower in FDTD:
+  **three lateral columns of paired phased sources** at -8/0/+8cm,
+  with 0.25/0.50/0.25 weights, rather than only one front/back pair.
+  Each back source emits a delayed inverse pulse. A 42cm-radius
+  CPU FDTD pressure test measured side energy **0.0092** against
+  **0.752** forward; the old single paired source produced 0.464
+  side energy in the same geometry. These are simulation values,
+  not calibrated real-world beam/HRTF measurements.
+  **B** still compares the narrow FDTD click with a single monopole.
+  **J** reference subtraction now models all six emitters.
+- Ghosts turn frequently while wandering (roughly every
+  **0.2–0.55 seconds**) and abandon a click chase after
+  **0.65–0.8 seconds** rather than 3–6 seconds. Their 3D
+  hexagons spin at around 275–355° per second, with a small
+  rotating marker inside their 2D silhouette. The **FDTD solid
+  mask does not spin**: rotating hard cells every frame would
+  produce precisely the whipping artifacts under investigation.
+  Nonlethal collisions and collectibles behave as before.
+
+The wedge remains an *aim guide*, **not** an impenetrable physical
+head. The microphone positions and phased-array directionality
+make the direct wave quieter at the ears while reflected sound
+still travels normally through the pressure field.
+
 ## Quiet navigation revision after hands-on feedback
 
 The acoustic grid is **500 × 500 cells, 1 cm per cell = 5 × 5 metres**.
@@ -35,13 +66,12 @@ the room was only 50 cm wide.
   circular 16-gons at low raster resolution. Both use the same
   acoustic material shapes and 3D representations.
 - **Actual ears behind the source:** the original microphones were
-  lateral to the two-element phased FDTD emitter, where the phase
-  interference actually *increased* the direct sound. Both ears are now
-  8 cm behind the player pivot and 6 cm to either side, fully inside
-  the 13 cm collision circle. A CPU FDTD test of these exact ear
-  positions measures only **7.75% of the monopole direct-click energy**
-  with the paired source (~92.25% attenuation). This is not evidence
-  of a physically impenetrable head or guaranteed perceptual improvement.
+  lateral to the phased emitter, where interference could increase
+  the direct sound. Both ears are now 6.5cm behind the player
+  and 4.5cm to either side (9cm total spacing), inside the
+  13cm collision disk. The wider three-column FDTD aperture is
+  also designed to suppress sideways radiation. Neither is a
+  physically solid or acoustically calibrated head.
 - The muted-cyan wedge is explicitly a *visual aiming guide*, not a
   reflective FDTD obstacle. The solver no longer contains a moving hard
   wedge; restoring it naïvely would reintroduce the pressure whipping.
@@ -63,14 +93,12 @@ from the direct click. Replacing it with a mere visual outline removed
 movement-induced mask pressure artifacts, but also removed its acoustical
 shield. This branch now includes two **optional A/B listening experiments**:
 
-- **B — phased vs. isotropic FDTD click.** The default click uses two
-  pressure sources separated by about 6cm: the rear element has opposite
-  sign and is delayed by the sound transit time, interfering destructively
-  behind the player. It DOES NOT turn the player into an impenetrable body,
-  nor does it guarantee no direct sound at the ears. In a free-field CPU
-  FDTD regression using the same stencil, backward receiver energy was
-  reduced by about 98% relative to a single point source; that is a
-  numerical bench test, NOT a perceptual calibration.
+- **B — narrow beam vs. single isotropic click.** The default click
+  has three laterally separated pairs of emitters. Its side and rear
+  cancellation are computed directly in the FDTD pressure grid,
+  rather than being painted into the visualization. B compares it
+  against an ordinary single-source click. Neither is an opaque head
+  or a measured human/bat emission profile.
 - **J — experimental echo-only headphone monitor (OFF by default).**
   Independently FDTD-simulates the same click in an empty room and
   subtracts that "incident" waveform from the receiver samples *before
@@ -177,7 +205,8 @@ Launch the new level with:
 
 Important new controls: **F** manual ping, **T** toggle automatic pulses
 (stealth), **G** throw an FDTD sound decoy (9-second cooldown), **C** three-ray
-virtual cane scan, **F2** swap 2D/3D view, **F3** immersive 3D,
+virtual cane scan, **A/D** strafe, **Q/E** or arrows turn,
+**F2** swap 2D/3D view, **F3** immersive 3D,
 **F4** arcade on/off, **F5** ghost heartbeat on/off,
 **F6** guidance beacon on/off, **R** restart.
 
@@ -259,7 +288,7 @@ Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a
 - F2 toggles right viewport 2D/3D; F3 toggles full-window first-person 3D.
 - F4 toggles Ghost Circuit game mode; F5 nearby enemy heartbeat,
   F6 nearby target beacon. F5/F6 are OFF initially.
-- B compares phased/isotropic FDTD player sources; N toggles world FDTD
+- B compares the narrow six-source FDTD beam with an isotropic monopole; N toggles world FDTD
   tones; J compares experimental direct-field subtraction (off by default).
 - 9/0 changes only the 2D wave display exposure, not physics.
 - R restarts shards, enemies, acoustic state and item pickups; ghost
