@@ -76,7 +76,7 @@ struct Enemy {
     float alert=0.0f;
     float wanderTimer=0.0f;
     unsigned direction=0;
-    float visualSpin=0.0f; // fast visual rotation; FDTD polygon remains stable
+    float visualSpin=0.0f; // same rotation in visuals and smoothed FDTD
     // Arcade archetypes: 0 tracker, 1 sprinter, 2 sentinel.
     unsigned archetype=0;
     bool eaten=false;
@@ -115,6 +115,7 @@ inline ThreatCue threatCue(float px,float py,float angle,
 struct Shard {
     float x=0, y=0;
     bool collected=false;
+    float spin=0.0f; // friendly, brisk 8-sided rotation in FDTD and 3D
 };
 struct GuidanceTarget { float x=0,y=0; bool exit=false,available=false; };
 struct ArcadeEvent {
@@ -257,7 +258,15 @@ public:
             buildDistances(x,y);
             navTimer_=0.5f;
         }
-        for(Shard &s:shards) {
+        for(size_t index=0;index<shards.size();++index) {
+            Shard &s=shards[index];
+            if(!s.collected) {
+                // Rapid spin is shared by the visual mesh and FDTD soft
+                // octagonal impedance; collection remains generous at 15cm
+                // so shrinking acoustic candy does not frustrate blind play.
+                const float speed=10.5f+0.62f*(float)(index%4);
+                s.spin=std::fmod(s.spin+dt*speed,2.0f*kPi);
+            }
             if(!s.collected && std::hypot(s.x-x,s.y-y)<15.0f){
                 s.collected=true; result.pickups++; remaining--; score+=100;
                 ++shardsCollected;
@@ -395,28 +404,27 @@ public:
         }
         return false;
     }
-    // Shards are small reflecting targets in addition to their distinct
-    // gameplay tones. Their material id 3 is a marker in the FDTD mask:
-    // the CUDA boundary kernel decides the coefficient for that interface.
-    // These are collectible (not movement-blocking) to preserve reachability.
-    void stampShards(float* dynamicMask) const {
-        // A finished round stops AI/movement, not the acoustic scenery.
-        for(const Shard &s:shards){
-            if(s.collected)continue;
-            // A single centred 14cm octagon, with no separate square
-            // glyph painted on top. Bigger than the old 10cm item, so
-            // its facets remain visible on a one-centimetre grid.
-            const int minX=std::max(1,(int)std::floor(s.x-7.0f));
-            const int maxX=std::min(side_-2,(int)std::ceil(s.x+7.0f));
-            const int minY=std::max(1,(int)std::floor(s.y-7.0f));
-            const int maxY=std::min(side_-2,(int)std::ceil(s.y+7.0f));
-            for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x){
-                float dx=(x+0.5f)-s.x,dy=(y+0.5f)-s.y;
-                if(insideNgon(dx,dy,7.0f,8,0.3926990817f)&&
-                   grid_[y*side_+x]<=0 &&
-                    dynamicMask[y*side_+x]<1.5f)
-                    dynamicMask[y*side_+x]=3.0f;
-            }
+    // Coins are smaller but retain exactly eight sides. Stamp fractional
+    // subcell coverage into a temporary CPU field and feed it through the
+    // same smoothing path as rotating ghost reflectors, not hard walls.
+    // The player still collects them within a forgiving 15cm radius.
+    void stampCandyCoverage(float* coverage) const {
+        if(!coverage)return;
+        for(const Shard& candy:shards) {
+            if(candy.collected)continue;
+            const float r=kCandyRadiusCm+1.0f;
+            const int minX=std::max(1,(int)std::floor(candy.x-r));
+            const int maxX=std::min(side_-2,(int)std::ceil(candy.x+r));
+            const int minY=std::max(1,(int)std::floor(candy.y-r));
+            const int maxY=std::min(side_-2,(int)std::ceil(candy.y+r));
+            for(int y=minY;y<=maxY;++y)
+                for(int x=minX;x<=maxX;++x) {
+                    const int idx=y*side_+x;
+                    if(grid_[idx]>0.0f)continue;
+                    const float amount=rotatingCandyCoverage(
+                        (x+0.5f)-candy.x,(y+0.5f)-candy.y,candy.spin);
+                    coverage[idx]=std::max(coverage[idx],amount);
+                }
         }
     }
     // Actual acoustic geometry rotates with visualSpin, as requested.
