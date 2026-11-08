@@ -32,8 +32,8 @@ inline float rotatingGhostCoverage(float dx,float dy,float rotation,
                                    float radiusCm=10.0f) {
     return rotatingPolygonCoverage(dx,dy,rotation,radiusCm,6);
 }
-// 8cm across instead of the former 14cm: still eight flat sides.
-constexpr float kCandyRadiusCm=4.0f;
+// Visibly 11cm across, still smaller than the original 14cm pills.
+constexpr float kCandyRadiusCm=5.5f;
 inline float rotatingCandyCoverage(float dx,float dy,float rotation) {
     return rotatingPolygonCoverage(dx,dy,rotation,kCandyRadiusCm,8);
 }
@@ -64,7 +64,7 @@ ECHO_GHOST_HD inline float effectiveSoftCoverage(float mask) {
     if(mask>=0.0f)return 0.0f;
     if(mask<-1.0f) {
         const float candyCoverage=fminf(1.0f,fmaxf(0.0f,-mask-1.0f));
-        return 0.84f*candyCoverage; // gentler 82% reflecting candy
+        return candyCoverage; // SAME 98%-reflective FDTD rattle as ghosts
     }
     return fminf(1.0f,-mask);
 }
