@@ -150,31 +150,39 @@ accepting these changes.
 
 The previous mouth wedge was a moving acoustic hard-wall baffle surrounding
 the click source; it was intended to shelter the microphones but introduced
-binary boundary jumps during locomotion. It is now visual only. The new
-default click uses a pair of FDTD sources about 6cm apart. The rear source
-emits the negative tapered pulse after the sound-travel delay between
-sources, making their far-field waves approximately cancel to the rear.
-This is a phased finite-difference source, NOT an impenetrable head shield,
-a pressure ray, or a calibrated bat-like beam. The two ears remain in
-unshielded free-field cells.
+binary boundary jumps during locomotion. It is now visual only, narrowed
+to a **32° full opening** and moved closer to the ears. The default player
+click uses **three lateral FDTD columns**, -8/0/+8cm from the player's
+forward axis, with front sources +6cm ahead of their delayed,
+negative-pressure rear partner. Pair weights are 0.25/0.50/0.25.
+Each of the six elements is an actual source in the pressure solver,
+not a ray cone, rendering filter, acoustic shield, or rigid body.
+The rear interference suppresses backwards radiation; the lateral
+aperture suppresses sideways radiation. The old wedge is not a
+physical object and therefore cannot leak through a 'solid' it no
+longer represents.
 
-A dependency-free free-field CPU FDTD test using the same Courant stencil
-measured normalized rear receiver energy 0.00433 with the phased pair
-versus 0.2161 with a single source, a reduction of approximately 98%.
-Forward energy was approximately 0.9405 in the paired case. These values
-apply only to that particular geometry, timeline and numerical setup;
-especially close ears and room reverberation require independent listening.
+In the prior iteration, a *single* front/back pair improved the rear
+field but barely narrowed the sides. In a new dependency-free CPU
+FDTD polar test 42cm from a straight-facing source, the six-emitter
+array gave forward energy **0.7516**, side (90°) **0.00919**, and
+rear **0.00254**, whereas the central 2-element endfire pair alone
+gave side energy **0.4639**. Thus the sidelobe reduction is measured
+in the simulated pressure field itself. These bench values depend
+on the specific 1.8kHz source, numerical grid and probe geometry;
+they are not a claimed real-world directivity index or proof of a
+perfectly narrow beam in a reverberant 5×5m room.
 
-The earlier microphones were lateral to this array: with the pair active,
-direct pressure *increased* at those positions in a small free-field
-benchmark. The revised 13cm collision-ring receiver model places both
-ears 8cm behind the pivot and 6cm to either side. At those actual
-locations, the same CPU FDTD stencil measured a paired/monopole
-direct-energy ratio of **0.0775**, i.e. ~92.25% lower direct energy.
-The previous far-field 98% result is NOT representative of the former
-ear positions. There is still no physically impenetrable wedge or
-head-scattering calculation: a true moving head would need accurate
-subcell boundary handling to avoid repeating the observed rattles.
+The earlier microphones were lateral to the array and sometimes saw
+MORE direct pressure than an isotropic source. They were first moved
+8cm back and ±6cm sideways. At the user's request they now sit
+**6.5cm back and ±4.5cm lateral**, only 9cm apart, with the visible
+wedge tip 2cm in front of them. The microphones remain within the
+player's 13cm collision radius. The incident-field J reference has
+been updated to include all six emitters and the new microphone
+positions. There is still NO impenetrable soundproof wedge or
+physical head scattering: such moving solid geometry needs a
+careful stable subcell boundary solver to avoid recreating whipping.
 
 The optional **J** mode implements linear incident/scattered pressure
 decomposition at the *receivers*. For each player pulse, it computes the
@@ -191,6 +199,12 @@ delay frames, hence J is deliberately OFF by default.
 
 Game acoustic models now use clearly visible **hexagonal 10cm-radius
 ghosts** and **octagonal 7cm-radius shards**, with matching 3D models.
+Ghosts now spin visually at about 4.8–6.2 radians/sec and choose
+a new wandering heading every 0.20–0.55s. Alert lasts only 0.65–0.8s
+following a nearby click, not 3–6s. Their FDTD mask retains a fixed
+rotational orientation to avoid rapid, discontinuous moving-wall
+pressure changes; 2D has a small spinning ornament inside the
+reflective hexagon while 3D spins the actual rendered mesh.
 The 2D renderer previously drew an additional 8px square GL_POINT on
 top of each reflector, making coins appear misshapen. Those duplicate
 squares are removed. Ghost hits now cause an at-most-1.5cm bump and a
