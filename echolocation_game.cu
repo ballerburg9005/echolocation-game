@@ -111,13 +111,14 @@ static float g_pulse_x, g_pulse_y;
 static void updatePlayerComponents(Player &p)
 {
     float c = cosf(p.angle), s = sinf(p.angle);
-    float lx = 6.f, ly = 5.5f, rx = -6.f, ry = -5.5f, wx = -1.f, wy = 1.f, px = 4.f, py = -4.f;
-
-    g_mic_l_x = p.pivot_x + lx * c - ly * s;
-    g_mic_l_y = p.pivot_y + lx * s + ly * c;
-
-    g_mic_r_x = p.pivot_x + rx * c - ry * s;
-    g_mic_r_y = p.pivot_y + rx * s + ry * c;
+    float wx = -1.f, wy = 1.f, px = 4.f, py = -4.f;
+    // The microphones used to sit transverse to the phased click,
+    // amplifying its near-field impulse. Move them behind the emitters.
+    // Both remain <13cm from pivot and safe from hard SVG walls.
+    const auto ears=echo::shieldedReceivers(
+        p.pivot_x,p.pivot_y,p.angle-PI/4.0f);
+    g_mic_l_x=ears.leftX;g_mic_l_y=ears.leftY;
+    g_mic_r_x=ears.rightX;g_mic_r_y=ears.rightY;
 
     g_wedge_x = p.pivot_x + wx * c - wy * s;
     g_wedge_y = p.pivot_y + wx * s + wy * c;
