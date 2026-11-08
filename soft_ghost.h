@@ -1,5 +1,5 @@
 #pragma once
-// Acoustic reflectors for rotating 6-sided ghosts.
+// Acoustic reflectors for rotating six-sided ghosts and eight-sided candies.
 //
 // Never stamp a moving/rotating ghost as a binary 1/2 in the hard CUDA
 // obstacle mask. A newly solid cell used to reset p_next to zero,
@@ -16,18 +16,26 @@
 #include <cmath>
 
 namespace echo {
-inline float rotatingGhostCoverage(float dx,float dy,float rotation,
-                                   float radiusCm=10.0f) {
-    if(radiusCm<=0 || !std::isfinite(dx)||!std::isfinite(dy)||
+inline float rotatingPolygonCoverage(float dx,float dy,float rotation,
+                                     float radiusCm,int sides) {
+    if(radiusCm<=0 || sides<3 || !std::isfinite(dx)||!std::isfinite(dy)||
        !std::isfinite(rotation))return 0.0f;
-    // 2x2 sub-cell coverage: a polygon edge never changes a full cell
-    // from 0 to 1 on an infinitesimal rotation.
+    // Four subcell samples, shared with both eight- and six-sided actors.
     float amount=0.0f;
     for(int y=0;y<2;++y)for(int x=0;x<2;++x)
         amount+=insideNgon(dx+(x?0.25f:-0.25f),
-                           dy+(y?0.25f:-0.25f),radiusCm,6,rotation)
+                           dy+(y?0.25f:-0.25f),radiusCm,sides,rotation)
                     ?0.25f:0.0f;
     return amount;
+}
+inline float rotatingGhostCoverage(float dx,float dy,float rotation,
+                                   float radiusCm=10.0f) {
+    return rotatingPolygonCoverage(dx,dy,rotation,radiusCm,6);
+}
+// 8cm across instead of the former 14cm: still eight flat sides.
+constexpr float kCandyRadiusCm=4.0f;
+inline float rotatingCandyCoverage(float dx,float dy,float rotation) {
+    return rotatingPolygonCoverage(dx,dy,rotation,kCandyRadiusCm,8);
 }
 inline float smoothGhostCoverage(float previous,float target,float dtSeconds,
                                  float responseSeconds=0.055f) {
@@ -45,6 +53,21 @@ inline float smoothGhostCoverage(float previous,float target,float dtSeconds,
 #else
 #define ECHO_GHOST_HD
 #endif
+// Encoding in the existing one-float mask; no extra GPU texture/buffer:
+//   0           fluid
+//   >0          static hard wall
+//   [-1,0)      soft ghost fractional coverage
+//   (-2,-1)     soft candy fractional coverage
+// One branch per mask lookup distinguishes material; the caller still
+// uses the same four-neighbour FDTD stencil and kernel launches.
+ECHO_GHOST_HD inline float effectiveSoftCoverage(float mask) {
+    if(mask>=0.0f)return 0.0f;
+    if(mask<-1.0f) {
+        const float candyCoverage=fminf(1.0f,fmaxf(0.0f,-mask-1.0f));
+        return 0.84f*candyCoverage; // gentler 82% reflecting candy
+    }
+    return fminf(1.0f,-mask);
+}
 ECHO_GHOST_HD inline float softGhostNeighbour(
     float center,float neighbor,float hereCoverage,
     float neighborCoverage) {
