@@ -54,6 +54,7 @@ struct ToneMarker {
     float x, y; 
     char type; // 'O' for obstacle, 'W' for win, 'I' for item
     bool isPlaying; // Playback state
+    bool collected; // Item markers are one-shot
 };
 
 static std::vector<Rect> g_rects;
@@ -181,7 +182,7 @@ static void parseSVGElement(tinyxml2::XMLElement* elem, float* h_mask)
             XMLElement* tspan = elem->FirstChildElement("tspan");
             const char* text = tspan ? tspan->GetText() : elem->GetText();
             if (text && (strstr(text, "O") || strstr(text, "W") || strstr(text, "I"))) {
-                ToneMarker tm;
+                ToneMarker tm{};
                 elem->QueryFloatAttribute("x", &tm.x);
                 elem->QueryFloatAttribute("y", &tm.y);
                 tm.y = SIZE - tm.y;
@@ -356,6 +357,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                 } else {
                     bool toneMarker = false;
                     for (int i = 0; i < numToneMarkers; i++) {
+                        if (toneMarkers[i].collected) continue;
                         float dtx = x - toneMarkers[i].x;
                         float dty = y - toneMarkers[i].y;
                         if (dtx * dtx + dty * dty <= 25.f) {
@@ -398,6 +400,7 @@ __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int 
                 } else {
                     bool toneMarker = false;
                     for (int i = 0; i < numToneMarkers; i++) {
+                        if (toneMarkers[i].collected) continue;
                         float dtx = x - toneMarkers[i].x;
                         float dty = y - toneMarkers[i].y;
                         if (dtx * dtx + dty * dty <= 25.f) {
@@ -631,6 +634,8 @@ int main(int argc, char* argv[])
     double lastSlideTime = 0.0;
     bool sliding = false;
     bool wasSliding = false;
+    bool gameWon = false;
+    int collectedItems = 0;
     double lastDebugTime = 0.0;
 
     while (!quit) {
@@ -760,51 +765,103 @@ int main(int argc, char* argv[])
             float lv = 0.5f + 0.5f * pan;
             float rv = 0.5f - 0.5f * pan;
             int slideSamples = beepSamples;
-            float* slideBuf = (float*)malloc(slideSamples * 2 * sizeof(float));
             for (int i = 0; i < slideSamples; i++) {
                 float t = (float)i / (float)g_sampleRate;
                 float s = sinf(2.f * PI * 330.f * t) * 0.05f; // 32-bit float
-                slideBuf[2 * i] = s * lv;
-                slideBuf[2 * i + 1] = s * rv;
+                beepBuf[2 * i] = s * lv;
+                beepBuf[2 * i + 1] = s * rv;
             }
-            SDL_QueueAudio(beepDev, slideBuf, slideSamples * 2 * sizeof(float));
-            free(slideBuf);
+            if (SDL_GetQueuedAudioSize(beepDev) <
+                (Uint32)(0.15 * g_sampleRate * 2 * sizeof(float)))
+                SDL_QueueAudio(beepDev, beepBuf, slideSamples * 2 * sizeof(float));
             lastSlideTime = nowT;
         }
 
-        // Handle marker beep playback
-        for (int i = 0; i < g_numToneMarkers; i++) {
-            ToneMarker& tm = g_toneMarkers[i];
-            float dx = tm.x - g_player.pivot_x;
-            float dy = tm.y - g_player.pivot_y;
-            float dist = sqrtf(dx * dx + dy * dy);
-            if (dist < 50.f) {
-                if (!tm.isPlaying) {
-                    tm.isPlaying = true;
-                    printf("[TONE DEBUG] Started playing marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f\n",
-                           tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
+        // Continuous, directional rhythms distinguish obstacle/collectible/goal
+        // without relying on the screen. Global clock avoids phase resets.
+        const int cueSamples = std::max(0, (int)lroundf(dtFrame * g_sampleRate));
+        std::vector<float> markerMix(cueSamples * 2, 0.0f);
+        bool markersAudible = false;
+        for (int i = 0; i < g_numToneMarkers; ++i) {
+            ToneMarker &tm = g_toneMarkers[i];
+            if (tm.collected) continue;
+            const float deltaX = tm.x - g_player.pivot_x;
+            const float deltaY = tm.y - g_player.pivot_y;
+            const float dist = sqrtf(deltaX*deltaX + deltaY*deltaY);
+            if (dist < 13.0f && tm.type == 'I') {
+                tm.collected = true;
+                ++collectedItems;
+                printf("[GAME] Item collected! Total: %d\n", collectedItems);
+                CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(),
+                          g_numToneMarkers * sizeof(ToneMarker), cudaMemcpyHostToDevice));
+                // Two ascending notes confirm a collectible without vision.
+                const int n = (int)(0.35f * g_sampleRate);
+                std::vector<float> tune(n*2);
+                for (int j = 0; j < n; ++j) {
+                    const float within = fmodf((float)j / g_sampleRate, 0.175f);
+                    const float freq = j < n/2 ? 650.0f : 900.0f;
+                    const float envelope = sinf(PI * within / 0.175f);
+                    const float s = 0.16f * envelope * envelope *
+                                    sinf(2.0f * PI * freq * within);
+                    tune[2*j] = s; tune[2*j+1] = s;
                 }
-                float angle = atan2f(dy, dx) - g_player.angle;
-                float pan = sinf(angle);
-                float atten = fmaxf(0.2f, 1.f - dist / 50.f);
-                float freq = (tm.type == 'O') ? 440.f : (tm.type == 'W') ? 660.f : 880.f; // Different freqs for O, W, I
-                int samplesToPlay = (int)(dtFrame * g_sampleRate);
-                float* markerBuf = (float*)malloc(samplesToPlay * 2 * sizeof(float));
-                for (int j = 0; j < samplesToPlay; j++) {
-                    float t = (float)j / (float)g_sampleRate;
-                    float sample = sinf(2.f * PI * freq * t) * 0.2f * atten; // 32-bit float
-                    markerBuf[2 * j] = sample * (0.5f + 0.5f * pan);
-                    markerBuf[2 * j + 1] = sample * (0.5f - 0.5f * pan);
-                }
-                SDL_QueueAudio(beepDev, markerBuf, samplesToPlay * 2 * sizeof(float));
-                free(markerBuf);
-            } else {
-                if (tm.isPlaying) {
-                    tm.isPlaying = false;
-                    printf("[TONE DEBUG] Stopped marker %c at (%.1f, %.1f), Player at (%.1f, %.1f), Dist=%.1f (too far)\n",
-                           tm.type, tm.x, tm.y, g_player.pivot_x, g_player.pivot_y, dist);
-                }
+                SDL_QueueAudio(beepDev, tune.data(),
+                               (Uint32)(tune.size()*sizeof(float)));
+                continue;
             }
+            if (dist < 13.0f && tm.type == 'W' && !gameWon) {
+                gameWon = true;
+                printf("[GAME] Goal reached! Items collected: %d\n", collectedItems);
+                SDL_SetWindowTitle(gfx.window, "Echolocation - Goal reached!");
+                const int n = (int)(0.60f * g_sampleRate);
+                std::vector<float> tune(n*2);
+                for (int j = 0; j < n; ++j) {
+                    const int note = (int)((3LL * j) / n);
+                    const float within = fmodf((float)j / g_sampleRate, 0.20f);
+                    const float envelope = sinf(PI * within / 0.20f);
+                    const float freq = note == 0 ? 660.0f :
+                                       note == 1 ? 880.0f : 1320.0f;
+                    const float s = 0.20f * envelope * envelope *
+                                    sinf(2.0f * PI * freq * within);
+                    tune[2*j] = s; tune[2*j+1] = s;
+                }
+                SDL_QueueAudio(beepDev, tune.data(),
+                               (Uint32)(tune.size()*sizeof(float)));
+            }
+            if (dist >= 85.0f) {
+                tm.isPlaying = false;
+                continue;
+            }
+            tm.isPlaying = true;
+            markersAudible = true;
+            const float angle = atan2f(deltaY, deltaX) -
+                                (g_player.angle - PI/4.0f);
+            const float pan = sinf(angle);
+            const float leftGain = sqrtf(0.5f * (1.0f + pan));
+            const float rightGain = sqrtf(0.5f * (1.0f - pan));
+            const float rangeGain = 0.16f * powf(1.0f - dist / 85.0f, 2.0f);
+            const float frequency = tm.type == 'O' ? 360.0f :
+                                    tm.type == 'I' ? 720.0f : 1080.0f;
+            const int count = tm.type == 'O' ? 1 : tm.type == 'I' ? 2 : 3;
+            for (int j = 0; j < cueSamples; ++j) {
+                const double t = nowT + (double)j / g_sampleRate;
+                const double cycle = fmod(t, 0.75);
+                const int event = (int)(cycle / 0.15);
+                const double within = cycle - event*0.15;
+                if (event >= count || within >= 0.09) continue;
+                const float envelope = sinf(PI * (float)(within/0.09));
+                const float sample = rangeGain * envelope * envelope *
+                               sinf(2.0f * PI * frequency * (float)within);
+                markerMix[2*j] += sample * leftGain;
+                markerMix[2*j+1] += sample * rightGain;
+            }
+        }
+        if (markersAudible && !markerMix.empty() &&
+            SDL_GetQueuedAudioSize(beepDev) <
+                (Uint32)(0.10 * g_sampleRate * 2 * sizeof(float))) {
+            for (float &sample : markerMix) sample = 0.75f * tanhf(sample);
+            SDL_QueueAudio(beepDev, markerMix.data(),
+                           (Uint32)(markerMix.size() * sizeof(float)));
         }
 
         wasSliding = sliding;
