@@ -48,7 +48,7 @@ out vec3 vColor;
 void main() {
     // Rotate faceted ghosts visually about vertical, without snapping
     // solid cells in the acoustical wave solver every rendered frame.
-    const float c=cos(uSpin),s=sin(uSpin);
+    float c=cos(uSpin),s=sin(uSpin);
     vec3 local=vec3(c*aPos.x+s*aPos.z,aPos.y,
                     -s*aPos.x+c*aPos.z);
     vWorld=local*uScale+uOffset;
