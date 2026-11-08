@@ -140,7 +140,7 @@ public:
     void reset() {
         rng_=seed_;
         score=0; lives=3; charges=0; shardsCollected=0; combo=0;
-        overdrive=0.0f; won=false; lost=false; invulnerability=1.0f;
+        overdrive=0.0f; won=false; lost=false; invulnerability=0.0f;
         playerX=homeX_; playerY=homeY_; enemies.clear(); shards.clear();
         for(int y=0;y<navSide_;++y)for(int x=0;x<navSide_;++x){
             walkable_[y*navSide_+x] = !circleGridContact(
@@ -197,7 +197,7 @@ public:
     // Euclidean range through thick maze walls. This is 5cm-grid geodesic
     // *gameplay*, not a measured sound pressure / diffraction prediction.
     void hearClick(float x,float y) {
-        if(won||lost||overdrive>0.0f) return;
+        if(won||overdrive>0.0f) return;
         std::vector<int> soundField(walkable_.size(),-1);
         computeDistances(x,y,soundField);
         for(Enemy &enemy:enemies) {
@@ -218,7 +218,7 @@ public:
     // optional arcade power-up: enemy stun / capture are *game mechanics*,
     // while the caller also emits a normal physical FDTD click.
     bool activateOverdrive() {
-        if(won||lost||charges<=0||overdrive>0.0f)return false;
+        if(won||charges<=0||overdrive>0.0f)return false;
         --charges;
         overdrive=5.0f;
         combo=0;
@@ -231,7 +231,7 @@ public:
 
     ArcadeEvent update(float dt,float x,float y) {
         ArcadeEvent result;
-        if(won||lost) return result;
+        if(won) return result;
         dt=std::max(0.0f,std::min(dt,0.05f));
         playerX=x;playerY=y;
         const float previousOverdrive=overdrive;
@@ -311,31 +311,33 @@ public:
                 e.x=next.x;e.y=next.y;
                 if(next.collided && !next.slid && e.alert<=0)e.wanderTimer=0;
             }
-            if(invulnerability<=0 && std::hypot(e.x-x,e.y-y)<24.0f){
-                --lives;result.hit=true;score=std::max(0,score-150);
-                invulnerability=3.0f;
-                if(lives<=0) {lost=true;result.gameOver=true;}
-                // Recoil the *player* away from the contact; do not teleport
-                // moving FDTD reflecting ghosts halfway across the level
-                // instantaneously (a strong acoustic pressure transient).
-                float awayX=x-e.x,awayY=y-e.y;
-                const float distance=std::hypot(awayX,awayY);
-                if(distance<0.001f) {
-                    awayX=x-homeX_; awayY=y-homeY_;
-                    if(std::hypot(awayX,awayY)<0.001f)awayX=1.0f;
+            // A ghost is a gentle solid bumper, NOT an enemy that can
+            // end the game. Never decrement lives, scores or disable pickups.
+            // Resolve small overlaps continuously; only one short feedback
+            // event is sent per cooldown, not a repeated death jingle.
+            const float gap=std::hypot(e.x-playerX,e.y-playerY);
+            if(gap<22.0f) {
+                float awayX=playerX-e.x,awayY=playerY-e.y;
+                float length=std::hypot(awayX,awayY);
+                if(length<0.001f) {
+                    awayX=playerX-homeX_;awayY=playerY-homeY_;
+                    length=std::hypot(awayX,awayY);
                 }
-                const float length=std::hypot(awayX,awayY);
-                const auto bounced=slideCircle(grid_,side_,x,y,
-                    16.0f*awayX/length,16.0f*awayY/length,13.0f);
-                result.bounced=true;
-                result.recoilX=bounced.x;
-                result.recoilY=bounced.y;
-                for(Enemy& other:enemies) {
-                    other.alert=0;
-                    other.wanderTimer=0;
-                    other.pursuitDistances.clear();
+                if(length<0.001f){awayX=1.0f;awayY=0.0f;length=1.0f;}
+                const float push=std::min(1.5f,22.0f-gap);
+                const auto moved=slideCircle(grid_,side_,
+                    playerX,playerY,awayX/length*push,
+                    awayY/length*push,13.0f);
+                if(std::hypot(moved.x-playerX,moved.y-playerY)>0.01f){
+                    playerX=moved.x;playerY=moved.y;
+                    result.bounced=true;
+                    result.recoilX=playerX;
+                    result.recoilY=playerY;
                 }
-                break;
+                if(invulnerability<=0.0f) {
+                    result.hit=true; // tiny contact feedback, not injury
+                    invulnerability=0.9f;
+                }
             }
         }
         return result;
@@ -347,7 +349,7 @@ public:
     // shortest-path cost in the collision-grid BFS. This cue is not physical
     // acoustics and can be disabled with F6 to play by raw echoes.
     GuidanceTarget guidanceTarget() const {
-        if(won||lost)return {};
+        if(won)return {};
         if(remaining==0)return GuidanceTarget{exitX,exitY,true,true};
         int bestDistance=std::numeric_limits<int>::max();
         const Shard* closest=nullptr;
@@ -371,7 +373,7 @@ public:
     }
 
     bool reachExit(float px,float py) {
-        if(!won&&!lost&&remaining==0&&std::hypot(px-exitX,py-exitY)<18) {
+        if(!won&&remaining==0&&std::hypot(px-exitX,py-exitY)<18) {
             won=true; score+=500;return true;
         }
         return false;
@@ -414,6 +416,8 @@ public:
             }
         }
     }
+    // lives and lost are retained only for backwards-compatible callers;
+    // ghost collisions are nonlethal and never modify either field.
     int score=0,lives=3,remaining=0,charges=0,shardsCollected=0,combo=0;
     float overdrive=0.0f;
     bool won=false,lost=false;
