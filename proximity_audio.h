@@ -36,6 +36,25 @@ inline bool hasClearSight(const float* walls,int side,
     }
     return true;
 }
+// Decide which objects are allowed to emit a discoverable FDTD cue, not
+// whether an FDTD wave is allowed to pass through a wall. Continuous
+// oscillators used to fill an entire 5m room with a stationary drone; at
+// this 1cm/2D grid there is also much less distance spreading than in 3D.
+// These proximity-limited, line-of-sight-verified pulses are deliberately
+// gameplay cues, not a physical inverse-square law or diffraction model.
+inline float localEmitterGain(const float* staticWalls,int side,
+    float listenerX,float listenerY,float sourceX,float sourceY,
+    float maxDistanceCm) {
+    if(!staticWalls||side<2||maxDistanceCm<=0.0f)return 0.0f;
+    const float distance=std::hypot(sourceX-listenerX,
+                                    sourceY-listenerY);
+    if(distance>=maxDistanceCm ||
+       !hasClearSight(staticWalls,side,listenerX,listenerY,
+                      sourceX,sourceY,0.0f))return 0.0f;
+    const float strength=1.0f-distance/maxDistanceCm;
+    return strength*strength; // smooth fade at range threshold
+}
+
 // Allow a quiet chime on first discovery and rare reminders while still
 // close. Crossing the outer hysteresis radius rearms the discovery event.
 struct ProximityGate {
