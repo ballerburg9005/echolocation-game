@@ -68,13 +68,35 @@ inline DirectResponse freeFieldDirect(const BeamArray& beam,
             const int frontY=e.frontY+centre-beam.elements[1].frontY;
             const int rearX=e.backX+centre-beam.elements[1].frontX;
             const int rearY=e.backY+centre-beam.elements[1].frontY;
-            next[frontY*N+frontX]+=
-                beam.weights[k]*amplitude*
-                clickSample(t,duration,inputStep)*decay;
+            // Match the precise subcell source footprint in the CUDA
+            // solver, including the fractionally delayed opposite sign
+            // pulse. Otherwise experimental J subtraction invents pops
+            // because its reference disagrees with the actual emitter.
+            const float sourceX=e.continuous?e.frontSubX+sx:(float)frontX;
+            const float sourceY=e.continuous?e.frontSubY+sy:(float)frontY;
+            const int ix=(int)std::floor(sourceX);
+            const int iy=(int)std::floor(sourceY);
+            for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx)
+                next[(iy+dy)*N+(ix+dx)]+=
+                    beam.weights[k]*amplitude*decay*
+                    sourceWeight(sourceX,sourceY,ix+dx,iy+dy)*
+                    clickSample(t,duration,inputStep);
             if(phased && beam.directional && e.enabled) {
-                next[rearY*N+rearX]-=
-                    beam.weights[k]*amplitude*
-                    clickSample(t-e.backDelay,duration,inputStep)*decay;
+                const float positionX=e.continuous?
+                    e.backSubX+sx:(float)rearX;
+                const float positionY=e.continuous?
+                    e.backSubY+sy:(float)rearY;
+                const int bx=(int)std::floor(positionX);
+                const int by=(int)std::floor(positionY);
+                const float backClick=e.continuous?
+                    subcellClickSample((float)t-e.backDelaySub,
+                                       duration,inputStep):
+                    clickSample(t-e.backDelay,duration,inputStep);
+                for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx)
+                    next[(by+dy)*N+(bx+dx)]-=
+                        beam.weights[k]*amplitude*decay*
+                        sourceWeight(positionX,positionY,bx+dx,by+dy)*
+                        backClick;
             }
         }
         out.left.push_back(bilinearSample(next.data(),N,lx,ly)*playbackGain);
