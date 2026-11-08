@@ -325,7 +325,14 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
     const float down  = wallD ? center : p[idx - size];
     const float up    = wallU ? center : p[idx + size];
     const int adjacentWalls = (int)wallL + (int)wallR + (int)wallD + (int)wallU;
-    const float damping = echo::wallDamping(reflection, sqrtf(c2), adjacentWalls);
+    // Ghosts are moving pressure-reflecting boundaries with a distinct local
+    // coefficient; the static SVG wall coefficient remains player-adjustable.
+    const bool touchesGhost=(wallL && mask[idx-1]>1.5f) ||
+                            (wallR && mask[idx+1]>1.5f) ||
+                            (wallD && mask[idx-size]>1.5f) ||
+                            (wallU && mask[idx+size]>1.5f);
+    const float damping = echo::wallDamping(
+        touchesGhost ? 0.82f : reflection, sqrtf(c2), adjacentWalls);
     float next = echo::impedanceWaveStep(center, previous, left, right,
                                         down, up, c2, damping);
 
@@ -839,8 +846,19 @@ int main(int argc, char* argv[])
 
         g_player = newP;
         updatePlayerComponents(g_player);
+        echo::ArcadeEvent arcadeEvent;
+        if(arcadeEnabled) {
+            arcadeEvent=arcade.update(dtFrame,g_player.pivot_x,g_player.pivot_y);
+            if(arcade.reachExit(g_player.pivot_x,g_player.pivot_y)) {
+                arcadeEvent.cleared=true;
+                gameWon=true;
+            }
+        }
         updateDynamicMask(h_mask, h_dynamic, g_wedge_x, g_wedge_y,
                           g_player.pivot_x, g_player.pivot_y);
+        // Moving enemies really alter the *CUDA wave boundary*, not merely
+        // the visuals. Static maze remains unchanged for CPU collisions.
+        if(arcadeEnabled) arcade.stampEnemies(h_dynamic);
         CUDA_CHECK(cudaMemcpy(d_mask, h_dynamic, SIZE * SIZE * sizeof(float),
                               cudaMemcpyHostToDevice));
 
@@ -908,7 +926,8 @@ int main(int argc, char* argv[])
                                (Uint32)(tune.size()*sizeof(float)));
                 continue;
             }
-            if (dist < 13.0f && tm.type == 'W' && !gameWon) {
+            if (dist < 13.0f && tm.type == 'W' && !gameWon &&
+                (!arcadeEnabled || arcade.remaining==0)) {
                 gameWon = true;
                 printf("[GAME] Goal reached! Items collected: %d\n", collectedItems);
                 SDL_SetWindowTitle(gfx.window, "Echolocation - Goal reached!");
@@ -975,10 +994,12 @@ int main(int argc, char* argv[])
             (int)ceil((missingFrames + (missingFrames ? 2 : 0)) /
                       (g_sampleRate * (double)g_DT))));
 
-        static unsigned long long simStep2 = 0;
         const int sourceX = (int)roundf(g_pulse_x);
         const int sourceY = (int)roundf(g_pulse_y);
         for (int i = 0; i < steps; ++i) {
+            if (arcadeEnabled && simStep2>=1000ULL &&
+                (simStep2-1000ULL)%(unsigned long long)g_pulseIntervalSteps==0ULL)
+                arcade.hearClick(g_pulse_x,g_pulse_y);
             updatePressure<<<blk, thr>>>(d_p_next, d_p, d_p_prev, d_mask,
                                          g_c2, SIZE, g_reflectionCoeff,
                                          sourceX, sourceY, PULSE_AMPLITUDE,
