@@ -24,7 +24,7 @@ static std::vector<float> rotatedCoverage(float rotation){
 }
 
 static std::vector<float> waveAfterPulse(
-    const std::vector<float>& ghost) {
+    const std::vector<float>& ghost,float materialStrength=1.0f) {
     constexpr int N=96,steps=180;
     std::vector<float> previous(N*N,0),now(N*N,0),next(N*N,0);
     const int duration=(int)std::lround(
@@ -33,15 +33,15 @@ static std::vector<float> waveAfterPulse(
         for(int y=1;y<N-1;++y)
             for(int x=1;x<N-1;++x) {
                 const int idx=y*N+x;
-                const float c=now[idx],h=ghost[idx];
+                const float c=now[idx],h=ghost[idx]*materialStrength;
                 const float l=echo::softGhostNeighbour(
-                    c,now[idx-1],h,ghost[idx-1]);
+                    c,now[idx-1],h,ghost[idx-1]*materialStrength);
                 const float r=echo::softGhostNeighbour(
-                    c,now[idx+1],h,ghost[idx+1]);
+                    c,now[idx+1],h,ghost[idx+1]*materialStrength);
                 const float d=echo::softGhostNeighbour(
-                    c,now[idx-N],h,ghost[idx-N]);
+                    c,now[idx-N],h,ghost[idx-N]*materialStrength);
                 const float u=echo::softGhostNeighbour(
-                    c,now[idx+N],h,ghost[idx+N]);
+                    c,now[idx+N],h,ghost[idx+N]*materialStrength);
                 next[idx]=echo::waveStep(
                     c,previous[idx],l,r,d,u,
                     echo::kCourantSquared)*0.9995f;
@@ -131,8 +131,10 @@ int main(){
         assert(std::fabs(echo::rotatingCandyCoverage((float)x,(float)y,0)-
                 echo::rotatingCandyCoverage((float)x,(float)y,echo::kPi/4))
                 <1e-5f);
-    const auto coinPressure0=waveAfterPulse(candy0);
-    const auto coinPressure1=waveAfterPulse(candy1);
+    // The 0.84 effective coverage scale is the same as the CUDA
+    // candy material tag, with ~82% rather than 98% reflection.
+    const auto coinPressure0=waveAfterPulse(candy0,0.84f);
+    const auto coinPressure1=waveAfterPulse(candy1,0.84f);
     float propagatedDifference=0.0f;
     for(size_t i=0;i<coinPressure0.size();++i)
         propagatedDifference+=std::fabs(coinPressure0[i]-coinPressure1[i]);
