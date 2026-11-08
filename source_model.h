@@ -160,14 +160,14 @@ ECHO_SOURCE_HD inline float toneFrequency(int id) {
     if(id==kGhostSprinter)return 840.0f;
     if(id==kGhostSentinel)return 530.0f;
     if(id>=kShardFirst && id<=kShardLast) {
-        // Gentle upper-register pentatonic bell notes. Individual coins
-        // rotate in FDTD too, so this cue supplements their high-frequency
-        // scattering rather than replacing it with a stereo UI sound.
+        // Mid-register pentatonic voices instead of inaudibly high
+        // 1.76–2.96kHz chirps. The rotating FDTD octagon produces the
+        // same kind of actual acoustic rattle as rotating ghosts.
         const int note=(id-kShardFirst)%5;
-        return note==0?1760.00f:
-               note==1?1975.53f:
-               note==2?2217.46f:
-               note==3?2637.02f:2960.00f;
+        return note==0?329.63f:
+               note==1?392.00f:
+               note==2?440.00f:
+               note==3?493.88f:587.33f;
     }
     if(id==kArcadeExit)return 1240.0f;
     if(id==kSvgGoal)return 1180.0f;
@@ -193,7 +193,12 @@ ECHO_SOURCE_HD inline float fdtdWorldTone(float encoded,
     const float envelope=0.5f-0.5f*cosf(
         2.0f*kPi*(float)cycle/duration);
     const double phase=fmod(t*(double)frequency,1.0);
-    const float amplitude=0.15f*weight*envelope;
+    // The old candy emitter was 0.15 pressure units at *full* proximity;
+    // its quadratic range fade made it inaudible after only a few cm.
+    // Keep the same infrequent 85ms in-FDTD chirp, but give candy a
+    // modestly stronger voice. No new synth audio bypasses the solver.
+    const bool candy=id>=kShardFirst && id<=kShardLast;
+    const float amplitude=(candy?1.2f:0.15f)*weight*envelope;
     return amplitude*sinf(2.0f*kPi*(float)phase);
 }
 
