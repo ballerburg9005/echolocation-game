@@ -51,6 +51,21 @@ ECHO_HD inline float impedanceWaveStep(float p, float prev, float left,
             courantSq*(left+right+down+up-4.0f*p)) / (1.0f+damping);
 }
 
+// Gameplay can use automatic pings, manual pings, or both. A disabled
+// automatic clock must *not* stop simulation time or change the sound speed.
+ECHO_HD inline int pulseIndex(uint64_t step, int interval, int duration,
+                              bool automatic, uint64_t manualStart) {
+    if (manualStart != UINT64_MAX && step >= manualStart &&
+        step - manualStart < (uint64_t)duration)
+        return (int)(step - manualStart);
+    if (automatic && step >= 1000ULL && interval > 0) {
+        uint64_t since=step-1000ULL;
+        int within=(int)(since % (uint64_t)interval);
+        if(within<duration)return within;
+    }
+    return -1;
+}
+
 // Hann-tapered burst: zero at both ends, avoiding the old discontinuous
 // quarter-cycle pulse. The chosen carrier is resolved by ~19 cells/wavelength.
 ECHO_HD inline float clickSample(int index, int duration, float dt) {
