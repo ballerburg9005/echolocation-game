@@ -313,12 +313,18 @@ __global__ void updatePressure(float* p_next, const float* p, const float* p_pre
     }
 
     const float center = p[idx], previous = p_prev[idx];
-    const float ghost = echo::wallGhost(center, previous, reflection, sqrtf(c2));
-    const float left  = mask[idx - 1]    > 0.0f ? ghost : p[idx - 1];
-    const float right = mask[idx + 1]    > 0.0f ? ghost : p[idx + 1];
-    const float down  = mask[idx - size] > 0.0f ? ghost : p[idx - size];
-    const float up    = mask[idx + size] > 0.0f ? ghost : p[idx + size];
-    float next = echo::waveStep(center, previous, left, right, down, up, c2);
+    const bool wallL = mask[idx - 1] > 0.0f;
+    const bool wallR = mask[idx + 1] > 0.0f;
+    const bool wallD = mask[idx - size] > 0.0f;
+    const bool wallU = mask[idx + size] > 0.0f;
+    const float left  = wallL ? center : p[idx - 1];
+    const float right = wallR ? center : p[idx + 1];
+    const float down  = wallD ? center : p[idx - size];
+    const float up    = wallU ? center : p[idx + size];
+    const int adjacentWalls = (int)wallL + (int)wallR + (int)wallD + (int)wallU;
+    const float damping = echo::wallDamping(reflection, sqrtf(c2), adjacentWalls);
+    float next = echo::impedanceWaveStep(center, previous, left, right,
+                                        down, up, c2, damping);
 
     if (x == sourceX && y == sourceY && step >= 1000ULL && interval > 0) {
         const unsigned long long elapsed = step - 1000ULL;
