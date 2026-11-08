@@ -15,6 +15,7 @@
 #include "collision.h"
 #include "svg_raster.h"
 #include "echo_arcade.h"
+#include "virtual_cane.h"
 #include "view3d.h"
 #include <climits>
 #include <ctype.h>
@@ -637,6 +638,38 @@ static void playArcadeFeedback(SDL_AudioDeviceID device,int sampleRate,int kind)
     SDL_QueueAudio(device,samples.data(),(Uint32)(samples.size()*sizeof(float)));
 }
 
+// Virtual cane assistance: three successive 75ms left/centre/right taps.
+// The tap pitch indicates obstacle distance and loudness indicates contact;
+// these stereo cues are separate from the 2D wave simulation.
+static void playCaneScan(SDL_AudioDeviceID device,int sampleRate,
+                         const float* staticMask,int size,
+                         float px,float py,float heading)
+{
+    if(SDL_GetQueuedAudioSize(device)>
+       (Uint32)(0.45f*sampleRate*2*sizeof(float)))return;
+    const auto rays=echo::sweepCane(staticMask,size,px,py,heading);
+    const int samples=(int)(0.39f*sampleRate);
+    std::vector<float> output(2*samples,0.0f);
+    const float panLeft[3]={0.96f,0.70f,0.18f};
+    const float panRight[3]={0.18f,0.70f,0.96f};
+    for(int i=0;i<3;++i) {
+        const float nearby=rays[i].hit?
+            fmaxf(0.0f,1.0f-fminf(rays[i].distanceCm,100.0f)/100.0f):0.0f;
+        const float frequency=rays[i].hit?510.0f+840.0f*nearby:245.0f;
+        const float loudness=rays[i].hit?0.09f+0.075f*nearby:0.029f;
+        const int first=(int)(i*0.13f*sampleRate);
+        const int n=(int)(0.075f*sampleRate);
+        for(int j=0;j<n && first+j<samples;++j){
+            const float t=(float)j/sampleRate;
+            const float env=sinf(PI*(float)j/(float)n);
+            const float sample=loudness*env*env*sinf(2.0f*PI*frequency*t);
+            output[2*(first+j)]+=sample*panLeft[i];
+            output[2*(first+j)+1]+=sample*panRight[i];
+        }
+    }
+    SDL_QueueAudio(device,output.data(),(Uint32)(output.size()*sizeof(float)));
+}
+
 int main(int argc, char* argv[])
 {
     const char* svgFile = (argc >= 2) ? argv[1] : "drawing.svg";
@@ -786,7 +819,7 @@ int main(int argc, char* argv[])
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
     std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
     std::puts("[CONTROLS] F click | T auto-pings/stealth | G throw wall-blocked decoy (9s cooldown)");
-    std::puts("[CONTROLS] 1/2 pulse interval");
+    std::puts("[CONTROLS] C 3-ray virtual cane obstacle scan | 1/2 pulse interval");
     std::puts("[CONTROLS] F5 enemy heartbeat | F6 target beacon | 3/4 decay | 5/6 reflections | 7/8 volume");
 
     while (!quit) {
@@ -844,6 +877,11 @@ int main(int argc, char* argv[])
                             manualPulseAt=simStep2;
                             if(arcadeEnabled)arcade.hearClick(g_pulse_x,g_pulse_y);
                         }
+                        break;
+                    case SDLK_c:
+                        if(!e.key.repeat)playCaneScan(beepDev,g_sampleRate,
+                            h_mask,SIZE,g_player.pivot_x,g_player.pivot_y,
+                            g_player.angle-PI/4.0f);
                         break;
                     case SDLK_g:
                         if(!e.key.repeat && arcadeEnabled && !arcade.won &&
