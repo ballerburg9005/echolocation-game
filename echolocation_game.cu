@@ -1034,7 +1034,8 @@ int main(int argc, char* argv[])
                 if(d<bestDistance) {
                     bestDistance=d;
                     nearest=echo::threatCue(g_player.pivot_x,
-                           g_player.pivot_y,g_player.angle,en.x,en.y,en.alert>0);
+                           g_player.pivot_y,g_player.angle,en.x,en.y,
+                           en.alert>0,en.archetype);
                 }
             }
             if(nearest.audible && nowT-lastThreatCue>=nearest.interval &&
@@ -1352,9 +1353,15 @@ int main(int argc, char* argv[])
                 for(const echo::Enemy &en:arcade.enemies) {
                     if(arcade.lost||arcade.won)break;
                     const bool alert=en.alert>0.0f;
+                    const float idleR=en.archetype==0?0.67f:
+                                      en.archetype==1?1.0f:0.24f;
+                    const float idleG=en.archetype==0?0.21f:
+                                      en.archetype==1?0.58f:0.68f;
+                    const float idleB=en.archetype==0?0.95f:
+                                      en.archetype==1?0.12f:1.0f;
                     orbs.push_back(echo::VisualOrb{en.x,en.y,0.105f,1.12f,
-                        alert?1.0f:0.55f,alert?0.16f:0.26f,
-                        alert?0.25f:0.95f,alert?1.6f:0.8f});
+                        alert?1.0f:idleR,alert?0.12f:idleG,
+                        alert?0.24f:idleB,alert?1.6f:0.8f});
                 }
                 for(const echo::Shard &shard:arcade.shards) {
                     if(shard.collected)continue;
