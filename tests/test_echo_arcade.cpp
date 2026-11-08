@@ -13,6 +13,14 @@ int main(){
     }
     // Wall with passable opening in the middle, for BFS pathfinding.
     for(int y=1;y<N-1;++y)if(y<49||y>71)mask[y*N+N/2]=1;
+    const auto validSpawn=echo::findFreeSpawn(mask.data(),N,23,25);
+    assert(validSpawn.valid && validSpawn.x==23 && validSpawn.y==25);
+    const auto movedSpawn=echo::findFreeSpawn(mask.data(),N,0,0);
+    assert(movedSpawn.valid);
+    assert(!echo::circleGridContact(mask.data(),N,movedSpawn.x,
+                                    movedSpawn.y,13).hit);
+    std::vector<float> completelyBlocked(N*N,1.0f);
+    assert(!echo::findFreeSpawn(completelyBlocked.data(),N,23,25).valid);
     // A decoy is a legitimate secondary sound source, projected along an
     // unobstructed corridor. It never crosses the central SVG wall.
     const auto decoy=echo::projectDecoy(mask.data(),N,23,25,1,0,90);
