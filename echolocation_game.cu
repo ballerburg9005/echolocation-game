@@ -10,6 +10,8 @@
 #include <math.h>
 #include <string.h>
 #include <vector>
+#include <algorithm>
+#include "acoustics.h"
 
 #ifndef PI
 #define PI 3.14159265358979323846f
@@ -23,21 +25,20 @@
     } \
 }
 
-static float g_DX              = 0.01f;
-static float g_DT;
+static const float g_DX = echo::kCellMetres;
+static const float g_DT = echo::kStepSeconds;
 static float g_pulseIntervalSec= 1.0f;
 static float g_decayFactor     = 0.9995f;
 static float g_reflectionCoeff = 0.9f;
-static float g_timeFudgeFactor = 0.985f;
 
 static int   g_sampleRate      = 48000;
 static float g_c2;
 static int   g_pulseIntervalSteps;
 static int   g_pulseDurationSteps;
 
-static float g_waveVolumeScale = 0.05f;
+static float g_waveVolumeScale = 0.01f; // start quietly with headphones
 
-static const float SPEED_OF_SOUND = 343.0f;
+static const float SPEED_OF_SOUND = echo::kSpeedOfSound;
 static const int   SIZE = 500;
 static const int   WINDOW_WIDTH = SIZE * 2;
 static const int   WINDOW_HEIGHT = SIZE;
@@ -62,14 +63,13 @@ static int g_numToneMarkers = 0;
 
 static void recalcDerivedParams()
 {
-    g_DT = g_DX / (SPEED_OF_SOUND * 1.41421356237f);
     g_c2 = (SPEED_OF_SOUND * g_DT / g_DX) * (SPEED_OF_SOUND * g_DT / g_DX);
 
     if (g_pulseIntervalSec < 0.1f) g_pulseIntervalSec = 0.1f;
     if (g_pulseIntervalSec > 5.f)  g_pulseIntervalSec = 5.f;
-    g_pulseIntervalSteps = (int)(g_pulseIntervalSec / g_DT);
+    g_pulseIntervalSteps = std::max(1, (int)lroundf(g_pulseIntervalSec / g_DT));
 
-    g_pulseDurationSteps = (int)(0.0005f / g_DT);
+    g_pulseDurationSteps = (int)lroundf(echo::kClickDurationSeconds / g_DT);
     if (g_pulseDurationSteps < 1) g_pulseDurationSteps = 1;
 
     if (g_reflectionCoeff < 0.f) g_reflectionCoeff = 0.f;
@@ -78,11 +78,9 @@ static void recalcDerivedParams()
     if (g_decayFactor < 0.f) g_decayFactor = 0.f;
     if (g_decayFactor > 1.f) g_decayFactor = 1.f;
 
-    if (g_timeFudgeFactor < 0.9f) g_timeFudgeFactor = 0.9f;
-    if (g_timeFudgeFactor > 1.0f) g_timeFudgeFactor = 1.0f;
-
-    printf("[PARAMS] Pulse=%.2fs  Decay=%.6f  Reflect=%.3f  Fudge=%.4f\n",
-           g_pulseIntervalSec, g_decayFactor, g_reflectionCoeff, g_timeFudgeFactor);
+    g_waveVolumeScale = fmaxf(0.001f, fminf(0.08f, g_waveVolumeScale));
+    printf("[PARAMS] Pulse=%.2fs  Decay/step=%.6f  Wall reflection=%.3f  Volume=%.4f\n",
+           g_pulseIntervalSec, g_decayFactor, g_reflectionCoeff, g_waveVolumeScale);
 }
 
 struct Player {
@@ -258,33 +256,28 @@ static void updateDynamicMask(const float* h_static, float* h_dynamic, float wed
     }
 }
 
+// No block-level barriers: partial tiles in a 500x500 grid cannot deadlock.
+// Solids are excluded from the pressure field; neighboring fluid cells use a
+// rigid/impedance ghost pressure, rather than a sign-flipped "wall pressure".
 __global__ void updatePressure(float* p_next, const float* p, const float* p_prev,
                                const float* mask, float c2, int size, float reflection)
 {
-    __shared__ float s_p[34][34];
-    int tx = threadIdx.x + 1, ty = threadIdx.y + 1;
-    int x = blockIdx.x * 32 + (tx - 1);
-    int y = blockIdx.y * 32 + (ty - 1);
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= size || y >= size) return;
-    int idx = y * size + x;
-    s_p[ty][tx] = p[idx];
-
-    if (tx == 1  && x > 0      && y < size) s_p[ty][0] = p[idx - 1];
-    if (tx == 32 && x < size - 1 && y < size) s_p[ty][33] = p[idx + 1];
-    if (ty == 1  && y > 0      && x < size) s_p[0][tx] = p[idx - size];
-    if (ty == 32 && y < size - 1 && x < size) s_p[33][tx] = p[idx + size];
-    __syncthreads();
-
-    if (x < 1 || x >= size - 1 || y < 1 || y >= size - 1) return;
-
-    if (mask[idx] > 0.f) {
-        p_next[idx] = -reflection * s_p[ty][tx];
+    const int idx = y * size + x;
+    if (x == 0 || y == 0 || x == size - 1 || y == size - 1 || mask[idx] > 0.0f) {
+        p_next[idx] = 0.0f;
         return;
     }
-    float lap = s_p[ty][tx + 1] + s_p[ty][tx - 1] +
-                s_p[ty + 1][tx] + s_p[ty - 1][tx] -
-                4.f * s_p[ty][tx];
-    p_next[idx] = 2.f * s_p[ty][tx] - p_prev[idx] + c2 * lap;
+
+    const float center = p[idx], previous = p_prev[idx];
+    const float ghost = echo::wallGhost(center, previous, reflection, sqrtf(c2));
+    const float left  = mask[idx - 1]    > 0.0f ? ghost : p[idx - 1];
+    const float right = mask[idx + 1]    > 0.0f ? ghost : p[idx + 1];
+    const float down  = mask[idx - size] > 0.0f ? ghost : p[idx - size];
+    const float up    = mask[idx + size] > 0.0f ? ghost : p[idx + size];
+    p_next[idx] = echo::waveStep(center, previous, left, right, down, up, c2);
 }
 
 __global__ void applyDecay(float* p, float decay)
@@ -295,39 +288,28 @@ __global__ void applyDecay(float* p, float decay)
     }
 }
 
-__global__ void addPulse(float* p, float sx, float sy, float amplitude,
-                         int t, int interval, int duration, float dt)
+__global__ void addPulse(float* p, const float* mask, float sx, float sy,
+                         float amplitude, unsigned long long t,
+                         int interval, int duration, float dt)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx == 0) {
-        int adj = t - 1000;
-        if (adj >= 0 && (adj % interval) < duration) {
-            float val = amplitude * sinf(2.f * PI * 500.f * ((adj % duration)) * dt);
-            int ix = (int)roundf(sx), iy = (int)roundf(sy);
-            if (ix >= 0 && ix < SIZE && iy >= 0 && iy < SIZE) {
-                atomicAdd(&p[iy * SIZE + ix], val);
-            }
-        }
-    }
+    if (blockIdx.x || threadIdx.x || t < 1000ULL || interval < 1) return;
+    const unsigned long long elapsed = t - 1000ULL;
+    const int pulseStep = (int)(elapsed % (unsigned long long)interval);
+    if (pulseStep >= duration) return;
+    const int ix = (int)roundf(sx), iy = (int)roundf(sy);
+    if (ix < 1 || ix >= SIZE - 1 || iy < 1 || iy >= SIZE - 1) return;
+    const int idx = iy * SIZE + ix;
+    if (mask[idx] > 0.0f) return;
+    p[idx] += amplitude * echo::clickSample(pulseStep, duration, dt);
 }
 
 __global__ void captureAndReduce(const float* p, float lx, float ly,
                                  float rx, float ry, int sampleIndex,
                                  float* audioL, float* audioR, float waveVolume)
 {
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        int ilx = (int)roundf(lx), ily = (int)roundf(ly);
-        int irx = (int)roundf(rx), iry = (int)roundf(ry);
-        if (ilx < 0) ilx = 0; if (ilx >= SIZE) ilx = SIZE - 1;
-        if (ily < 0) ily = 0; if (ily >= SIZE) ily = SIZE - 1;
-        if (irx < 0) irx = 0; if (irx >= SIZE) irx = SIZE - 1;
-        if (iry < 0) iry = 0; if (iry >= SIZE) iry = SIZE - 1;
-
-        float vl = p[ily * SIZE + ilx];
-        float vr = p[iry * SIZE + irx];
-        audioL[sampleIndex] = vl * waveVolume;
-        audioR[sampleIndex] = vr * waveVolume;
-    }
+    if (blockIdx.x || threadIdx.x) return;
+    audioL[sampleIndex] = echo::bilinearSample(p, SIZE, lx, ly) * waveVolume;
+    audioR[sampleIndex] = echo::bilinearSample(p, SIZE, rx, ry) * waveVolume;
 }
 
 __global__ void updateVBO(float* vbo_data, float* p, float* mask, int size, int showObj, int t,
