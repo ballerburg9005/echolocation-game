@@ -106,5 +106,46 @@ int main(){
     std::printf("rotating soft ghost FDTD pressure difference: %.6f\n",
                 difference);
     assert(difference>0.1);
+    // Tiny candies use the *same* time-varying FDTD ghost interface,
+    // still with 8 faces and no hard p_next reset. Rotating an octagon
+    // must alter the wave solution, not merely the camera mesh.
+    std::vector<float> candy0(N*N,0.0f),candy1(N*N,0.0f);
+    constexpr int cx=54,cy=50;
+    float candyArea=0.0f,shiftedArea=0.0f,edgeChange=0.0f;
+    for(int y=35;y<65;++y)for(int x=39;x<69;++x) {
+        const int idx=y*N+x;
+        const float dx=(x+0.5f)-cx,dy=(y+0.5f)-cy;
+        candy0[idx]=echo::rotatingCandyCoverage(dx,dy,0.0f);
+        candy1[idx]=echo::rotatingCandyCoverage(dx,dy,echo::kPi/8.0f);
+        candyArea+=candy0[idx];shiftedArea+=candy1[idx];
+        edgeChange+=std::fabs(candy0[idx]-candy1[idx]);
+    }
+    assert(echo::kCandyRadiusCm==4.0f);
+    assert(candyArea>20.0f && candyArea<55.0f);
+    assert(std::fabs(candyArea-shiftedArea)<candyArea*0.12f);
+    assert(edgeChange>1.0f);
+    assert(echo::rotatingCandyCoverage(5,0,0)==0.0f);
+    assert(echo::rotatingCandyCoverage(0,0,0)==1.0f);
+    // 8-fold rotational symmetry is preserved.
+    for(int y=-5;y<=5;++y)for(int x=-5;x<=5;++x)
+        assert(std::fabs(echo::rotatingCandyCoverage((float)x,(float)y,0)-
+                echo::rotatingCandyCoverage((float)x,(float)y,echo::kPi/4))
+                <1e-5f);
+    const auto coinPressure0=waveAfterPulse(candy0);
+    const auto coinPressure1=waveAfterPulse(candy1);
+    float propagatedDifference=0.0f;
+    for(size_t i=0;i<coinPressure0.size();++i)
+        propagatedDifference+=std::fabs(coinPressure0[i]-coinPressure1[i]);
+    assert(propagatedDifference>0.1f);
+    // Material decoding reuses one float per cell and the existing
+    // FDTD stencil. Smaller candy is gently reflective, not ghost-strong.
+    assert(echo::effectiveSoftCoverage(-0.75f)==0.75f);
+    assert(std::fabs(echo::effectiveSoftCoverage(-1.75f)-0.63f)<1e-5f);
+    assert(echo::effectiveSoftCoverage(0)==0.0f);
+    assert(echo::effectiveSoftCoverage(2.0f)==0.0f);
+    assert(echo::effectiveSoftCoverage(-1.75f)<
+           echo::effectiveSoftCoverage(-0.75f));
+    std::printf("rotating candy FDTD wave difference %.4f, 8-gon area %.2f cells\\n",
+                propagatedDifference,candyArea);
     std::puts("rotating hexagons: fractional geometric coverage, smooth impedance and distinct FDTD echoes passed");
 }
