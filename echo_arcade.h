@@ -58,11 +58,11 @@ inline DecoyPlacement projectDecoy(const float* walls,int size,float startX,
     dirX/=norm;dirY/=norm;
     // Sampling every 2cm with a 3cm clearance keeps the click emitter off
     // blocked cells and prevents jumping across a thin wall.
-    for(float distance=10.0f;distance<=maxRangeCm;distance+=2.0f) {
+    for(float distance=0.0f;distance<=maxRangeCm;distance+=2.0f) {
         const float x=startX+dirX*distance;
         const float y=startY+dirY*distance;
         if(circleGridContact(walls,size,x,y,3.0f).hit)break;
-        result={x,y,true};
+        if(distance>=10.0f)result={x,y,true};
     }
     return result;
 }
