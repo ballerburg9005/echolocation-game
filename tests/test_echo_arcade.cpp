@@ -166,7 +166,6 @@ int main(){
     // second square in the 2D visualization.
     std::vector<float> shapeMask=mask;
     game.stampShards(shapeMask.data());
-    const auto shard=game.shards[0];
     int materialCount=0;
     for(int y=0;y<N;++y)for(int x=0;x<N;++x)
         if(shapeMask[y*N+x]==3.0f)++materialCount;
