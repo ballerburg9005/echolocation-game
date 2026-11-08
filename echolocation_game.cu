@@ -737,7 +737,8 @@ int main(int argc, char* argv[])
     updatePlayerComponents(g_player);
 
     g_numToneMarkers = g_toneMarkers.size();
-    std::vector<echo::ProximityGate> markerGates(g_numToneMarkers);
+    // Object discovery tones are now physical FDTD world emitters; the
+    // old nonphysical proximity chimes are deliberately disabled.
     if (g_numToneMarkers > 0) {
         CUDA_CHECK(cudaMalloc(&d_toneMarkers, g_numToneMarkers * sizeof(ToneMarker)));
         CUDA_CHECK(cudaMemcpy(d_toneMarkers, g_toneMarkers.data(), 
@@ -977,7 +978,7 @@ int main(int argc, char* argv[])
                         previousMicLX=g_mic_l_x; previousMicLY=g_mic_l_y;
                         previousMicRX=g_mic_r_x; previousMicRY=g_mic_r_y;
                         for(ToneMarker &tm:g_toneMarkers)tm.collected=false;
-                        markerGates.assign(g_numToneMarkers,echo::ProximityGate{});
+                        // FDTD emitters are reconstructed from reset objects.
                         if(g_numToneMarkers>0)CUDA_CHECK(cudaMemcpy(
                             d_toneMarkers,g_toneMarkers.data(),
                             g_numToneMarkers*sizeof(ToneMarker),cudaMemcpyHostToDevice));
@@ -1232,16 +1233,14 @@ int main(int argc, char* argv[])
                                (Uint32)(tap.size()*sizeof(float)));
         }
 
-        // Legacy O/I/W discovery sounds are NOT simulated echoes. They
-        // should chime only when discovering something right beside the
-        // player, with path occlusion, and never beep from a distant pillar.
-        // Entry-triggered chirps get a rare 4.5-second reminder when nearby.
+        // O/I/W landmarks now emit their location-specific, extremely quiet
+        // tones INSIDE the 2D FDTD field. Only the game-rule collection / win
+        // events remain direct UI audio (and the wall-contact tactile cue).
         for(int i=0;i<g_numToneMarkers;++i) {
             ToneMarker &tm=g_toneMarkers[i];
             if(tm.collected)continue;
-            const float deltaX=tm.x-g_player.pivot_x;
-            const float deltaY=tm.y-g_player.pivot_y;
-            const float dist=std::hypot(deltaX,deltaY);
+            const float dist=std::hypot(tm.x-g_player.pivot_x,
+                                        tm.y-g_player.pivot_y);
             if(dist<13.0f && tm.type=='I') {
                 tm.collected=true;
                 ++collectedItems;
@@ -1249,36 +1248,11 @@ int main(int argc, char* argv[])
                 CUDA_CHECK(cudaMemcpy(d_toneMarkers,g_toneMarkers.data(),
                     g_numToneMarkers*sizeof(ToneMarker),cudaMemcpyHostToDevice));
                 playArcadeFeedback(beepDev,g_sampleRate,0);
-                continue;
-            }
-            if(dist<13.0f && tm.type=='W' && !gameWon &&
-               (!arcadeEnabled || arcade.remaining==0)) {
+            } else if(dist<13.0f && tm.type=='W' && !gameWon &&
+                      (!arcadeEnabled || arcade.remaining==0)) {
                 gameWon=true;
                 printf("[GAME] SVG goal reached\n");
-                // Arcade's separate win event already plays its own jingle.
                 if(!arcadeEnabled)playArcadeFeedback(beepDev,g_sampleRate,2);
-            }
-            const float radius=echo::markerRadiusCm(tm.type);
-            const bool nearby=dist<radius &&
-                echo::hasClearSight(h_mask,SIZE,g_player.pivot_x,
-                                    g_player.pivot_y,tm.x,tm.y);
-            if(!nearby) {
-                tm.isPlaying=false;
-                markerGates[i].shouldChime(radius+7.0f,radius,nowT);
-                continue;
-            }
-            tm.isPlaying=true;
-            if(SDL_GetQueuedAudioSize(beepDev) <
-                  (Uint32)(0.10f*g_sampleRate*2*sizeof(float)) &&
-               markerGates[i].shouldChime(dist,radius,nowT)) {
-                const auto gains=echo::localBearing(g_player.pivot_x,
-                    g_player.pivot_y,g_player.angle-PI/4.0f,
-                    tm.x,tm.y,echo::proximityStrength(dist,radius));
-                const auto cue=echo::localChime(g_sampleRate,tm.type,
-                                               gains.left,gains.right,gains.rear);
-                if(!cue.empty())
-                    SDL_QueueAudio(beepDev,cue.data(),
-                                   (Uint32)(cue.size()*sizeof(float)));
             }
         }
 
