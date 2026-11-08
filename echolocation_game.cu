@@ -1484,7 +1484,7 @@ int main(int argc, char* argv[])
                         arcade.overdrive>0?0.17f:alert?1.0f:idleR,
                         arcade.overdrive>0?0.90f:alert?0.12f:idleG,
                         arcade.overdrive>0?1.0f:alert?0.24f:idleB,
-                        arcade.overdrive>0?2.0f:alert?1.6f:0.8f,16});
+                        arcade.overdrive>0?2.0f:alert?1.6f:0.8f,6});
                 }
                 for(const echo::Shard &shard:arcade.shards) {
                     if(shard.collected)continue;
