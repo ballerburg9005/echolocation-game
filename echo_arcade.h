@@ -14,6 +14,36 @@
 
 namespace echo {
 
+// Choose a collision-safe start on arbitrary SVG levels. Search at 5-cm
+// intervals, minimizing distance from the intended (legacy) start position.
+// Unlike silently teleporting on every restart this runs only at level load.
+struct SafeSpawn { float x=0,y=0; bool valid=false; };
+inline SafeSpawn findFreeSpawn(const float* walls,int size,float desiredX,
+                              float desiredY,float radius=13.0f) {
+    if(!walls||size<3||!std::isfinite(desiredX)||!std::isfinite(desiredY))
+        return {};
+    if(!circleGridContact(walls,size,desiredX,desiredY,radius).hit &&
+       desiredX>=radius+1 && desiredY>=radius+1 &&
+       desiredX<(float)size-radius-1 &&
+       desiredY<(float)size-radius-1)
+        return {desiredX,desiredY,true};
+    SafeSpawn result;
+    float bestDistance=std::numeric_limits<float>::infinity();
+    // Sample legal centres; if the radius does not fit even once, report
+    // failure instead of placing the player inside a blocking wall.
+    for(float y=radius+2.0f;y<size-radius-2.0f;y+=5.0f)
+        for(float x=radius+2.0f;x<size-radius-2.0f;x+=5.0f) {
+            const float dx=x-desiredX,dy=y-desiredY;
+            const float d2=dx*dx+dy*dy;
+            if(d2<bestDistance &&
+               !circleGridContact(walls,size,x,y,radius).hit) {
+                result={x,y,true};
+                bestDistance=d2;
+            }
+        }
+    return result;
+}
+
 // Decoy emitter placement: a sound source projected along the player's
 // facing direction, blocked by actual SVG geometry (no teleport through walls).
 // This is used for a *real* second FDTD source in the main CUDA kernel.
