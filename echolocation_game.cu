@@ -694,7 +694,8 @@ int main(int argc, char* argv[])
     mapGlyphs.reserve(128*3);
     double lastArcadeMessage=0.0;
     double lastThreatCue=0.0;
-    bool dangerAudio=true;
+    double lastGuidanceCue=0.0;
+    bool dangerAudio=true, guidanceAudio=true;
     std::printf("[ARCADE] %d ghosts, %d shards; reach the exit after collecting all.\n",
                 (int)arcade.enemies.size(),arcade.remaining);
 
@@ -756,7 +757,7 @@ int main(int argc, char* argv[])
     std::puts("[CONTROLS] F2 3D/2D | F3 immersive 3D | F4 arcade on/off | R restart");
     std::puts("[CONTROLS] W/S move | A/D rotate | Q/E strafe | arrows also work");
     std::puts("[CONTROLS] F manually click | T toggle auto-click/stealth | 1/2 interval");
-    std::puts("[CONTROLS] F5 toggle enemy danger heartbeat | 3/4 decay | 5/6 reflections | 7/8 volume");
+    std::puts("[CONTROLS] F5 enemy heartbeat | F6 target beacon | 3/4 decay | 5/6 reflections | 7/8 volume");
 
     while (!quit) {
         SDL_Event e;
@@ -804,6 +805,7 @@ int main(int argc, char* argv[])
                     } break;
                     case SDLK_F4: arcadeEnabled=!arcadeEnabled; break;
                     case SDLK_F5: dangerAudio=!dangerAudio; break;
+                    case SDLK_F6: guidanceAudio=!guidanceAudio; break;
                     case SDLK_t:
                         if(!e.key.repeat)automaticPulse=!automaticPulse;
                         break;
@@ -832,7 +834,8 @@ int main(int argc, char* argv[])
                         audioResampler=echo::StereoLinearResampler(g_DT,g_sampleRate);
                         SDL_ClearQueuedAudio(simDev);
                         SDL_ClearQueuedAudio(beepDev);
-                        lastBeep=0;lastSlideTime=0;lastThreatCue=0;wasSliding=false;
+                        lastBeep=0;lastSlideTime=0;lastThreatCue=0;
+                        lastGuidanceCue=0;wasSliding=false;
                         break;
                     case SDLK_ESCAPE: quit = true; break;
                 }
@@ -963,6 +966,48 @@ int main(int argc, char* argv[])
                 SDL_QueueAudio(beepDev,heartbeat.data(),
                                (Uint32)(heartbeat.size()*sizeof(float)));
                 lastThreatCue=nowT;
+            }
+        }
+
+        // A distinct high-pitched optional "next target" beacon allows
+        // navigation without vision. It is game UI (direct stereo bearing),
+        // not a simulated sound propagation source; F6 disables the aid.
+        if(arcadeEnabled&&guidanceAudio&&!arcade.won&&!arcade.lost &&
+           nowT-lastGuidanceCue>=1.20 &&
+           SDL_GetQueuedAudioSize(beepDev) <
+               (Uint32)(0.15*g_sampleRate*2*sizeof(float))) {
+            const echo::GuidanceTarget target=arcade.guidanceTarget();
+            if(target.available) {
+                const float dx=target.x-g_player.pivot_x;
+                const float dy=target.y-g_player.pivot_y;
+                const float bearing=atan2f(dy,dx)-
+                    (g_player.angle-PI/4.0f);
+                const float pan=sinf(bearing);
+                const float left=sqrtf(0.5f*(1.0f+pan));
+                const float right=sqrtf(0.5f*(1.0f-pan));
+                const int notes=target.exit?3:2;
+                const int n=(int)(notes*0.13f*g_sampleRate);
+                std::vector<float> beacon(2*n,0.0f);
+                const float distance=std::hypot(dx,dy);
+                // Deliberately broad distance law, unlike physical room audio.
+                const float gain=0.045f+0.07f*
+                    fmaxf(0.0f,1.0f-fminf(distance,500.0f)/500.0f);
+                for(int j=0;j<n;++j) {
+                    const float t=(float)j/g_sampleRate;
+                    const int note=std::min(notes-1,(int)(t/0.13f));
+                    const float within=fmodf(t,0.13f);
+                    if(within>0.08f)continue;
+                    const float env=sinf(PI*within/0.08f);
+                    const float frequency=(target.exit?1190.0f:810.0f)+
+                                          note*(target.exit?170.0f:110.0f);
+                    const float chirp=gain*env*env*
+                        sinf(2.0f*PI*frequency*within);
+                    beacon[2*j]=chirp*left;
+                    beacon[2*j+1]=chirp*right;
+                }
+                SDL_QueueAudio(beepDev,beacon.data(),
+                               (Uint32)(beacon.size()*sizeof(float)));
+                lastGuidanceCue=nowT;
             }
         }
 
