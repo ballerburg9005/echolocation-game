@@ -885,6 +885,9 @@ int main(int argc, char* argv[])
     int collectedItems = 0;
     double lastDebugTime = 0.0;
     float intervalRawAudioPeak=0.0f;
+    float previousRaw[2]={0.0f,0.0f};
+    float intervalMaxSampleJump=0.0f,intervalJumpAngle=0.0f;
+    unsigned long long intervalSharpJumps=0;
     unsigned long long intervalLimiterSamples=0,intervalUnderruns=0;
     unsigned long long simStep2=0;
     uint64_t manualPulseAt=UINT64_MAX;
@@ -1052,6 +1055,9 @@ int main(int argc, char* argv[])
                         SDL_ClearQueuedAudio(simDev);
                         SDL_ClearQueuedAudio(beepDev);
                         wallTouch=echo::ContactTrigger{};
+                        previousRaw[0]=previousRaw[1]=0.0f;
+                        intervalMaxSampleJump=0.0f;
+                        intervalSharpJumps=0;
                         lastThreatCue=0;lastGuidanceCue=0;
                         lastCount=SDL_GetPerformanceCounter();
                         break;
@@ -1457,13 +1463,26 @@ int main(int argc, char* argv[])
             }
             // A soft limiter prevents a numerical transient from delivering
             // arbitrary full-scale peaks to headphones.
-            for (float &sample : h_audioOut) {
+            // Detect actual discontinuities in the *unprocessed* stereo
+            // pressure, including across SDL queue chunk boundaries.
+            // Instrumentation never changes the physics or post-filtering.
+            for (size_t n=0;n<h_audioOut.size();++n) {
+                float &sample=h_audioOut[n];
+                const int ear=(int)(n&1);
                 if(isfinite(sample)) {
+                    const float jump=fabsf(sample-previousRaw[ear]);
+                    if(jump>intervalMaxSampleJump) {
+                        intervalMaxSampleJump=jump;
+                        intervalJumpAngle=g_player.angle-PI/4.0f;
+                    }
+                    if(jump>0.5f)++intervalSharpJumps;
+                    previousRaw[ear]=sample;
                     intervalRawAudioPeak=fmaxf(intervalRawAudioPeak,fabsf(sample));
                     if(fabsf(sample)>0.95f)++intervalLimiterSamples;
                     sample=0.8f*tanhf(sample);
                 } else {
                     ++intervalLimiterSamples;
+                    previousRaw[ear]=0.0f;
                     sample=0.0f;
                 }
             }
@@ -1477,12 +1496,15 @@ int main(int argc, char* argv[])
         if (simTime - lastDebugTime >= 5.0) {
             float queuedSeconds = SDL_GetQueuedAudioSize(simDev) /
                                   (2.0f * sizeof(float) * g_sampleRate);
-            printf("[AUDIO-DIAG] SimTime=%.2f Steps=%d Queue=%.3fs RawPeak=%.4f HighSamples=%llu Underflows=%llu B=%d N=%d J=%d\n",
+            printf("[AUDIO-DIAG] SimTime=%.2f Steps=%d Queue=%.3fs RawPeak=%.4f MaxJump=%.4f JumpAngle=%.2f SharpJumps=%llu HighSamples=%llu Underflows=%llu B=%d N=%d J=%d\n",
                    simTime,steps,queuedSeconds,intervalRawAudioPeak,
-                   intervalLimiterSamples,intervalUnderruns,
+                   intervalMaxSampleJump,intervalJumpAngle,
+                   intervalSharpJumps,intervalLimiterSamples,intervalUnderruns,
                    (int)phasedClick,(int)worldTones,(int)echoOnlyMonitor);
             lastDebugTime=simTime;
             intervalRawAudioPeak=0.0f;
+            intervalMaxSampleJump=0.0f;
+            intervalSharpJumps=0;
             intervalLimiterSamples=0;
             intervalUnderruns=0;
         }
