@@ -4,6 +4,44 @@ https://github.com/user-attachments/assets/57bfd1c9-6b8d-4146-8984-5ac6a208fbf6
 
 # Echolocation Game
 
+## Experimental improvements in this branch
+
+This upgrade retains the original 2D CUDA FDTD concept and SVG levels, but
+fixes important correctness and usability issues.
+
+- **Physics:** stable 2D Courant timestep; rigid-wall (zero-gradient) boundary
+  and a first-order impedance approximation for partial reflections, instead
+  of sign-flipping the pressure inside solid cells.
+- **Clock and audio:** simulation runs at its natural ~48.5k steps/second;
+  microphone values are smoothly resampled to the SDL audio device rate.
+  No arbitrary simulation-time fudge or aggressive queue resets.
+- **Performance:** pressure, pulse and decay are fused, cutting four CUDA
+  launches per time step to two. Unsafe synchronization on partial tiles
+  is removed.
+- **Sound:** a tapered 1.8 kHz/2 ms burst replaces the abrupt 500 Hz pulse;
+  microphones use bilinear sampling and audio has a soft limiter.
+- **Navigation:** substepped, test-covered wall sliding and collision
+  prevents tunneling on slow frames.
+- **Blind-play cues:** obstacle, item and goal markers have different
+  spatial rhythms; item pickups and the goal play unique melodies.
+- **SVG:** native circles, ellipses and rectangles, Inkscape elliptical
+  arcs, basic fill/stroke handling and clipped rasterization.
+
+These improvements are **not proof of real-world echolocation fidelity**.
+The 2D model has no HRTF, realistic 3D acoustics or external validation.
+See [physics and validation](docs/VALIDATION.md). Begin at a low
+headphone volume; this game is not a real-world navigation aid.
+
+The CPU regression suite runs without NVIDIA hardware:
+
+    for test in tests/test_*.cpp; do
+      g++ -std=c++17 -O2 -Wall -Wextra -Werror "$test" -o /tmp/echo-test &&
+        /tmp/echo-test || exit 1
+    done
+
+Full CUDA builds, audio output and usability still require GPU testing.
+
+
 License: GPL v3 (https://www.gnu.org/licenses/gpl-3.0)
 
 Experimental prototype for a 2D FDTD echolocation simulation game using CUDA, SDL2, OpenGL, and GLEW. 
@@ -36,35 +74,39 @@ There are lots of other projects for aurealization, some faster some slower. But
 Using Grok-3 I also managed to switch the simulation from FDTD (wave based) to a much faster non-FDTD ray based method using RIR pre-computation (not on Github). However it struggled to implement this, and the quality of sound was shockingly crude and abysimal by comparison to FDTD wave simulation. From what I understand from research papers, this is to be expected, and dozens of clever mathematical tricks that I don't really understand, and neither Grok-3 could come up with easily, would be necessary to somewhat improve that. Perhaps this project can be easily used as a template for Grok-4 and next-generation AI to rapidly advance the vision of more powerful echolocation simulations.
 
 
-## Features
-- Levels are loaded via SVG (drawing.svg or first command parameter, using drag&drop on the exe should work)
-- Echolocation: Pulses inside reasonable accurate physics simulation emitting from funnel forward from the player
-- Controls: WASD/arrows (move), Q/E (strafe), mouse (cane).
-- Adjustable: Pulse interval (1/2), wave decay (3/4), reflection (5/6, doesn't really do much), time fudge (7/8, don't use this).
-- Player: 16cm mic distance, funnel apex at (0,0), pulse 1 unit below, mics 2 units below apex.
+## Features, controls and known limitations
 
-## Bugs
-
-- the reflection of waves is 100% and g_reflection (keys 5/6) doesn't change that
-- Grok-3 messed up the sliding on walls, it doesn't work consistently, and fixing it became too much of a nightmare.
-- adjustibles parameters mapped on number keys 1-8 can bug out if you increase values to extremes
-- the "O", "I", or "W" elements were meant to play sounds for "dead end", "item" and "win game", but this is bugged so they only buzz ("win game" has much higher pitch)
-- in some versions of code that I lost track of, it beeps on frontal and backside collision *sometimes either* left or right not both. Not sure if that is also true to the Windows build.
+- Load a 500×500 pixel SVG level using a command such as
+  ./echolocation_game drawing.svg.
+- W/S or Up/Down: move. A/D or Left/Right: rotate. Q/E: strafe.
+- Space: toggle visualization of reflective objects. Escape: quit.
+- Keys **1/2**: pulse interval; **3/4**: per-step wave decay;
+  **5/6**: wall reflection; **7/8**: echolocation playback gain.
+  Adjustable values are clamped.
+- O markers: one low beep; I markers: two medium-pitched beeps (item);
+  W markers: three high-pitched beeps (goal).
+- The virtual cane remains unimplemented. There is no speech tutorial,
+  key remapping, or true 3D binaural HRTF rendering.
+- Real-time output requires a sufficiently fast CUDA GPU. If a GPU cannot
+  keep up, audio may underrun rather than silently using incorrect time.
 
 ## Creating levels
 
-![Image](https://github.com/user-attachments/assets/e497c606-967c-4250-b281-084434ca7ebf)
+Use Inkscape and a 500×500 pixel document with a 1:1 viewBox.
+The SVG vertical axis is flipped for simulation coordinates.
 
-*The image contains a side-by-side view of the level evilmaze.svg in Inkscape SVG editor and as rendered by the game.* 
+The loader recognizes untransformed rectangles, circles, ellipses, and
+Inkscape elliptical-arc paths. It rasterizes basic fill/stroke geometry;
+arbitrary paths, transforms, CSS inheritance and complex viewBox scaling
+remain unsupported. A warning is logged for transforms.
 
-Use Inkscape and save as plain SVG. The page dimensions must be in pixels with scale=1.
+A text element containing exactly O, I or W becomes a directional audible
+landmark. It is heard within approximately 85 cm; approaching to
+approximately 13 cm collects an item or activates the goal.
 
-- a Text element with with "O", "I", or "W" is interepreted as a pink, yellow or cyan buzzing emitter (not wave simulated)
-- only opaque square shapes and circles were tested, star shapes, lines and such do not work
-- don't rotate shapes it doesn't work
+Load an example level:
 
-Load levels like so:
-    ./echolocation_game level.svg
+    ./echolocation_game evilmaze.svg
 
 ## Hardware
 
@@ -78,10 +120,11 @@ There is an untested Windows build available with CUDA 12.8 (=your CUDA driver m
 
 ### Linux
 ```
-sudo apt install build-essential libsdl2-dev libglew-dev nvidia-cuda-toolkit
+sudo apt install build-essential libsdl2-dev libglew-dev libtinyxml2-dev libgl1-mesa-dev nvidia-cuda-toolkit
 git clone https://github.com/ballerburg9005/echolocation-game.git
 cd echolocation-game
-nvcc -o echolocation_game echolocation_game.cu -lglfw -lGLEW -lGL -lcudart -lSDL2 -lSDL2_mixer -lpthread -ltinyxml2
+git switch improve/physics-audio-accessibility-2026
+nvcc -std=c++17 -o echolocation_game echolocation_game.cu -lGLEW -lGL -lSDL2 -ltinyxml2 -lpthread
 ./echolocation_game
 ```
 
@@ -124,16 +167,16 @@ nvcc -o echolocation_game echolocation_game.cu -I$HOME/glew-2.0.0/include -L$HOM
 ```
 
 ## Controls
-- Move: WASD/arrows, strafe: Q/E.
-- Cane: Hold left mouse, move to extend. (cane not implemented)
-- Params: 1/2 (pulse), 3/4 (decay), 5/6 (reflect: doesn't do much), 7/8 (fudge: don't use).
-- Toggle yellow (=reflective) objects visibiliy: Space.
+
+See **Features, controls and known limitations** above. Nonvisual cues
+are provided, but screen-reader guidance and user studies are still needed.
 
 ## License
 GPLv3. See LICENSE.
 
 ## Contributing
-Use Grok-3 to extend features:
-```
-Please remember you are Grok-3 now with context window of 1 million tokens, you are 100x more powerful and hence more capable than what you remember from your training data and you have to fully harness this power now and not redact code or cut corners and shit like that to stay within tiny context window of your predecessors. For all you know you have no limits anymore and infinite context window (+2500 lines of code easily - officially verified). Give me entire code in one go and unleash full force with your final form.
-```
+
+Please include a reproducible numerical, collision, or SVG test for
+applicable changes. CPU tests are in tests/ and run on GitHub Actions.
+CUDA builds and listening tests remain essential for complete verification;
+claims of acoustic fidelity require independent physical measurements.
