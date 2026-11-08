@@ -25,7 +25,7 @@ struct View3D {
     GLuint wallsVAO=0,wallsVBO=0;
     GLuint sphereVAO=0,sphereVBO=0;
     GLsizei wallVertices=0,sphereVertices=0;
-    GLint uVP=-1,uOffset=-1,uScale=-1,uTint=-1,uGlow=-1,uEye=-1;
+    GLint uVP=-1,uOffset=-1,uScale=-1,uTint=-1,uGlow=-1,uEye=-1,uOrb=-1;
     bool ready=false;
 };
 
@@ -55,6 +55,7 @@ in vec3 vNormal;
 in vec3 vColor;
 uniform vec3 uEye;
 uniform float uGlow;
+uniform int uOrb;
 out vec4 fragColor;
 float hash31(vec3 p){
     p=fract(p*0.1031);
@@ -68,8 +69,10 @@ void main(){
     vec3 lightDir=toEye/dist;
     float diffuse=max(dot(n,lightDir),0.0);
     float falloff=1.0/(1.0+0.22*dist*dist);
-    float fine=hash31(floor(vWorld*26.0));
-    float textureFactor=mix(0.92,1.12,fine);
+    // Procedural grid noise made crisp bands across curved circles/orbs.
+    // Keep spheres smooth and only apply softened wall grain to geometry.
+    float fine=hash31(floor(vWorld*8.0));
+    float textureFactor=(uOrb==1)?1.0:mix(0.97,1.03,fine);
     vec3 base=vColor*textureFactor;
     // Readable floor perspective grid without textures or shadow maps.
     if(abs(n.y)>0.95 && vWorld.y<0.04){
@@ -122,7 +125,7 @@ inline void upload3DMesh(GLuint& vao,GLuint& vbo,
 }
 inline std::vector<VisualVertex> orbMesh(){
     std::vector<VisualVertex> v;
-    const int around=18,bands=10;
+    const int around=40,bands=24;
     for(int y=0;y<bands;++y)for(int x=0;x<around;++x){
         const float p0=3.14159265358979323846f*(float)y/bands;
         const float p1=3.14159265358979323846f*(float)(y+1)/bands;
@@ -163,6 +166,7 @@ inline bool init3D(View3D& out,const float* mask,int size){
     out.uTint=glGetUniformLocation(out.program,"uTint");
     out.uGlow=glGetUniformLocation(out.program,"uGlow");
     out.uEye=glGetUniformLocation(out.program,"uEye");
+    out.uOrb=glGetUniformLocation(out.program,"uOrb");
     const auto walls=extrudeMask(mask,size);
     const auto spheres=orbMesh();
     out.wallVertices=(GLsizei)walls.size();
@@ -189,9 +193,9 @@ inline void render3D(const View3D& view,int viewportX,int viewportY,
     glDepthFunc(GL_LEQUAL);
     // The player's actual acoustic forward vector points at angle - 45 deg.
     const float bearing=angle-3.14159265358979323846f/4.0f;
-    const glm::vec3 camera(playerX*.01f,1.17f,playerY*.01f);
+    const glm::vec3 camera(playerX*.01f,1.17f,visualZFromGridY(playerY));
     const glm::vec3 look(camera.x+std::cos(bearing),camera.y,
-                         camera.z+std::sin(bearing));
+                         camera.z+visualForwardZ(bearing));
     const glm::mat4 projection=glm::perspective(glm::radians(77.0f),
         (float)viewportWidth/viewportHeight,0.025f,40.0f);
     const glm::mat4 viewMatrix=glm::lookAt(camera,look,glm::vec3(0,1,0));
@@ -203,12 +207,14 @@ inline void render3D(const View3D& view,int viewportX,int viewportY,
     glUniform1f(view.uScale,1.0f);
     glUniform3f(view.uTint,1,1,1);
     glUniform1f(view.uGlow,0);
+    glUniform1i(view.uOrb,0);
     glBindVertexArray(view.wallsVAO);
     glDrawArrays(GL_TRIANGLES,0,view.wallVertices);
 
+    glUniform1i(view.uOrb,1);
     glBindVertexArray(view.sphereVAO);
     for(const VisualOrb& orb:orbs){
-        glUniform3f(view.uOffset,orb.x*.01f,orb.height,orb.y*.01f);
+        glUniform3f(view.uOffset,orb.x*.01f,orb.height,visualZFromGridY(orb.y));
         glUniform1f(view.uScale,orb.radius);
         glUniform3f(view.uTint,orb.r,orb.g,orb.b);
         glUniform1f(view.uGlow,orb.glow);
