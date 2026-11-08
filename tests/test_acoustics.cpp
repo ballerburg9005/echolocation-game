@@ -66,9 +66,13 @@ int main() {
     // Funnel is only a visual outline, not a moving binary acoustic wall:
     // exact ray points render as edges; the back/side of the cone do not.
     assert(echo::visualFunnelPixel(5,5,0,0,10,0,0,0)==false);
-    const float halfAngle=38.0f*echo::kPi/180.0f;
+    const float halfAngle=16.0f*echo::kPi/180.0f;
     assert(echo::visualFunnelPixel(5.0f*std::cos(halfAngle),
         5.0f*std::sin(halfAngle),0,0,10,0,0,0));
+    // A previous 38-degree half-angle was visibly far too open.
+    const float oldHalfAngle=38.0f*echo::kPi/180.0f;
+    assert(!echo::visualFunnelPixel(5.0f*std::cos(oldHalfAngle),
+        5.0f*std::sin(oldHalfAngle),0,0,10,0,0,0));
     assert(!echo::visualFunnelPixel(-5,0,0,0,10,0,0,0));
 
     // One second of 48.5 kHz FDTD must become 48 kHz stereo without drifting.
