@@ -540,6 +540,8 @@ static void initGraphics(GraphicsContext &gfx)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS,1);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES,4);
 
     gfx.window = SDL_CreateWindow("Echolocation, Dual View (SVG)",
                                   SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -555,6 +557,7 @@ static void initGraphics(GraphicsContext &gfx)
     }
     glewExperimental = GL_TRUE;
     glewInit();
+    glEnable(GL_MULTISAMPLE);
     glClearColor(0, 0, 0, 1);
 
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
@@ -788,6 +791,11 @@ int main(int argc, char* argv[])
     recalcDerivedParams();
     echo::StereoLinearResampler audioResampler(g_DT, g_sampleRate);
     updatePlayerComponents(g_player);
+    // Mic positions are continuous across GPU batches: sampling an
+    // instantaneous new position once per SDL frame can zipper/rattle in
+    // the standing pressure field even when the wall grid is unchanged.
+    float previousMicLX=g_mic_l_x,previousMicLY=g_mic_l_y;
+    float previousMicRX=g_mic_r_x,previousMicRY=g_mic_r_y;
 
     dim3 thr(32, 32);
     dim3 blk((SIZE + 31) / 32, (SIZE + 31) / 32);
@@ -917,6 +925,8 @@ int main(int argc, char* argv[])
                         lastDecoySimTime=-100;automaticPulse=true;
                         g_player=initialPlayer;
                         updatePlayerComponents(g_player);
+                        previousMicLX=g_mic_l_x; previousMicLY=g_mic_l_y;
+                        previousMicRX=g_mic_r_x; previousMicRY=g_mic_r_y;
                         for(ToneMarker &tm:g_toneMarkers)tm.collected=false;
                         markerGates.assign(g_numToneMarkers,echo::ProximityGate{});
                         if(g_numToneMarkers>0)CUDA_CHECK(cudaMemcpy(
@@ -1206,8 +1216,13 @@ int main(int argc, char* argv[])
                                          decoyPulseX,decoyPulseY,decoyPulseAt);
             CUDA_CHECK(cudaGetLastError());
 
-            captureAndReduce<<<1, 1>>>(d_p_next, g_mic_l_x, g_mic_l_y,
-                                       g_mic_r_x, g_mic_r_y, audioBatchIndex,
+            const float alpha=(float)(i+1)/(float)steps;
+            const float micLX=previousMicLX+(g_mic_l_x-previousMicLX)*alpha;
+            const float micLY=previousMicLY+(g_mic_l_y-previousMicLY)*alpha;
+            const float micRX=previousMicRX+(g_mic_r_x-previousMicRX)*alpha;
+            const float micRY=previousMicRY+(g_mic_r_y-previousMicRY)*alpha;
+            captureAndReduce<<<1, 1>>>(d_p_next, micLX, micLY,
+                                       micRX, micRY, audioBatchIndex,
                                        d_audioL, d_audioR, g_waveVolumeScale);
             CUDA_CHECK(cudaGetLastError());
 
@@ -1221,6 +1236,10 @@ int main(int argc, char* argv[])
             d_p_next = tmp;
         }
 
+        if(steps>0) {
+            previousMicLX=g_mic_l_x; previousMicLY=g_mic_l_y;
+            previousMicRX=g_mic_r_x; previousMicRY=g_mic_r_y;
+        }
         if(manualPulseAt!=UINT64_MAX &&
            simStep2>=manualPulseAt+(uint64_t)g_pulseDurationSteps)
             manualPulseAt=UINT64_MAX;
