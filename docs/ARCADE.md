@@ -60,8 +60,8 @@ The maze has three enemies, three lives, and up to twelve echo shards.
 | F2 | Toggle right 2D/3D viewport |
 | F3 | Toggle immersive full-window 3D |
 | F4 | Arcade on/off, preserving pure FDTD navigation mode |
-| F5 | Enable/disable directional enemy heartbeat |
-| F6 | Enable/disable stereo next-target beacon |
+| F5 | Opt into nearby directional enemy heartbeat (off initially) |
+| F6 | Opt into nearby, unobstructed target discovery chime (off initially) |
 | R | Restart level and clear acoustic state |
 | Space | Toggle object visibility in original 2D view |
 | 1/2 | Pulse interval |
@@ -76,10 +76,30 @@ The maze has three enemies, three lives, and up to twelve echo shards.
 Static SVG walls, moving enemies and uncollected shards have real occupancy
 in this simulation; two virtual microphones sample the resulting pressure.
 
-**Game-only synthetic audio:** SVG O/I/W markers, item/damage/victory jingles,
-enemy heartbeat (F5), and stereo target guidance (F6) do not enter the FDTD
-field. They are deliberately synthesized and panned; they do not travel
-through walls, apply HRTFs, or follow real room reverberation.
+**Game-only synthetic audio:** nearby SVG O/I/W chimes, item/damage/victory
+jingles, enemy heartbeat (F5), target discovery (F6), and wall-contact
+taps do not enter the FDTD field. They use stereo rendering rather than
+wall reverberation or measured HRTFs. O/I/W now chime only on first
+discovery inside 24/30/35 cm respectively, and only with an unobstructed
+straight path; reminders are delayed at least 4.5 seconds. **F5 and F6
+are OFF by default.** If enabled, F6 is silent beyond 35 cm and around
+walls, and F5 is silent beyond 55 cm. Neither is a whole-level beacon.
+
+**Wall contact:** collision taps are computed from the solid cell touched
+on the player's 13cm collision circle, not a single averaged obstacle
+bearing. Approximate 16cm ear spacing causes different arrival delays
+and intensity at each ear, while a darker rear tap distinguishes front
+and rear centre. Holding forward into a wall no longer repeats the beep;
+there is no continuous sliding tone. These are short synthetic cues, not
+a measured binaural or material-contact impulse response.
+
+**FDTD movement artifact mitigation:** the visual player funnel is no
+longer itself a moving, instantaneously appearing hard wall in the
+pressure simulation. Its display is retained on the two-panel map, but
+its former role as a physical directional baffle is not modeled. We
+interpolate the ear sampling positions across audio batches. This
+reduces abrupt pressure and receiver jumps but makes acoustic
+directivity and natural movement cues an open validation issue.
 
 **Stealth and decoys:** T disables automatic player pulses, not
 numerical timekeeping. F triggers a player click on demand; G sends a
@@ -111,8 +131,11 @@ This version restores the idea with a new smaller and testable mesh pipeline.
 
 - Each wall is extruded from the same SVG rasterization used in collision
   and acoustic propagation. Walls therefore occupy the same planar cells.
-- OpenGL 3.3 draws a perspective camera, directional lighting, subtle
-  procedural materials and glowing 3D entities.
+- OpenGL 3.3 draws a right-handed perspective camera, directional
+  lighting, subtle procedural materials and glowing 3D entities.
+  Grid +Y maps to GL -Z, so player turns match the 2D view. The
+  ceiling is separated from obstacle roofs to prevent coplanar
+  z-fighting stripes on round shapes; curved orbs use smoother shading.
 - The original two-panel 2D diagnostic view remains available.
 - This is **2.5D graphical extrusion, not 3D wave simulation**. No sound
   elevation, ear pinna filtering, head scattering or HRTFs are modeled.
@@ -129,8 +152,10 @@ application; it cannot exercise real GPU audio playback.
 
 - Real-time throughput and actual audio-device latency need profiling on
   representative NVIDIA hardware.
-- Moving solid masks can produce pressure artifacts at interfaces and should
-  be checked against a moving-boundary reference solver.
+- Moving solid enemies/shards can still produce pressure artifacts at
+  interfaces and should be checked against a moving-boundary reference
+  solver. The player's moving acoustic funnel mask was removed specifically
+  to avoid a demonstrated source of rattle during navigation.
 - Ghost sound detection and 5 cm grid pathfinding are heuristics, not
   perceptually or scientifically validated acoustics.
 - Decoy clicks run through the numerical solver, but decoy targeting and
