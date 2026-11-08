@@ -21,6 +21,10 @@ struct Enemy {
     float alert=0.0f;
     float wanderTimer=0.0f;
     unsigned direction=0;
+    // Arcade archetypes: 0 tracker, 1 sprinter, 2 sentinel.
+    unsigned archetype=0;
+    float lastHeardX=0,lastHeardY=0;
+    std::vector<int> pursuitDistances; // shortest paths to last audible click
 };
 // Assistive proximity heartbeat for enemies. This is explicitly game UI
 // sonification, not part of the modeled wave field. Facing angle uses the
@@ -100,7 +104,8 @@ public:
             if(spaced) {
                 Enemy e; e.x=e.spawnX=x; e.y=e.spawnY=y;
                 e.direction=(unsigned)(enemies.size()%4);
-                e.speed=15.0f+3.0f*(float)enemies.size();
+                e.archetype=(unsigned)enemies.size();
+                e.speed=e.archetype==0?17.0f:e.archetype==1?24.0f:12.5f;
                 enemies.push_back(e);
             }
         }
@@ -121,12 +126,24 @@ public:
         navTimer_=0;
     }
 
-    // Used by game's acoustic click trigger; enemies hear only nearby clicks.
+    // Arcade sound detection follows reachable passages rather than
+    // Euclidean range through thick maze walls. This is 5cm-grid geodesic
+    // *gameplay*, not a measured sound pressure / diffraction prediction.
     void hearClick(float x,float y) {
         if(won||lost) return;
+        std::vector<int> soundField(walkable_.size(),-1);
+        computeDistances(x,y,soundField);
         for(Enemy &enemy:enemies) {
-            if(std::hypot(enemy.x-x,enemy.y-y)<180.0f)
-                enemy.alert=std::max(enemy.alert,4.5f);
+            const int enemyNode=nodeAt(enemy.x,enemy.y);
+            const int distanceCells=soundField[enemyNode];
+            const float maxRange=enemy.archetype==1?125.0f:
+                                 enemy.archetype==2?230.0f:180.0f;
+            if(distanceCells<0 || distanceCells*kNavStep>maxRange)continue;
+            enemy.alert=std::max(enemy.alert,
+                enemy.archetype==1?3.2f:enemy.archetype==2?6.0f:4.5f);
+            enemy.lastHeardX=x;
+            enemy.lastHeardY=y;
+            enemy.pursuitDistances=soundField;
         }
     }
 
@@ -156,20 +173,21 @@ public:
             if(e.alert>0) {
                 const int here=nodeAt(e.x,e.y);
                 int best=here;
-                int bestDist=(here>=0 && here<(int)distances_.size())?distances_[here]:-1;
+                const auto &field=e.pursuitDistances.empty()?distances_:e.pursuitDistances;
+                int bestDist=(here>=0 && here<(int)field.size())?field[here]:-1;
                 const int xx=here%navSide_, yy=here/navSide_;
                 const int neighbors[4][2]={{1,0},{-1,0},{0,1},{0,-1}};
                 for(const auto&d:neighbors){
                     int nx=xx+d[0],ny=yy+d[1];
                     if(nx<0||ny<0||nx>=navSide_||ny>=navSide_)continue;
                     int n=ny*navSide_+nx;
-                    if(distances_[n]>=0 && (bestDist<0||distances_[n]<bestDist)){
-                        best=n;bestDist=distances_[n];
+                    if(field[n]>=0 && (bestDist<0||field[n]<bestDist)){
+                        best=n;bestDist=field[n];
                     }
                 }
                 if(best!=here) {
                     tx=coord(best%navSide_)-e.x;ty=coord(best/navSide_)-e.y;
-                } else {tx=x-e.x;ty=y-e.y;}
+                } else {tx=e.lastHeardX-e.x;ty=e.lastHeardY-e.y;}
             } else {
                 e.wanderTimer-=dt;
                 if(e.wanderTimer<=0) {
@@ -195,6 +213,7 @@ public:
                 for(Enemy& other:enemies) {
                     other.x=other.spawnX;other.y=other.spawnY;
                     other.alert=0;
+                    other.pursuitDistances.clear();
                 }
                 break;
             }
@@ -300,8 +319,8 @@ private:
         // Fixed-seed xorshift; reproducible and safe from modulo-by-zero.
         rng_^=rng_<<13; rng_^=rng_>>17; rng_^=rng_<<5; return rng_;
     }
-    void buildDistances(float x,float y){
-        std::fill(distances_.begin(),distances_.end(),-1);
+    void computeDistances(float x,float y,std::vector<int>& field) const {
+        std::fill(field.begin(),field.end(),-1);
         int root=nodeAt(x,y);
         if(!walkable_[root]) {
             // Nearest legal nav cell (for a valid player position close to
@@ -314,7 +333,7 @@ private:
             }
             if(!walkable_[root])return;
         }
-        std::queue<int> pending;pending.push(root);distances_[root]=0;
+        std::queue<int> pending;pending.push(root);field[root]=0;
         while(!pending.empty()){
             int n=pending.front();pending.pop();
             int cx=n%navSide_,cy=n/navSide_;
@@ -323,11 +342,14 @@ private:
                 int xx=cx+d[0], yy=cy+d[1];
                 if(xx<0||xx>=navSide_||yy<0||yy>=navSide_)continue;
                 int next=yy*navSide_+xx;
-                if(walkable_[next]&&distances_[next]<0){
-                    distances_[next]=distances_[n]+1;pending.push(next);
+                if(walkable_[next]&&field[next]<0){
+                    field[next]=field[n]+1;pending.push(next);
                 }
             }
         }
+    }
+    void buildDistances(float x,float y){
+        computeDistances(x,y,distances_);
     }
 };
 
