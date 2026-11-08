@@ -11,7 +11,14 @@ int main() {
     for(const auto &v:a)assert(std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z));
     mask[3*N+3]=1;
     auto b=echo::extrudeMask(mask.data(),N);
-    assert(b.size()==12+6+4*6); // top and four separate wall faces
+    assert(b.size()==12+6+4*6);
+    // Roof and ceiling must not overlap in the same plane (z-fighting).
+    float ceiling=-1.0f, roof=-1.0f;
+    for(size_t i=0;i<b.size();++i) {
+        if(i>=6 && i<12)ceiling=std::max(ceiling,b[i].y);
+        if(i>=12 && i<18)roof=std::max(roof,b[i].y);
+    }
+    assert(ceiling>roof+0.01f); // top and four separate wall faces
     assert(b.size()%3==0);
     // Adjacent solids must not expose internal walls to the camera.
     mask[3*N+4]=1;
