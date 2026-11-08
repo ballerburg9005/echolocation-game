@@ -88,6 +88,33 @@ int main(){
     }
     soundTest.hearClick(23,25);
     for(const auto &enemy:soundTest.enemies)assert(enemy.alert==0.0f);
+    // Overdrive requires four collected shards. A stunned ghost is harmless
+    // and can be captured for bonus points; after 5 seconds it respawns.
+    echo::EchoArcade powered(mask.data(),N,23,25,777);
+    assert(powered.shards.size()>=4);
+    const auto firstPowerShard=powered.shards[0];
+    assert(!powered.activateOverdrive());
+    for(int i=0;i<4;++i) {
+        auto p=powered.shards[i];
+        powered.update(0,p.x,p.y);
+    }
+    assert(powered.charges==1);
+    assert(powered.activateOverdrive());
+    assert(powered.charges==0 && powered.overdrive==5.0f);
+    assert(!powered.enemies.empty());
+    const float ghostX=powered.enemies[0].x;
+    const float ghostY=powered.enemies[0].y;
+    auto captured=powered.update(0,ghostX,ghostY);
+    assert(captured.ghostsCaught>=1 && powered.enemies[0].eaten);
+    const int bonusScore=powered.score;
+    assert(bonusScore>=600); // four shards + first ghost
+    for(int t=0;t<101;++t)powered.update(0.05f,23,25);
+    assert(powered.overdrive==0.0f);
+    assert(!powered.enemies[0].eaten);
+    powered.reset();
+    assert(powered.shards[0].x==firstPowerShard.x);
+    assert(powered.shards[0].y==firstPowerShard.y);
+    assert(powered.charges==0 && powered.score==0);
     // Items collect exactly once.
     auto s=game.shards[0];
     auto ev=game.update(0.016f,s.x,s.y);
