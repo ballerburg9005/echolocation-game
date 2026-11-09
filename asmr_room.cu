@@ -769,9 +769,10 @@ static void printUsage(const char* executable){
         "  Mouse         Move the speaker target within the acoustic room\n"
         "  M             Toggle mouse / keyboard movement\n"
         "  WASD, arrows  Move speaker in keyboard mode\n"
-        "  H             Cycle listener SVG geometries\n"
-        "  Q             Cycle acoustic grid quality\n"
-        "  Z             True FDTD zoom 1.00/1.25/1.55/2.00/SQUARE\n"
+        "  H / Shift+H   Next / previous listener SVG; keeps zoom\n"
+        "  Q / Shift+Q   Next / previous compatible grid quality\n"
+        "  Z / Shift+Z   Next / previous FDTD zoom; keeps listener\n"
+        "                1.00/1.25/1.55/2.00/SQUARE 0.75m\n"
         "                last view is a 0.75m square, still orbitable\n"
         "                (~85% -> 68% of original full-room cell-work)\n"
         "  V             Toggle pressure field visualization\n"
@@ -991,6 +992,8 @@ int main(int argc,char** argv){
     uint64_t lastFrame=SDL_GetPerformanceCounter();
     const double perfFrequency=(double)SDL_GetPerformanceFrequency();
     bool primeAudioAfterSwitch=false;
+    std::string selectorNotice;
+    uint64_t selectorNoticeUntil=0;
     size_t previewFadeFrames=2400; // 50ms attack after solver state reset
     // One atomic transition for ALL H, Q and Z changes. In particular,
     // neither H nor Z is ever allowed to mutate the other dimension.
@@ -1011,15 +1014,21 @@ int main(int argc,char** argv){
     const auto selectConfiguration=[&](int h,int q,int z,
                                       const char* changed)->bool{
         if(!candidateValid(h,q,z)){
-            std::fprintf(stderr,
-                "[%s] REFUSED head=%s, Z=%.2fx%s, Q=%d: "
-                "mic cavity solid/disconnected at this dx. "
-                "Keeping current H/Z/Q unchanged.\n",
+            char message[256];
+            std::snprintf(message,sizeof(message),
+                "[%s] BLOCKED %s at Z %.2fx%s Q%d (mic not connected); "
+                "CURRENT %s Z %.2fx",
                 changed,h==0?"V2":h==1?"CHANNEL":"SIMPLE",
-                zoomSteps[(size_t)z],z==4?" SQUARE":"",q);
+                zoomSteps[(size_t)z],z==4?" SQUARE":"",q,
+                headIndex==0?"V2":headIndex==1?"CHANNEL":"SIMPLE",
+                zoomValue());
+            selectorNotice=message;
+            selectorNoticeUntil=SDL_GetTicks64()+4000;
+            std::fprintf(stderr,"%s\n",message);
             return false;
         }
         if(h==headIndex&&q==qualityIndex&&z==zoomIndex)return true;
+        selectorNoticeUntil=0;
         const auto* newHead=h==0?&listenerV2:
                              h==1?&listenerChannels:&listenerSimple;
         const float dx=asmr::zoomDx(qualityDx[(size_t)q],z);
@@ -1146,17 +1155,20 @@ int main(int argc,char** argv){
                     live->dt(),asmr::kOutputRate);
             }
             if(key==SDLK_h && mode==Mode::Preview){
-                // One H press means exactly one model step, based on
-                // the ACTIVE head, never on a hidden attempted index.
-                const int requested=(headIndex+1)%3;
-                selectConfiguration(requested,qualityIndex,zoomIndex,"H");
+                const bool reverse=(event.key.keysym.mod&KMOD_SHIFT)!=0;
+                const auto next=asmr::nextSelection(
+                    {headIndex,qualityIndex,zoomIndex},'H',reverse);
+                selectConfiguration(next.head,next.quality,next.zoom,"H");
             }
             if(key==SDLK_q && mode==Mode::Preview){
+                const bool reverse=(event.key.keysym.mod&KMOD_SHIFT)!=0;
+                auto next=asmr::LabSelection{headIndex,qualityIndex,zoomIndex};
                 bool applied=false;
-                for(size_t trial=1;trial<qualityDx.size();++trial){
-                    const int q=(qualityIndex+(int)trial)%
-                                    (int)qualityDx.size();
-                    if(selectConfiguration(headIndex,q,zoomIndex,"Q")){
+                for(size_t trial=0;trial<qualityDx.size()-1;++trial){
+                    next=asmr::nextSelection(next,'Q',reverse,
+                                            (int)qualityDx.size());
+                    if(selectConfiguration(next.head,next.quality,
+                                           next.zoom,"Q")){
                         applied=true;break;
                     }
                 }
@@ -1164,11 +1176,10 @@ int main(int argc,char** argv){
                     "[Q] No compatible quality preset for this H/Z.\n");
             }
             if(key==SDLK_z && mode==Mode::Preview){
-                // Exactly one step through the five ordered zoom
-                // presets. No scanning/skipping stages or altering H.
-                const int requested=(zoomIndex+1)%
-                                     (int)zoomSteps.size();
-                selectConfiguration(headIndex,qualityIndex,requested,"Z");
+                const bool reverse=(event.key.keysym.mod&KMOD_SHIFT)!=0;
+                const auto next=asmr::nextSelection(
+                    {headIndex,qualityIndex,zoomIndex},'Z',reverse);
+                selectConfiguration(next.head,next.quality,next.zoom,"Z");
             }
             if(key==SDLK_r){
                 record.clear();recordingClock=0;
@@ -1568,7 +1579,9 @@ int main(int argc,char** argv){
             diagnosticTone?"FDTD TEST":waveLoaded?"READY":"MISSING",
             record.empty()?0:record.back().t-record.front().t,
             playbackPhase,(double)lastWindow);
-        SDL_SetWindowTitle(window,title);
+        SDL_SetWindowTitle(window,
+            SDL_GetTicks64()<selectorNoticeUntil?
+                selectorNotice.c_str():title);
         SDL_Delay(6);
     }
     SDL_ClearQueuedAudio(device);
