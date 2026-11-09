@@ -244,13 +244,15 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
 // genuinely refining the acoustic grid near the listener.
 // The final view is an actual 0.75m square; there is room to orbit
 // the head since its center has 0.375m to all four walls.
-// F11 expands the ENTIRE physical laboratory: every room wall,
-// authored listener/speaker SVG, mic, mouth, and movement distance.
-// Solver geometry stays in normalized design coordinates, so the
-// number of GPU cells does NOT grow with physical metres. Acoustic
-// dx and CFL dt scale together; physical frequencies resolvable by
-// the mesh decrease by the same factor.
-constexpr std::array<float,4> kPhysicsScales{1.0f,2.0f,5.0f,10.0f};
+// F11 scales the ENTIRE physical laboratory: room, listener/source
+// silhouettes, microphones, mouth, openings, and movement.
+// Smaller-than-life worlds require more physical timesteps per
+// second. Coarsen their NORMALIZED mesh by S^(-1/3) to compensate
+// the S-fold CFL step-rate increase without exploding total work.
+// This is a deliberate resolution tradeoff, not a pitch shortcut.
+constexpr std::array<float,7> kPhysicsScales{
+    0.10f,0.20f,0.50f,1.00f,2.00f,5.00f,10.00f};
+constexpr int kDefaultPhysicsScaleIndex=3;
 constexpr float kSquareMp3Gain=0.75f;
 inline int nextPhysicalScaleIndex(int index,bool reverse=false){
     const int count=(int)kPhysicsScales.size();
@@ -258,6 +260,15 @@ inline int nextPhysicalScaleIndex(int index,bool reverse=false){
 }
 inline float physicalMetres(float designMetres,float scale){
     return designMetres*scale;
+}
+inline float physicalScaleDxFactor(float scale){
+    // cell updates/sec ∝ area / (S * normalized_dx^3).
+    // At S<1 the domain gets fewer normalized cells, preserving
+    // approximately the SAME workload as the selected 1x H/Q/Z.
+    return scale<1.0f?std::cbrt(1.0f/scale):1.0f;
+}
+inline float physicalScaleDesignDx(float zoomDx,float scale){
+    return zoomDx*physicalScaleDxFactor(scale);
 }
 inline double physicalStepSeconds(float designDx,float scale){
     return (double)(designDx*scale)/
@@ -314,6 +325,12 @@ inline float relativeCellWork(float dx,RoomView view,
     // Relative acoustic cell-updates/sec, ignoring fixed launch overhead.
     return (view.width*view.height)/(kRoomMetres*kRoomHeightMetres)*
            std::pow(baselineDx/dx,3.0f);
+}
+inline float physicalScaleWork(float designDx,RoomView view,
+                               float scale,
+                               float baselineDx=kLiveDx){
+    // Relative cell-update work per REAL second, not per graph.
+    return relativeCellWork(designDx,view,baselineDx)/scale;
 }
 inline bool validArtistInView(Vec2 p,RoomView view){
     return validArtist(p) &&
