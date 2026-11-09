@@ -704,7 +704,8 @@ int main(){
     std::printf("[CONTROLS] F5 = render last 5s, F6 = 10s, F7 = 20s "
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P replay, L reload ~/test.mp3, T toggle live, "
-       "Q cycle 5/8/10mm preview, V pressure waves, 9/0 exposure, "
+       "H head SVG channel/simple, Q cycle 3.5/3/2.5/5/8/10mm, "
+       "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
        "offline dx=%.1fmm ~%.0fHz with %.0fHz input lowpass.\n",
@@ -753,26 +754,77 @@ int main(){
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
             }
+            if(key==SDLK_h && mode==Mode::Preview){
+                const bool candidate=!channels;
+                const asmr::SvgSilhouette& shape=candidate?
+                    listenerChannels:listenerSimple;
+                const auto mask=asmr::svgRoomMask(
+                    asmr::cells(live->dx()),live->dx(),shape);
+                if(!asmr::validateMicrophones(mask,
+                    asmr::cells(live->dx()),live->dx(),
+                    candidate,shape)) {
+                    std::fprintf(stderr,
+                        "[SVG HEAD] %.1fmm FDTD grid does not "
+                        "resolve both proposed %s-mode microphone "
+                        "recesses. Try Q for finer cells.\n",
+                        live->dx()*1000,candidate?
+                        "ear-channel":"simple");
+                }else{
+                    channels=candidate;
+                    head=channels?&listenerChannels:&listenerSimple;
+                    SDL_ClearQueuedAudio(device);
+                    highQuality.reset();live.reset();
+                    live=std::make_unique<FdtdRoom>(
+                        qualityDx[qualityIndex],*head,channels);
+                    live->uploadAudio(liveAudio);
+                    previewStep=0;sourceCursor=artist;
+                    liveResampler=echo::StereoLinearResampler(
+                        live->dt(),asmr::kOutputRate);
+                    std::printf("[SVG HEAD] Mode=%s, eardrum/mic "
+                        "distance %.1fcm, y=%.1fmm. "
+                        "Both probes in REAL air cells.\n",
+                        channels?"channel":"simple",
+                        asmr::micSpacing(channels)*100,
+                        channels?asmr::kChannelEarY*1000:0.0f);
+                }
+            }
             if(key==SDLK_q && mode==Mode::Preview){
-                qualityIndex=(qualityIndex+1)%3;
-                liveCutoff=qualityBand[qualityIndex];
-                if(waveLoaded)liveAudio=asmr::lowpass(
-                    fullAudio,liveCutoff,asmr::kOutputRate);
-                SDL_ClearQueuedAudio(device);
-                // The old graph/device field is released before
-                // allocating the new-size pressure grid.
-                live.reset();
-                live=std::make_unique<FdtdRoom>(
-                    qualityDx[qualityIndex],*head,channels);
-                live->uploadAudio(liveAudio);
-                previewStep=0;sourceCursor=artist;
-                liveResampler=echo::StereoLinearResampler(
-                    live->dt(),asmr::kOutputRate);
-                std::printf("[QUALITY] Real FDTD dx=%.1fmm, "
-                            "%dx%d cells, WAV input spectrum %.0fHz\n",
-                            live->dx()*1000,
-                            asmr::cells(live->dx()),
-                            asmr::cells(live->dx()),liveCutoff);
+                // Never silently use 10mm cells for a 3mm-wide
+                // ear groove if its microphone is blocked at this
+                // resolution; skip any such unsupported grid.
+                const int old=qualityIndex;
+                for(size_t trial=0;trial<qualityDx.size();++trial) {
+                    qualityIndex=(qualityIndex+1)%
+                        (int)qualityDx.size();
+                    const float dx=qualityDx[qualityIndex];
+                    const int side=asmr::cells(dx);
+                    const auto mask=asmr::svgRoomMask(side,dx,*head);
+                    if(asmr::validateMicrophones(
+                        mask,side,dx,channels,*head))
+                        break;
+                }
+                if(old!=qualityIndex) {
+                    liveCutoff=qualityBand[qualityIndex];
+                    if(waveLoaded)liveAudio=asmr::lowpass(
+                        fullAudio,liveCutoff,asmr::kOutputRate);
+                    SDL_ClearQueuedAudio(device);
+                    live.reset();
+                    live=std::make_unique<FdtdRoom>(
+                        qualityDx[qualityIndex],*head,channels);
+                    live->uploadAudio(liveAudio);
+                    previewStep=0;sourceCursor=artist;
+                    liveResampler=echo::StereoLinearResampler(
+                        live->dt(),asmr::kOutputRate);
+                    std::printf("[QUALITY] Full 2x2m FDTD grid "
+                        "dx=%.2fmm, %dx%d acoustic cells, "
+                        "spatial 10-cell band %.0fHz, "
+                        "input MP3 LP %.0fHz\n",
+                        live->dx()*1000,
+                        asmr::cells(live->dx()),
+                        asmr::cells(live->dx()),
+                        asmr::tenCellFrequency(live->dx()),
+                        liveCutoff);
+                }
             }
             if(key==SDLK_r){
                 record.clear();recordingClock=0;
