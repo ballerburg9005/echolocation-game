@@ -20,7 +20,8 @@ constexpr float kListenerY=kRoomHeightMetres/3.0f; // EXACT bottom third
 constexpr float kEardrumSeparation=0.080f; // previous 8cm experimental pair
 constexpr float kNewChannelMicSeparation=0.042f; // +/-21mm: inner cavity pair
 constexpr float kEarCanalLength=0.020f;
-constexpr float kChannelEarY=-0.007f; // 7mm below central horizontal axis
+constexpr float kChannelEarY=-0.007f; // new circular-cavity mode, 7mm BELOW
+constexpr float kPinnaEarY=0.003f; // V2 stays 3mm ABOVE, unchanged
 
 constexpr float kOuterMicSeparation=
     kEardrumSeparation+0.8f*kEarCanalLength; // 9.6cm simple notch mics
@@ -342,13 +343,16 @@ inline float micSpacing(bool earChannels=false,bool pinnaV2=false){
     return pinnaV2?kPinnaMicSeparation:
         earChannels?kNewChannelMicSeparation:kOuterMicSeparation;
 }
+inline float micOffsetY(bool earChannels=false,bool pinnaV2=false){
+    return pinnaV2?kPinnaEarY:earChannels?kChannelEarY:0.0f;
+}
 inline Vec2 leftEar(bool earChannels=false,bool pinnaV2=false){
     return {kListenerX-0.5f*micSpacing(earChannels,pinnaV2),
-            kListenerY+(earChannels?kChannelEarY:0.0f)};
+            kListenerY+micOffsetY(earChannels,pinnaV2)};
 }
 inline Vec2 rightEar(bool earChannels=false,bool pinnaV2=false){
     return {kListenerX+0.5f*micSpacing(earChannels,pinnaV2),
-            kListenerY+(earChannels?kChannelEarY:0.0f)};
+            kListenerY+micOffsetY(earChannels,pinnaV2)};
 }
 inline std::vector<float> lowpass(const std::vector<float>& input,
                                   float cutoff,int sampleRate,
