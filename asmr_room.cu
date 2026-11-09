@@ -437,7 +437,8 @@ static void circle(SDL_Renderer* r,int cx,int cy,int radius,bool filled){
 static void drawRoom(SDL_Renderer* renderer,
     const std::vector<asmr::PathPoint>& record,
     asmr::Vec2 artist,asmr::Vec2 physicalSource,
-    float progress,bool processing,bool playing,bool mouseMode,
+    float progress,bool processing,bool playing,
+    float playbackFraction,bool mouseMode,
     SDL_Texture* waves,bool showPressure,
     const asmr::SvgSilhouette& listenerShape,
     const asmr::SvgSilhouette& speakerShape,
@@ -514,9 +515,17 @@ static void drawRoom(SDL_Renderer* renderer,
         bar.w=(int)std::lround(bg.w*std::clamp(progress,0.0f,1.0f));
         SDL_RenderFillRect(renderer,&bar);
     }else if(playing){
-        color(renderer,70,222,174);
-        SDL_Rect bar{80,kWindow-43,kWindow-160,8};
+        SDL_Rect bar{80,kWindow-43,kWindow-160,14};
+        color(renderer,88,91,106);
         SDL_RenderFillRect(renderer,&bar);
+        color(renderer,70,222,174);
+        bar.w=(int)std::lround(bar.w*
+            std::clamp(playbackFraction,0.0f,1.0f));
+        SDL_RenderFillRect(renderer,&bar);
+        // A dot at the active phase is visible even with a tiny
+        // fraction, and snaps back to the start on every loop.
+        color(renderer,255,243,140);
+        circle(renderer,80+bar.w,kWindow-36,6,true);
     }
     if(mouseMode){
         color(renderer,251,241,169);
