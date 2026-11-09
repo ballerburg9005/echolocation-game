@@ -125,7 +125,10 @@ press **H** for `listener_with_ear_channel.svg`: that independent
 model retains the 8 cm target. It is an experimental dimensional
 assumption, not a universal claim about children's anatomy. At too
 coarse a resolution, the program refuses a microphone position that
-cannot sample air reliably.
+cannot sample air reliably **or whose sampled air is isolated from the
+outside room**. User-edited SVG necks can seal when rasterized at
+5mm or another dx; press Q for a finer grid or inspect the SVG path.
+We do not delete material to fake a connected ear channel.
 
 Press **H** in live mode to cycle the alternative geometries:
 `listener_v2.svg` (default), `listener_with_ear_channel.svg`, and
