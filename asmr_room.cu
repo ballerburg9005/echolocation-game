@@ -467,19 +467,27 @@ int main(){
         SDL_Quit();return 1;
     }
     SDL_PauseAudioDevice(device,0);
+    const std::array<float,3> qualityDx{
+        asmr::kLiveDx,asmr::kMediumDx,asmr::kSafeDx};
+    const std::array<float,3> qualityBand{
+        asmr::kLivePassband,asmr::kMediumPassband,
+        asmr::kSafePassband};
+    int qualityIndex=0;
+    float liveCutoff=qualityBand[qualityIndex];
     std::vector<float> fullAudio,liveAudio;
     bool waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
-                                    asmr::kLivePassband);
+                                    liveCutoff);
 
-    FdtdRoom live(asmr::kLiveDx);
-    live.uploadAudio(liveAudio);
+    auto live=std::make_unique<FdtdRoom>(qualityDx[qualityIndex]);
+    live->uploadAudio(liveAudio);
     std::unique_ptr<FdtdRoom> highQuality;
-    echo::StereoLinearResampler liveResampler(live.dt(),
+    echo::StereoLinearResampler liveResampler(live->dt(),
                                                 asmr::kOutputRate);
-    std::vector<float> queued;
-    queued.reserve(asmr::kGraphBatch*4);
+    std::vector<float> queued,blockSamples;
+    queued.reserve(asmr::kGraphBatch*4*96);
+    blockSamples.reserve(asmr::kGraphBatch*4);
     uint64_t previewStep=0;
-    asmr::Vec2 artist{1.50f,1.0f},previousArtist=artist;
+    asmr::Vec2 artist{1.50f,1.0f},sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
     Mode mode=Mode::Preview;
     SDL_WarpMouseInWindow(window,screenX(artist.x),screenY(artist.y));
@@ -498,8 +506,9 @@ int main(){
        "WASD/arrows move with mouse disabled.\n");
     std::printf("[CONTROLS] F5 = render last 5s, F6 = 10s, F7 = 20s "
        "in HIGH quality, then play the complete finished WAV.\n");
-    std::printf("[CONTROLS] P = replay latest processed clip, "
-       "L = reload WAV, T = live-preview on/off, R = reset path, Esc = exit.\n");
+    std::printf("[CONTROLS] P replay, L reload ~/test.mp3, T toggle live, "
+       "Q cycle 5/8/10mm preview, V pressure waves, 9/0 exposure, "
+       "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
        "offline dx=%.1fmm ~%.0fHz with %.0fHz input lowpass.\n",
        asmr::kLiveDx*1000,asmr::tenCellFrequency(asmr::kLiveDx),
@@ -538,9 +547,10 @@ int main(){
             if(key==SDLK_r){
                 record.clear();recordingClock=0;
                 record.push_back({0,artist});
-                previewStep=0;live.reset();
+                previewStep=0;live->reset();
+                sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
-                    live.dt(),asmr::kOutputRate);
+                    live->dt(),asmr::kOutputRate);
                 SDL_ClearQueuedAudio(device);
                 mode=Mode::Preview;
                 std::printf("[PATH] Recording reset.\n");
@@ -557,12 +567,13 @@ int main(){
         if(reload){
             waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
                                        liveCutoff);
-            live.uploadAudio(liveAudio);
+            live->uploadAudio(liveAudio);
             if(highQuality)highQuality->uploadAudio(fullAudio);
             if(mode==Mode::Preview){
-                live.reset();previewStep=0;
+                live->reset();previewStep=0;
+                sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
-                    live.dt(),asmr::kOutputRate);
+                    live->dt(),asmr::kOutputRate);
                 SDL_ClearQueuedAudio(device);
             }
         }
@@ -598,7 +609,8 @@ int main(){
                   "offline %.1fmm / %.0fHz. %.0f million grid steps.\n",
                   job.selected.duration,asmr::kOfflineDx*1000,
                   asmr::kOfflinePassband,
-                  (double)job.total*800.0*800.0/1e6);
+                  (double)job.total*asmr::cells(asmr::kOfflineDx)*
+                      asmr::cells(asmr::kOfflineDx)/1e6);
             }
         }
         if(mode==Mode::Preview){
@@ -632,28 +644,40 @@ int main(){
             if(previewEnabled&&waveLoaded){
                 const int queuedFrames=(int)(
                     SDL_GetQueuedAudioSize(device)/(2*sizeof(float)));
-                int need=std::max(0,(int)(0.085*asmr::kOutputRate)-
+                int need=std::max(0,(int)(0.075*asmr::kOutputRate)-
                                     queuedFrames);
                 int batches=0;
-                while(need>0 && batches<64){
-                    const auto points=mouthBatch({},0,live.dt(),
-                        previewStep,live.dx(),previousArtist,artist,false);
-                    const auto audio=live.process(points,previewStep);
+                queued.clear();
+                // The physical source position persists ACROSS the
+                // CUDA batches. Previously the same mouse sweep was
+                // replayed from start to finish for every mini-batch.
+                while(need>0 && batches<96){
+                    const auto points=mouthBatch(
+                        {},0,live->dt(),previewStep,live->dx(),
+                        sourceCursor,artist,false);
+                    const auto audio=live->process(points,previewStep);
                     previewStep+=asmr::kGraphBatch;
-                    queued.clear();
+                    blockSamples.clear();
                     for(int n=0;n<asmr::kGraphBatch;++n)
                         liveResampler.push(audio[n*2],audio[n*2+1],
-                                           queued);
-                    for(float& v:queued)
-                        v=0.42f*std::tanh(2.0f*v); // safety, preview only
-                    if(!queued.empty())
-                        SDL_QueueAudio(device,queued.data(),
-                            (Uint32)(queued.size()*sizeof(float)));
-                    need-=(int)queued.size()/2;
+                                           blockSamples);
+                    queued.insert(queued.end(),blockSamples.begin(),
+                                  blockSamples.end());
+                    need-=(int)blockSamples.size()/2;
                     ++batches;
                 }
+                // Preserve actual FDTD pressure differences linearly.
+                // No always-on tanh distortion/harmonic generator.
+                for(float& v:queued) {
+                    v=std::isfinite(v)?0.22f*v:0.0f;
+                    v=std::clamp(v,-0.85f,0.85f);
+                }
+                if(!queued.empty()&&SDL_QueueAudio(
+                    device,queued.data(),
+                    (Uint32)(queued.size()*sizeof(float)))!=0)
+                    std::fprintf(stderr,"[SDL AUDIO] %s\n",
+                                 SDL_GetError());
             }
-            previousArtist=artist;
         }else if(mode==Mode::Render){
             // A bounded number of expensive GPU graph batches per UI
             // frame keeps progress and Escape responsive. No audio is
@@ -698,9 +722,10 @@ int main(){
         }else if(mode==Mode::Playback){
             if(SDL_GetQueuedAudioSize(device)==0){
                 mode=Mode::Preview;
-                live.reset();previewStep=0;
+                live->reset();previewStep=0;
+                sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
-                    live.dt(),asmr::kOutputRate);
+                    live->dt(),asmr::kOutputRate);
                 previousArtist=artist;
             }
         }
@@ -710,12 +735,12 @@ int main(){
                  mode==Mode::Render,mode==Mode::Playback,mouseMode);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR Room | %s | WAV:%s | path %.1fs | live %.0fHz / render %.0fHz | F5/F6/F7 = last 5/10/20s | M mouse | L reload | P replay",
+            "ASMR CUDA FDTD | %s | MP3:%s | path %.1fs | live %.0fHz / offline %.0fHz | Q quality | V pressure",
             mode==Mode::Render?"RENDERING":mode==Mode::Playback?
                 "PLAYING FINISHED WAV":"RECORDING",
             waveLoaded?"READY":"MISSING",
             record.empty()?0:record.back().t-record.front().t,
-            asmr::kLivePassband,asmr::kOfflinePassband);
+            liveCutoff,asmr::kOfflinePassband);
         SDL_SetWindowTitle(window,title);
         SDL_Delay(6);
     }
