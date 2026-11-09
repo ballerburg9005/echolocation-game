@@ -87,6 +87,8 @@ __global__ void asmrPressureStep(
     float* next,const float* now,const float* previous,
     const float* mask,const float* pcm,const int* pcmLength,
     const float4* mouthLocations,const uint64_t* blockBase,
+    const float* ambientPCM,const int* ambientLength,
+    const int* ambientOn,const float2* ambientPositions,
     float* outStereo,int localStep,int nx,int ny,float dx,float dt,float decay,
     float originX,float originY,float halfMicSeparation,float micYOffset,double absoluteStart,
     double recordingDuration,bool offline,
@@ -168,6 +170,30 @@ __global__ void asmrPressureStep(
             pressure+=kInputStrength*amplitude*envelope*
                 echo::sourceWeight(mouth.x,mouth.y,x,y);
         }
+    }
+    // Diagnostic N: four distant, incoherent broadband emitters
+    // genuinely excite the acoustic FIELD. Both pinnae and canal
+    // receive the propagated/scattered field, not fake colored noise
+    // mixed at the ear output. Only ~16 cells per stencil do PCM work.
+    for(int source=0;source<asmr::kAmbientSourceCount;++source){
+        const float2 p=ambientPositions[source];
+        if(fabsf((float)x-p.x)>=1.0f||
+           fabsf((float)y-p.y)>=1.0f||
+           *ambientOn==0)continue;
+        const double elapsed=(double)(*blockBase+
+                                      (uint64_t)localStep)*dt;
+        float envelope=1.0f;
+        if(offline){
+            if(elapsed>=recordingDuration)continue;
+            const float rise=fminf(1.0f,(float)(elapsed/0.035));
+            const float fall=fminf(1.0f,(float)(
+                (recordingDuration-elapsed)/0.06));
+            envelope=fmaxf(0.0f,fminf(rise,fall));
+        }
+        const float noise=roomWaveSample(ambientPCM,*ambientLength,
+            absoluteStart+elapsed+2.0137*source);
+        pressure+=kInputStrength*asmr::kAmbientInjection*
+            noise*envelope*echo::sourceWeight(p.x,p.y,x,y);
     }
     next[idx]=pressure*decay;
 }
@@ -279,11 +305,30 @@ public:
         LAB_CUDA(cudaMalloc(&deviceOutput_,sizeof(float)*2*asmr::kGraphBatch));
         LAB_CUDA(cudaMalloc(&deviceAudio_,sizeof(float)*kMaxWavFrames));
         LAB_CUDA(cudaMalloc(&deviceAudioFrames_,sizeof(int)));
+        LAB_CUDA(cudaMalloc(&deviceAmbientPCM_,
+            sizeof(float)*asmr::kOutputRate*asmr::kAmbientNoiseSeconds));
+        LAB_CUDA(cudaMalloc(&deviceAmbientFrames_,sizeof(int)));
+        LAB_CUDA(cudaMalloc(&deviceAmbientOn_,sizeof(int)));
+        LAB_CUDA(cudaMalloc(&deviceAmbientPositions_,
+            sizeof(float2)*asmr::kAmbientSourceCount));
+        std::array<float2,asmr::kAmbientSourceCount> locations{};
+        for(int i=0;i<asmr::kAmbientSourceCount;++i){
+            const auto pos=asmr::ambientSource(view_,i);
+            locations[(size_t)i]=make_float2(
+                (pos.x-view_.originX)/dx_-0.5f,
+                (pos.y-view_.originY)/dx_-0.5f);
+        }
+        LAB_CUDA(cudaMemcpy(deviceAmbientPositions_,locations.data(),
+            sizeof(locations),cudaMemcpyHostToDevice));
         LAB_CUDA(cudaMalloc(&deviceImage_,
                            (size_t)kPressureW*kPressureH*
                            sizeof(uint32_t)));
         int zero=0;
         LAB_CUDA(cudaMemcpy(deviceAudioFrames_,&zero,sizeof(int),
+                            cudaMemcpyHostToDevice));
+        LAB_CUDA(cudaMemcpy(deviceAmbientFrames_,&zero,sizeof(int),
+                            cudaMemcpyHostToDevice));
+        LAB_CUDA(cudaMemcpy(deviceAmbientOn_,&zero,sizeof(int),
                             cudaMemcpyHostToDevice));
         LAB_CUDA(cudaStreamCreate(&stream_));
         const dim3 threads(16,16);
@@ -297,7 +342,10 @@ public:
             asmrPressureStep<<<blocks,threads,0,stream_>>>(
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
-                deviceMouth_,deviceStep_,deviceOutput_,t,
+                deviceMouth_,deviceStep_,
+                deviceAmbientPCM_,deviceAmbientFrames_,
+                deviceAmbientOn_,deviceAmbientPositions_,
+                deviceOutput_,t,
                 nx_,ny_,dx_,dt_,decay,view_.originX,view_.originY,
                 halfMicSeparation_,micYOffset_,
                 0.0,1e12,false,deviceSpeaker_,speakerW_,speakerH_,
@@ -322,7 +370,10 @@ public:
             asmrPressureStep<<<blocks,threads,0,stream_>>>(
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
-                deviceMouth_,deviceStep_,deviceOutput_,t,
+                deviceMouth_,deviceStep_,
+                deviceAmbientPCM_,deviceAmbientFrames_,
+                deviceAmbientOn_,deviceAmbientPositions_,
+                deviceOutput_,t,
                 nx_,ny_,dx_,dt_,decay,view_.originX,view_.originY,
                 halfMicSeparation_,micYOffset_,
                 absoluteStart,length,offline,
@@ -345,6 +396,21 @@ public:
             cudaMemcpyHostToDevice));
         LAB_CUDA(cudaMemcpy(deviceAudioFrames_,&amount,sizeof(int),
                             cudaMemcpyHostToDevice));
+    }
+    void uploadAmbient(const std::vector<float>& pcm,bool enabled){
+        const int amount=(int)std::min(pcm.size(),
+            (size_t)asmr::kOutputRate*asmr::kAmbientNoiseSeconds);
+        if(amount>0)LAB_CUDA(cudaMemcpy(
+            deviceAmbientPCM_,pcm.data(),(size_t)amount*sizeof(float),
+            cudaMemcpyHostToDevice));
+        LAB_CUDA(cudaMemcpy(deviceAmbientFrames_,&amount,sizeof(int),
+            cudaMemcpyHostToDevice));
+        setAmbientEnabled(enabled);
+    }
+    void setAmbientEnabled(bool enabled){
+        const int value=enabled?1:0;
+        LAB_CUDA(cudaMemcpy(deviceAmbientOn_,&value,sizeof(int),
+            cudaMemcpyHostToDevice));
     }
     std::array<float,asmr::kGraphBatch*2> process(
         const std::array<float4,asmr::kGraphBatch>& mouths,
@@ -397,6 +463,10 @@ public:
         if(deviceOutput_)cudaFree(deviceOutput_);
         if(deviceAudio_)cudaFree(deviceAudio_);
         if(deviceAudioFrames_)cudaFree(deviceAudioFrames_);
+        if(deviceAmbientPCM_)cudaFree(deviceAmbientPCM_);
+        if(deviceAmbientFrames_)cudaFree(deviceAmbientFrames_);
+        if(deviceAmbientOn_)cudaFree(deviceAmbientOn_);
+        if(deviceAmbientPositions_)cudaFree(deviceAmbientPositions_);
         if(deviceImage_)cudaFree(deviceImage_);
     }
     FdtdRoom(const FdtdRoom&)=delete;
@@ -415,6 +485,9 @@ private:
     uint64_t* deviceStep_=nullptr;
     float* deviceOutput_=nullptr;
     int* deviceAudioFrames_=nullptr;
+    float* deviceAmbientPCM_=nullptr;
+    int* deviceAmbientFrames_=nullptr,*deviceAmbientOn_=nullptr;
+    float2* deviceAmbientPositions_=nullptr;
     uint32_t* deviceImage_=nullptr;
     cudaStream_t stream_=nullptr;
     cudaGraph_t graph_=nullptr;
