@@ -30,10 +30,10 @@ constexpr float kMouthOffset=0.055f; // 5.5cm: clear of the speaker's recess edg
 constexpr float kHeadClearance=0.018f;
 constexpr float kMinimumSeparation=kHeadRadius+kArtistRadius+kHeadClearance;
 constexpr float kRoomClearance=kArtistRadius+0.018f;
-// Q cycles up to 12kHz actual 2D FDTD preview. Grid sizes are the
-// FULL 2m room, never a 50cm scaled model.
-// Default costs about 19% fewer 2D space-time cell updates than 3.5mm
-// (533² / 571² times 3.5 / 3.75). Keep 8.5kHz input and 48kHz output.
+// Live 400x711 ~= the original 533x533 budget. Offline 1000x1778
+// ~= the previous 1333x1333 offline budget: BOTH preserve area in
+// cell counts while physical room spans 2x3.56m. FDTD step time and
+// accurate acoustic bandwidth must change with dx to obey the CFL rule.
 constexpr float kLiveDx=0.0050f;  // 400x711 in 9:16 room; ~25% less live cell-work
 constexpr float kBalancedDx=0.0045f; // optional higher-quality live preview
 constexpr float kPreviousDx=0.00375f; // optional former live preset
@@ -42,7 +42,7 @@ constexpr float kUltraDx=0.0025f;  // 800², 13.7kHz
 constexpr float kSafeDx=0.0050f;   // 400², 6.86kHz
 constexpr float kLowDx=0.0080f;    // 250² fallback
 constexpr float kLowestDx=0.0100f; // 200² fallback
-constexpr float kOfflineDx=0.0015f;// 1333², 22.9kHz at 10 cells / wave
+constexpr float kOfflineDx=0.0020f;// 1000x1778 ~= 1333² cells; 17.15kHz at 10 cells / wave
 constexpr float kLivePassband=6000.0f; // <6.86kHz ten-cell numerical limit
 constexpr float kBalancedPassband=6800.0f;
 constexpr float kPreviousPassband=8500.0f;
@@ -51,7 +51,7 @@ constexpr float kUltraPassband=12000.0f;
 constexpr float kSafePassband=5500.0f;
 constexpr float kLowPassband=4000.0f;
 constexpr float kLowestPassband=2800.0f;
-constexpr float kOfflinePassband=19000.0f;
+constexpr float kOfflinePassband=16000.0f; // below 17.15kHz 10-cell limit
 constexpr int kOutputRate=48000;
 constexpr int kGraphBatch=126; // multiple of 3 for GPU field ring to repeat in a CUDA Graph
 constexpr float kOutsideReflection=0.32f;
