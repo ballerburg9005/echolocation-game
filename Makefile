@@ -22,7 +22,14 @@ build/asmr_room: asmr_room.cu asmr_lab_math.h asmr_mp3_audio.h asmr_svg_geometry
 test:
 	@set -e; for src in tests/test_*.cpp; do \
 	    out="/tmp/$$(basename "$$src" .cpp)"; \
-	    $(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -pedantic "$$src" -o "$$out"; \
+	    if [ "$(basename "$src")" = "test_asmr_svg.cpp" ]; then \
+	        $(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+	            $(pkg-config --cflags librsvg-2.0 cairo) "$src" \
+	            -o "$out" $(pkg-config --libs librsvg-2.0 cairo); \
+	    else \
+	        $(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+	            "$src" -o "$out"; \
+	    fi; \
 	    "$$out"; \
 	done
 
