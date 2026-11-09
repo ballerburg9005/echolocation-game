@@ -41,6 +41,19 @@ is nonzero but headphones remain silent, check SDL's selected output
 device, system volume and mute. If `earPeak` stays zero on the
 calibration tone, that points to a source/mask/FDTD problem instead.
 The visible cyan/magenta field in V mode is the same solver field.
+The startup console prints `[AUDIO CLOCK]` with the actual SDL output
+format; it must be 48,000 Hz, stereo float. Every five seconds,
+`generated/wall` estimates how many seconds of live audio were
+produced per wall-clock second, and `solver/compute` gives an upper
+bound on solver throughput, including GPU transfer/synchronization
+but not UI rendering. A `solver/compute` figure below 1x suggests
+hardware cannot keep pace; a nearly empty queue plus frequent
+`near-empty queues` supports underruns. Neither causes the device
+sample rate to change automatically. A low-pass at 8.5kHz, 2D room
+resonances and partially transmissive artist geometry may instead
+color the live timbre. The **offline 1.5mm/19kHz WAV is fully
+precomputed** and therefore does not play at a lower pitch when
+rendering takes longer than real time.
 
 ### Head geometries and eardrums
 
@@ -81,7 +94,13 @@ The speaker silhouette additionally creates **genuine moving
 fractional impedance scattering** sampled from the uploaded SVG
 alpha texture in the CUDA stencil. It is *not* a moving hard mask:
 pressure is preserved during motion to avoid numerical whips.
-This is an approximation to a moving solid boundary, not a complete
+That means a visible, attenuated pressure field INSIDE the moving
+speaker, whereas the static listener's hard mask has zero pressure
+inside. This is expected from the different boundary conditions,
+not evidence of hidden sound processing. We deliberately have not
+made the moving speaker rigid just to hide those waves: that could
+reintroduce discontinuities during movement. This is an approximation
+to a moving solid boundary, not a complete
 fluid–structure or rigid-body acoustic calculation.
 
 The mouse still maps 1:1 to the full room, subject to listener,
@@ -93,15 +112,19 @@ speaker and outside-wall collision clearance. A physical
 | Property | Default live | Offline 5/10/20 s render |
 |---|---:|---:|
 | Physical room | 2.0 × 2.0 m | 2.0 × 2.0 m |
-| Grid cell | **3.5 mm** | **1.5 mm** |
-| Acoustic cells per side | ~571 | ~1333 |
-| Wave steps/s (CFL) | ~139k | ~323k |
-| Ten-cells/wavelength reference | ~9.8 kHz | ~22.9 kHz |
+| Grid cell | **3.75 mm** | **1.5 mm** |
+| Acoustic cells per side | ~533 | ~1333 |
+| Wave steps/s (CFL) | ~129k | ~323k |
+| Ten-cells/wavelength reference | ~9.15 kHz | ~22.9 kHz |
 | Source low-pass | **8.5 kHz** | **19 kHz** |
 | Sound capture | two FDTD microphones | same two microphones |
 
-Press **Q** to cycle 3.5 / 3 / 2.5 / 5 / 8 / 10 mm live grid
-settings, with corresponding input passbands. Offline stays at 1.5 mm,
+Press **Q** to cycle 3.75 / 3 / 2.5 / 5 / 8 / 10 mm live grid
+settings, with corresponding input passbands. This replaces the 3.5mm
+default with ~19% fewer space-time pressure updates (an analytical
+estimate, not a measured 19% wall-time or GPU-watt reduction). The same
+2m physical room, 8.5kHz live low-pass, 48kHz stereo device output,
+and physical-time resampler remain in use. Offline stays at 1.5 mm,
 independently of the preview resolution; it may take substantially
 longer than realtime to render even a short clip.
 
