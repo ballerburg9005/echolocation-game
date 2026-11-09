@@ -927,9 +927,9 @@ static void printUsage(const char* executable){
         "                last view is a 0.75m square, still orbitable\n"
         "                (~85% -> 27.2% of original full-room cell-work)\n"
         "  F11 / Shift+F11 Cycle real physical scale in both directions\n"
-        "                0.1 / 0.2 / 0.5 / 1 / 2 / 5 / 10x\n"
-        "                Shift+F11 from 1x = 0.5x smaller room\n"
-        "                small scales coarsen the GPU grid to cap work\n"
+        "                1 / 2 / 3 / 4 / 0.1 / 0.25 / 0.5 / 0.75x\n"
+        "                Shift+F11 from 1x = 0.75x smaller room\n"
+        "                small rooms target 40pct less solver cell work\n"
         "  F12           Cycle distance falloff: raw, 1,2,3,4,6,8,\n"
         "                10,12,16,20x extra 2D-to-3D pressure loss\n"
         "  Shift+F12     Previous distance-falloff strength\n"
@@ -1312,7 +1312,7 @@ int main(int argc,char** argv){
        "L reload selected MP3, D FDTD test chirp, N ambient noise, "
        "T toggle live, "
        "H V2/channel/simple, Q quality, Z 1/1.25/1.55/2/square, "
-       "F11 physical metres 0.1/0.2/0.5/1/2/5/10x, "
+       "F11 physical metres 1/2/3/4/0.1/0.25/0.5/0.75x, "
        "F12 distance 0x-20x (Shift reverses), "
        "V pressure waves, B authored mask guide, 9/0 exposure, "
        "R reset, Esc exit.\n");
@@ -1922,7 +1922,7 @@ int main(int argc,char** argv){
                 std::max(0.001,windowWallSeconds);
             const double computeCapacity=generatedSeconds/
                 std::max(0.000001,previewComputeSecondsWindow);
-            std::printf("[ASMR FDTD] LIVE physical dx=%.2fmm F11 %.0fx cells=%dx%d "
+            std::printf("[ASMR FDTD] LIVE physical dx=%.2fmm F11 %gx cells=%dx%d "
                         "pressure steps=%llu queue=%.1fms "
                         "near-empty queues=%llu safety-clipped samples=%llu "
                         "generated/wall=%.2fx solver/compute=%.2fx "
