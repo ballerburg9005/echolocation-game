@@ -885,8 +885,7 @@ int main(int argc,char** argv){
     }
     // Default is the supplied 185.35mm mirrored PINNA silhouette,
     // not the old 17cm circle or the previous channel drawing.
-    int headIndex=0; // acoustic/visible SVG actually in use
-    int headCycleIndex=0; // H advances even if a candidate is invalid
+    int headIndex=0; // single source of truth for active H model
     bool channels=true; // V2 uses its own 12.4cm open pinna probes
     const auto* head=&listenerV2;
     SDL_Texture* speakerSprite=headTexture(
@@ -1147,11 +1146,10 @@ int main(int argc,char** argv){
                     live->dt(),asmr::kOutputRate);
             }
             if(key==SDLK_h && mode==Mode::Preview){
-                // H never changes the room scale. Even a channel
-                // blocked by coarse dx cannot silently force a zoom.
-                headCycleIndex=(headCycleIndex+1)%3;
-                selectConfiguration(headCycleIndex,qualityIndex,
-                                    zoomIndex,"H");
+                // One H press means exactly one model step, based on
+                // the ACTIVE head, never on a hidden attempted index.
+                const int requested=(headIndex+1)%3;
+                selectConfiguration(requested,qualityIndex,zoomIndex,"H");
             }
             if(key==SDLK_q && mode==Mode::Preview){
                 bool applied=false;
@@ -1166,19 +1164,11 @@ int main(int argc,char** argv){
                     "[Q] No compatible quality preset for this H/Z.\n");
             }
             if(key==SDLK_z && mode==Mode::Preview){
-                // Zoom never changes the selected head. Walk past
-                // incompatible cell sizes while retaining H and Q.
-                bool applied=false;
-                for(size_t trial=1;trial<zoomSteps.size();++trial){
-                    const int z=(zoomIndex+(int)trial)%
-                                 (int)zoomSteps.size();
-                    if(selectConfiguration(headIndex,qualityIndex,z,"Z")){
-                        applied=true;break;
-                    }
-                }
-                if(!applied)std::fprintf(stderr,
-                    "[Z] No compatible physical zoom for this head/Q; "
-                    "head and room left unchanged.\n");
+                // Exactly one step through the five ordered zoom
+                // presets. No scanning/skipping stages or altering H.
+                const int requested=(zoomIndex+1)%
+                                     (int)zoomSteps.size();
+                selectConfiguration(headIndex,qualityIndex,requested,"Z");
             }
             if(key==SDLK_r){
                 record.clear();recordingClock=0;
