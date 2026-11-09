@@ -251,6 +251,11 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
 // dx and CFL dt scale together; physical frequencies resolvable by
 // the mesh decrease by the same factor.
 constexpr std::array<float,4> kPhysicsScales{1.0f,2.0f,5.0f,10.0f};
+constexpr float kSquareMp3Gain=0.75f;
+inline int nextPhysicalScaleIndex(int index,bool reverse=false){
+    const int count=(int)kPhysicsScales.size();
+    return (index+count+(reverse?-1:1))%count;
+}
 inline float physicalMetres(float designMetres,float scale){
     return designMetres*scale;
 }
