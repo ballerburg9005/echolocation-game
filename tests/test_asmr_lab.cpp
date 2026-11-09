@@ -46,6 +46,36 @@ int main(){
             }
         }
     }
+    // A UI choice is a triple, never three independently drifting
+    // cursors. Pressing H/Z/Q must advance exactly one dimension and
+    // wrap in both directions without skipping any intermediate item.
+    for(int head=0;head<3;++head)
+        for(int zoom=0;zoom<(int)asmr::kZoomSteps.size();++zoom)
+            for(int quality=0;quality<8;++quality){
+                const asmr::LabSelection current{head,quality,zoom};
+                const auto nextH=asmr::nextSelection(current,'H');
+                assert(nextH.head==(head+1)%3);
+                assert(nextH.zoom==zoom&&nextH.quality==quality);
+                const auto prevH=asmr::nextSelection(current,'H',true);
+                assert(prevH.head==(head+2)%3);
+                assert(prevH.zoom==zoom&&prevH.quality==quality);
+                const auto nextZ=asmr::nextSelection(current,'Z');
+                assert(nextZ.zoom==(zoom+1)%5);
+                assert(nextZ.head==head&&nextZ.quality==quality);
+                const auto prevZ=asmr::nextSelection(current,'Z',true);
+                assert(prevZ.zoom==(zoom+4)%5);
+                assert(prevZ.head==head&&prevZ.quality==quality);
+                const auto nextQ=asmr::nextSelection(current,'Q');
+                assert(nextQ.quality==(quality+1)%8);
+                assert(nextQ.head==head&&nextQ.zoom==zoom);
+                const auto prevQ=asmr::nextSelection(current,'Q',true);
+                assert(prevQ.quality==(quality+7)%8);
+                assert(prevQ.head==head&&prevQ.zoom==zoom);
+            }
+    assert(std::fabs(asmr::kZoomWorkRatios[3]-0.684f)<1e-5f);
+    assert(std::fabs(asmr::kZoomWorkRatios[4]-0.272f)<1e-5f);
+    assert(asmr::kZoomWorkRatios[4]/
+           0.68f <0.401f); // exact 60% fewer square grid updates
     assert(asmr::kZoomWorkRatios.front()<0.86f);
     assert(asmr::kZoomWorkRatios.back()<=0.85f*0.80f+0.001f);
     assert(std::fabs(asmr::micSpacing(true)-0.039f)<1e-6f);
