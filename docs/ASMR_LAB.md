@@ -310,14 +310,54 @@ Every five seconds the terminal prints `[METRES]` with the actual
 listener, mouse target, smoothed acoustic head, mouth, left/right
 source-to-microphone distances and predicted flight times at **343m/s**.
 At 1× the grid's physical width/height are 2.0m × 3.5556m;
-gentle zoom and the final square use the actual cropped dimensions
-printed by [METRES]. **A true 2D
-wave spreads as approximately 1/sqrt(distance)**, weaker attenuation
-than the approximately 1/distance of a freely spreading 3D wave.
-The ear outline also lacks full 3D pinna cues, so a 2m geometry may
-sound subjectively closer even when the physical grid and acoustic
-delays are correct. We have NOT added arbitrary distance gain to the
-solver or audio; the numerical room scale is still auditable.
+actual zoom and the final square use the cropped dimensions printed
+by [METRES]. **An idealized 2D point source has pressure decreasing
+as 1/sqrt(distance)**, whereas in a free-field 3D world pressure
+decreases as approximately **1/distance**. The familiar
+**inverse-square** statement refers to sound *intensity*, not
+pressure amplitude. This difference can make a physically correct
+2D FDTD experiment sound unusually near even when its measured
+time-of-flight, head scattering, and left/right cues are consistent.
+
+### F12 — experimental 2D-to-3D distance falloff
+
+Press **F12** to cycle through **0× → 1× → 2× → 3× → 4× → 6× →
+8× → 10× → 12× → 16× → 20× → 0×**.
+**Shift+F12** cycles backward. The current setting appears in the
+window title as `F12 Nx`, and changes require no CUDA rebuilding,
+no change of H/Z/Q settings, and no change to the acoustic room.
+
+F12 adjusts the *stereo pressure captured at the two actual
+microphones*, not the propagation kernel, head mask, or raw
+wavefield visualization. For each channel, it multiplies the
+sampled FDTD pressure by
+
+`gain = min(1, (0.20m / max(0.20m, source-to-mic distance))^(N/2))`.
+
+Here **0×** is the unchanged 2D FDTD audio. **1×** adds one factor
+of `1/sqrt(distance)` so a 2D point-source pressure is approximately
+converted to a 3D-like `1/distance` law (hence inverse-square
+**intensity**). **2×** adds twice that extra exponent, and **20×**
+is an intentionally extreme audition setting, **not a realistic
+physical acoustic law**. No correction boosts sources inside the
+20cm reference radius. Each ear receives a separate gain from
+the **physically smoothed CUDA mouth trajectory**, so original FDTD
+arrival delays and field scattering remain unchanged; the
+extra L/R gain may emphasize interaural level differences at
+very high settings. This approximation does **not** turn the
+2D pressure field or reflections into a true 3D wave simulation.
+
+The same correction applies during live audio and to
+**F5/F6/F7 offline WAV renders**. Offline PCM is normalized
+*before* F12 attenuation so automatic gain cannot cancel the
+requested distance loss. While a completed WAV is looping,
+pressing F12 instantly reprocesses the already-rendered
+recording with a short click-preventing crossfade; no GPU
+recalculation is needed, the playhead is preserved, and
+`asmr_last_05s.wav` (or the chosen duration) is updated.
+The original normalized unattenuated playback PCM stays in
+memory so repeated F12 adjustments never accumulate rounding
+loss or attenuation.
 
 ### Controls
 
@@ -327,6 +367,7 @@ solver or audio; the numerical room scale is still auditable.
 | M | Toggle mouse versus WASD/arrow movement |
 | V | Toggle the **actual CUDA pressure-wave visualization** |
 | B | Toggle semi-transparent authored SVG over FDTD head mask to audit alignment |
+| F12 / Shift+F12 | Cycle extra source-to-microphone distance loss 0×–20× forward / backward (0× raw 2D; 1× approx. 3D amplitude) |
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
 | H / Shift+H | Next / previous listener: V2 → CHANNEL → SIMPLE; retains zoom |
 | Q / Shift+Q | Next / previous compatible acoustic grid quality |
@@ -383,6 +424,11 @@ raw signed pressure with adjustable exposure.
 
 ## Acoustic limitations and validation
 
+- **F12 is a post-FDTD distance-dependent microphone gain
+  experiment**, not a replacement 3D propagation solver. The full
+  wavefield, obstacles, and travel time stay exactly 2D; at
+  high correction levels the added gain is intentionally
+  exaggerated and can change L/R level differences.
 - This is **genuine two-dimensional FDTD**, not HRTF rendering,
   generic reverb, direct stereo panning or ray tracing. The two
   microphones sample the propagated field on opposite sides of the
