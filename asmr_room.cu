@@ -875,9 +875,11 @@ static std::vector<float> distanceShapedClip(
         const auto m=asmr::mouth(source);
         return std::array<float,2>{
             asmr::distanceFalloffGain(
-                asmr::length(asmr::sub(m,earL))*physicsScale,strength),
+                asmr::length(asmr::sub(m,earL))*physicsScale,
+                strength,physicsScale),
             asmr::distanceFalloffGain(
-                asmr::length(asmr::sub(m,earR))*physicsScale,strength)};
+                asmr::length(asmr::sub(m,earR))*physicsScale,
+                strength,physicsScale)};
     };
     constexpr size_t segment=96; // 2ms at 48kHz
     for(size_t first=0;first<frames;first+=segment){
@@ -1366,9 +1368,10 @@ int main(int argc,char** argv){
                 std::fprintf(stderr,
                     "[F12 DISTANCE] %dx  (old %dx). 0x=raw 2D FDTD, "
                     "1x=approx 3D amplitude 1/r, "
-                    "20x=exaggerated. Reference %.0fcm.\n",
+                    "20x=exaggerated. F11-scaled reference %.1fcm.\n",
                     strength,oldStrength,
-                    asmr::kFalloffReferenceMetres*100.0f);
+                    asmr::kFalloffReferenceMetres*
+                    physicsScaleValue()*100.0f);
                 if(mode==Mode::Playback && !lastPlaybackBase.empty()){
                     // Reapply instantly to the *existing* offline FDTD
                     // recording, without rerendering a single CUDA step
@@ -1756,12 +1759,14 @@ int main(int argc,char** argv){
                         asmr::length(asmr::sub(physicalMouth,
                             asmr::leftEar(channels,head->pinnaV2)))*
                             physicsScaleValue(),
-                        ambientEnabled?0:falloffStrength());
+                        ambientEnabled?0:falloffStrength(),
+                        physicsScaleValue());
                     const float falloffR=asmr::distanceFalloffGain(
                         asmr::length(asmr::sub(physicalMouth,
                             asmr::rightEar(channels,head->pinnaV2)))*
                             physicsScaleValue(),
-                        ambientEnabled?0:falloffStrength());
+                        ambientEnabled?0:falloffStrength(),
+                        physicsScaleValue());
                     for(int n=0;n<asmr::kGraphBatch;++n)
                         liveResampler.push(
                             audio[n*2]*falloffL,
