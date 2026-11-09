@@ -231,8 +231,9 @@ public:
         if(!asmr::validateMicrophones(mask,nx_,ny_,dx_,channels,head)) {
             std::fprintf(stderr,
                 "[ASMR ERROR] Mic at x = %.4f / %.4f m is inside a "
-                "SOLID svg cell or blocked bilinear footprint, "
-                "resolution %.4fm. Refusing invalid ear samples.\n",
+                "SOLID SVG cell, blocked bilinear footprint, or "
+                "disconnected air cavity, resolution %.4fm. "
+                "Refusing invalid ear samples.\n",
                 asmr::kListenerX-halfMicSeparation_,
                 asmr::kListenerX+halfMicSeparation_,dx_);
             std::exit(3);
@@ -939,8 +940,9 @@ int main(){
                     asmr::cells(live->dx()),asmr::cellsY(live->dx()),
                     live->dx(),proposedChannels,shape)) {
                     std::fprintf(stderr,"[SVG HEAD] Mode %d at %.2fmm "
-                        "blocks the eardrum microphone. Press Q "
-                        "for finer resolution.\n",proposed,
+                        "has a blocked or disconnected ear passage. "
+                        "Press Q for another grid size or inspect "
+                        "your channel SVG.\n",proposed,
                         live->dx()*1000);
                 }else{
                     headIndex=proposed;
