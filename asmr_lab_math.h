@@ -14,6 +14,8 @@ constexpr float kListenerY=1.0f;
 // not a claim that every child has the same eardrum spacing.
 constexpr float kEardrumSeparation=0.080f;
 constexpr float kEarCanalLength=0.020f;
+constexpr float kChannelEarY=0.003f; // exact SVG groove sits 3mm above centre
+
 constexpr float kOuterMicSeparation=
     kEardrumSeparation+0.8f*kEarCanalLength; // 9.6cm simple notch mics
 constexpr float kHeadRadius=0.085f; // conservative collider for 17cm ear SVG
@@ -202,10 +204,12 @@ inline float micSpacing(bool earChannels=false){
     return earChannels?kEardrumSeparation:kOuterMicSeparation;
 }
 inline Vec2 leftEar(bool earChannels=false){
-    return {kListenerX-0.5f*micSpacing(earChannels),kListenerY};
+    return {kListenerX-0.5f*micSpacing(earChannels),
+            kListenerY+(earChannels?kChannelEarY:0.0f)};
 }
 inline Vec2 rightEar(bool earChannels=false){
-    return {kListenerX+0.5f*micSpacing(earChannels),kListenerY};
+    return {kListenerX+0.5f*micSpacing(earChannels),
+            kListenerY+(earChannels?kChannelEarY:0.0f)};
 }
 inline std::vector<float> lowpass(const std::vector<float>& input,
                                   float cutoff,int sampleRate,
