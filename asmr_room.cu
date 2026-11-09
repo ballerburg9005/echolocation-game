@@ -1550,7 +1550,7 @@ int main(int argc,char** argv){
                 live->uploadAudio(ambientEnabled?
                     std::vector<float>{}:liveAudio);
                 live->reset();
-                previewStep=0;sourceCursor=artist;
+                sourceCursor=artist; // preserve full MP3 clock on N toggle
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
                 previewFadeFrames=0;
@@ -1579,7 +1579,7 @@ int main(int argc,char** argv){
                 }
                 live->uploadAudio(diagnosticTone?
                     filteredDiagnostic:liveAudio);
-                live->reset();previewStep=0;sourceCursor=artist;
+                live->reset();sourceCursor=artist; // retain MP3 clock
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
                 SDL_PauseAudioDevice(device,1);
@@ -1597,7 +1597,7 @@ int main(int argc,char** argv){
             if(key==SDLK_t) {
                 previewEnabled=!previewEnabled;
                 SDL_ClearQueuedAudio(device);
-                live->reset();previewStep=0;
+                live->reset(); // retain full MP3 clock across T toggles
                 sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
@@ -1673,7 +1673,7 @@ int main(int argc,char** argv){
             if(key==SDLK_SPACE && mode==Mode::Playback){
                 SDL_ClearQueuedAudio(device);
                 mode=Mode::Preview;
-                live->reset();previewStep=0;
+                live->reset(); // resume MP3, not its first 60 seconds
                 sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
