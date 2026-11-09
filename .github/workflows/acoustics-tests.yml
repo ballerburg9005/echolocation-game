@@ -29,7 +29,7 @@ jobs:
             if [[ "$(basename "$source")" == "test_asmr_svg.cpp" ]]; then
               g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
                 $(pkg-config --cflags librsvg-2.0 cairo) \
-                "$source" -o "$executable" \
+                "$source" asmr_svg_geometry.cpp -o "$executable" \
                 $(pkg-config --libs librsvg-2.0 cairo)
             else
               g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
