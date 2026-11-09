@@ -3,8 +3,9 @@
 // Listener head is a REAL stationary 2D FDTD obstruction with two ears.
 // Artist is a collision-safe moving visual head; its mouth is a real
 // moving FDTD pressure emitter facing the listener on every path sample.
-// Live default: 3.75mm grid, 8.5kHz input passband, 48kHz stereo output.
-// Offline: original 1.5mm / 19kHz passband, processed to 48kHz stereo
+// Live 9:16: 5mm, 6kHz, 400x711 ~= original square preview cell budget.
+// Offline: 2mm, 16kHz, 1000x1778 ~= original square offline cell budget;
+// both paths resample physically timed FDTD samples to 48kHz stereo
 // WAV before playback. The GPU cannot change playback speed or pitch.
 #include "asmr_lab_math.h"
 #include "asmr_svg_geometry.h"
