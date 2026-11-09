@@ -56,6 +56,20 @@ constexpr float kLowPassband=4000.0f;
 constexpr float kLowestPassband=2800.0f;
 constexpr float kOfflinePassband=16000.0f; // below 17.15kHz 10-cell limit
 constexpr int kOutputRate=48000;
+// Keep one short window on the CUDA device, not the complete MP3.
+// The 2-second overlap means a 126-step graph batch can cross a
+// source-window boundary while the entire MP3 stays in host RAM.
+constexpr uint64_t kMp3WindowFrames=60ULL*kOutputRate;
+constexpr uint64_t kMp3WindowStride=58ULL*kOutputRate;
+inline uint64_t mp3WindowStart(double seconds,uint64_t fullFrames){
+    if(fullFrames<2||!std::isfinite(seconds)||seconds<0.0)return 0;
+    if(fullFrames<=kMp3WindowFrames)return 0;
+    double pos=std::fmod(seconds*(double)kOutputRate,
+                         (double)fullFrames);
+    if(pos<0)pos+=(double)fullFrames;
+    return ((uint64_t)pos/kMp3WindowStride)*kMp3WindowStride;
+}
+
 constexpr int kGraphBatch=126; // multiple of 3 for GPU field ring to repeat in a CUDA Graph
 constexpr float kHeadReflection=0.74f;
 constexpr float kOutsideReflection=0.82f;
