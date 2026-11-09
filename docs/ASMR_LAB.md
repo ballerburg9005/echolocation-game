@@ -177,9 +177,12 @@ outside room**. User-edited SVG necks can seal when rasterized at
 We do not delete material to fake a connected ear channel. **H**
 advances deterministically V2 → CHANNEL → SIMPLE: no more silent
 substitution with the simple SVG. If CHANNEL fails at the selected
-grid size, the program tests the gentle square-room grid and chooses
-it if it connects. Otherwise the head remains unchanged and a clear
-error is printed. The terminal's **[SVG LOAD]** line prints the
+grid size, the program searches the five **gentle** zooms for the first
+grid with a physically connected microphone cavity and switches there.
+For this authored SVG, the CPU tests verify the **1.16× stage** actually
+connects both microphones; more zoom is not automatically more correct,
+because thin grooves can alias closed at certain grid spacings.
+If none connects, the head remains unchanged and a clear error is printed. The terminal's **[SVG LOAD]** line prints the
 exact SVG path and dimensions, and **[H] ACTIVE** prints which model
 actually feeds CUDA.
 
@@ -220,9 +223,13 @@ are unchanged. During looping offline replay, the head also follows
 its **recorded physical FDTD movement**, not the unsmoothed cursor path.
 
 When **V** is enabled, the listener mask is the **actual pixelated
-acoustic material**, now positioned in the very same aspect-correct
-viewport as all microphone markers and the smooth SVG. Press **V**
-again to see the authored high-resolution SVG. CPU tests independently
+acoustic material**, in the same aspect-correct viewport as all
+microphone markers. The original smooth SVG is lightly drawn over
+it as a *co-registration guide*, not as acoustic material.
+Press **B** to toggle that translucent authored shape and spot any
+residual mismatch; the white centre crosshair and cyan/magenta
+microphone markers remain at exact physical coordinates. Press **V**
+to hide pressure and see the full-opacity authored SVG. CPU tests independently
 verify the SVG-to-material occupancy at physical metre coordinates,
 including the actual GPU image-lookup Y inversion at each zoom.
 The authored source is loaded from the current checkout's
@@ -276,6 +283,7 @@ solver or audio; the numerical room scale is still auditable.
 | Mouse | Position the movement TARGET in 2 × 3.56 m; orange acoustic head follows smoothly |
 | M | Toggle mouse versus WASD/arrow movement |
 | V | Toggle the **actual CUDA pressure-wave visualization** |
+| B | Toggle semi-transparent authored SVG over FDTD head mask to audit alignment |
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
 | H | V2 → CHANNEL → SIMPLE, never silently substitute an invalid SVG |
 | Q | Cycle real-time acoustic grid resolution |
