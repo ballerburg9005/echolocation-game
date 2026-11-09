@@ -132,6 +132,31 @@ int main(){
         asmr::kRoomMetres,0.25f)-0.5f)<1e-6f);
     assert(std::fabs(asmr::physicalMetres(
         asmr::kRoomMetres,0.75f)-1.5f)<1e-6f);
+    // The unified Z × F11 × Q budget MUST prevent a large portrait
+    // world from silently doing 3-5x more work than the working square.
+    // This is an analytic cell-update ceiling; fixed launch overhead
+    // and real GPU runtime are separate measurements.
+    assert(asmr::kLiveCellWorkCeiling<=0.20f);
+    for(const float physical:asmr::kPhysicsScales)
+        for(size_t z=0;z<asmr::kZoomSteps.size();++z){
+            const bool square=z+1==asmr::kZoomSteps.size();
+            const auto view=asmr::roomView(
+                asmr::kZoomSteps[z],square);
+            for(const float quality:{0.0025f,0.00375f,0.0050f,0.008f}){
+                const float nominal=asmr::physicalScaleDesignDx(
+                    asmr::zoomDx(quality,(int)z),physical);
+                const float dx=asmr::budgetedLiveDx(
+                    quality,(int)z,physical);
+                const float work=asmr::physicalScaleWork(dx,view,physical);
+                assert(dx>=nominal*0.99999f);
+                assert(work<=asmr::kLiveCellWorkCeiling*1.0002f);
+                assert(std::isfinite(work));
+                if(asmr::physicalScaleWork(nominal,view,physical)>
+                    asmr::kLiveCellWorkCeiling)
+                    assert(std::fabs(work-
+                        asmr::kLiveCellWorkCeiling)<0.0001f);
+            }
+        }
     // N diagnostic excites the SAME FDTD physics from four fixed,
     // distinct, air-borne positions; it is not noise mixed at the ears.
     // All four positions must stay well outside the listener and walls
