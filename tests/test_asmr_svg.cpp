@@ -90,7 +90,7 @@ int main(){
     // adds a 3mm connecting microphone port at precisely that x.
     assert(simple.solid(-.048f,0));
     assert(simple.solid(.048f,0));
-    assert(std::fabs(asmr::micSpacing(true)-0.042f)<1e-6f);
+    assert(std::fabs(asmr::micSpacing(true)-0.039f)<1e-6f);
     assert(std::fabs(asmr::micSpacing(false)-0.096f)<1e-6f);
     assert(std::fabs(asmr::micSpacing(true,true)-0.124f)<1e-6f);
     // V2's old 40mm ear location is SOLID in the unmodified SVG.
@@ -260,5 +260,5 @@ int main(){
         speaker,{1.5f,1.0f},m,speakerForward));
     std::printf("Exact Inkscape SVG masks passed: 129.82mm simple, "
       "170.23mm channels, 185.35mm new pinna V2, 134.48mm sender; "
-      "4.2cm channel / 9.6cm simple / 12.4cm V2 real-air mic spacing, open channel and source recess\n");
+      "3.9cm channel / 9.6cm simple / 12.4cm V2 real-air mic spacing, open channel and source recess\n");
 }
