@@ -272,6 +272,7 @@ int main(){
     // preserve the real-time solver-work budget, which must not silently
     // seal an authored mic or disable H/Z navigation. Check every
     // listener at each small F11 scale and acoustic zoom.
+    int shrinkConfigurationsFailing=0;
     for(const float scale:{0.5f,0.2f,0.1f}){
         for(size_t stage=0;stage<asmr::kZoomSteps.size();++stage){
             const auto view=asmr::roomView(
@@ -290,15 +291,40 @@ int main(){
                 const bool connected=asmr::validateMicrophones(
                     mask,nx,ny,dx,h!=2,shape,
                     view.originX,view.originY);
-                if(!connected)
+                if(!connected){
+                    ++shrinkConfigurationsFailing;
                     std::fprintf(stderr,
                         "[F11 SVG] FAIL F11=%.2fx Z=%zu H=%d "
                         "normalized dx=%.2fmm grid=%dx%d\\n",
                         scale,stage,h,dx*1000,nx,ny);
-                assert(connected);
+                    for(float factor:{1.01f,1.025f,1.05f,1.075f,
+                                      1.10f,1.15f,1.20f,
+                                      .99f,.975f,.95f,.925f,.90f}){
+                        const float d=dx*factor;
+                        const int xx=(int)std::lround(view.width/d);
+                        const int yy=(int)std::lround(view.height/d);
+                        const auto alt=asmr::svgRoomMask(
+                            xx,yy,d,shape,view.originX,view.originY);
+                        if(asmr::validateMicrophones(
+                            alt,xx,yy,d,h!=2,shape,
+                            view.originX,view.originY)){
+                            std::fprintf(stderr,
+                                "[F11 SVG] WORKAROUND %.3fx base dx "
+                                "%.2fmm for H%d\\n",factor,
+                                d*1000,h);
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
+    if(shrinkConfigurationsFailing)
+        std::fprintf(stderr,
+            "[F11 SVG] %d of 45 configurations fail "
+            "at exact cube-root dx; tune common dx to pass.\\n",
+            shrinkConfigurationsFailing);
+    assert(shrinkConfigurationsFailing==0);
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
     constexpr float dx=.0025f;
