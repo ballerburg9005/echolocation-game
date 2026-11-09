@@ -38,6 +38,8 @@ static constexpr int kWindowW=540;
 static constexpr int kWindowH=960; // 9:16 portrait
 static constexpr int kMaxWavSeconds=60;
 static constexpr int kMaxWavFrames=asmr::kOutputRate*kMaxWavSeconds;
+static_assert((uint64_t)kMaxWavFrames==asmr::kMp3WindowFrames);
+ // 60 seconds is ONLY the GPU CACHE window, never the full MP3.
 static constexpr float kInputStrength=3.0f;
 static constexpr int kPressureW=360, kPressureH=640; // GPU field visual only
 static constexpr int kReplayW=180, kReplayH=320; // replay visual only
@@ -579,15 +581,16 @@ static bool loadSourceAudio(const std::string& filename,
     std::vector<float> source;
     std::string error;
     if(!asmr::decodeMP3(filename,source,error,asmr::kOutputRate,
-                         kMaxWavSeconds)) {
+                         0 /* no duration limit */)) {
         std::fprintf(stderr,"[MP3] %s: %s (path recording still works).\n",
                      filename.c_str(),error.c_str());
         return false;
     }
     full=asmr::lowpass(source,asmr::kOfflinePassband,asmr::kOutputRate);
     live=asmr::lowpass(source,liveCutoff,asmr::kOutputRate);
-    std::printf("[MP3] Loaded %s (%.2fs, mono 48kHz). "
-                "LIVE %.0fHz, OFFLINE %.0fHz. Input enters CUDA FDTD.\n",
+    std::printf("[MP3] Loaded COMPLETE %s (%.2fs, mono 48kHz). "
+                "LIVE %.0fHz, OFFLINE %.0fHz. "
+                "60s GPU cache, LOOP ONLY AT FULL TRACK END.\n",
                 filename.c_str(),source.size()/
                 (double)asmr::kOutputRate,liveCutoff,
                 asmr::kOfflinePassband);
@@ -1020,7 +1023,9 @@ static void printUsage(const char* executable){
         "                ambient-only replaces the moving MP3; no mic EQ\n"
         "                F5/F6/F7 can render ambient alone in HQ\n"
         "  T             Toggle live FDTD sound\n"
-        "  L             Reload the selected MP3 source\n"
+        "  L             Reload the selected FULL MP3 from the beginning\n"
+        "                Long MP3s stream in 60s GPU cache windows;\n"
+        "                no looping until actual track end\n"
         "  R             Reset recorded path and solver\n"
         "  F5, F6, F7    Offline render/replay last 5, 10, 20 seconds\n"
         "  P             Replay last completed offline recording\n"
@@ -1311,6 +1316,8 @@ int main(int argc,char** argv){
                              h==1?&listenerChannels:&listenerSimple;
         const float dx=asmr::budgetedLiveDx(
             qualityDx[(size_t)q],z,physicalScale);
+        const double preservedSourceSeconds=
+            (double)previewStep*live->dt();
         const float nextCutoff=std::min(
             std::min(19000.0f,
                 qualityBand[(size_t)q]*qualityDx[(size_t)q]/
@@ -1344,7 +1351,10 @@ int main(int argc,char** argv){
         gView=live->view();
         artist=asmr::restrictCentreInView(artist,gView);
         sourceCursor=artist;
-        previewStep=0;
+        // Grid rebuild resets pressure, NOT the full MP3 playhead.
+        // Re-express the old acoustic timeline in the new F11 dx/dt.
+        previewStep=(uint64_t)std::llround(
+            preservedSourceSeconds/live->dt());
         liveResampler=echo::StereoLinearResampler(
             live->dt(),asmr::kOutputRate);
         previewFadeFrames=0;
