@@ -7,11 +7,14 @@
 #include <vector>
 
 namespace asmr {
-constexpr float kRoomMetres=2.0f; // width, retained for existing geometry
+// Preserve the prior square solver's ~284k CELLS while reflowing it
+// as a 400x711 portrait grid. 2m wide x (2m*16/9) tall at 5mm is
+// physically longer but does NOT multiply the number of simulation cells.
+constexpr float kRoomMetres=2.0f; // physical horizontal width
 constexpr float kRoomHeightMetres=kRoomMetres*16.0f/9.0f; // 9:16 portrait
-// Listener remains at y=1m: ~2.56m in front (+Y) and 1m behind.
-constexpr float kListenerX=1.0f;
-constexpr float kListenerY=1.0f;
+constexpr float kListenerX=kRoomMetres*0.5f;
+constexpr float kListenerY=kRoomHeightMetres/3.0f; // EXACT bottom third
+// Leaves 1/3 (1.19m) behind and 2/3 (2.37m) in front (+Y).
 // These are explicitly user-specified experimental CHILD HEAD distances,
 // not a claim that every child has the same eardrum spacing.
 constexpr float kEardrumSeparation=0.080f;
@@ -130,7 +133,7 @@ inline Vec2 moveArtist(Vec2 origin,Vec2 target) {
     return current;
 }
 inline Vec2 interpolate(const std::vector<PathPoint>& points,double t){
-    if(points.empty())return {1.45f,1.0f};
+    if(points.empty())return {kListenerX+0.45f,kListenerY};
     if(t<=points.front().t)return points.front().centre;
     if(t>=points.back().t)return points.back().centre;
     auto it=std::lower_bound(points.begin(),points.end(),t,
