@@ -27,7 +27,9 @@ constexpr float kMinimumSeparation=kHeadRadius+kArtistRadius+kHeadClearance;
 constexpr float kRoomClearance=kArtistRadius+0.018f;
 // Q cycles up to 12kHz actual 2D FDTD preview. Grid sizes are the
 // FULL 2m room, never a 50cm scaled model.
-constexpr float kLiveDx=0.0035f;   // 571², 9.8kHz at 10 cells / lambda
+// Default costs about 19% fewer 2D space-time cell updates than 3.5mm
+// (533² / 571² times 3.5 / 3.75). Keep 8.5kHz input and 48kHz output.
+constexpr float kLiveDx=0.00375f;  // 533², 9.15kHz at 10 cells / lambda
 constexpr float kMediumDx=0.0030f; // 667², 11.4kHz
 constexpr float kUltraDx=0.0025f;  // 800², 13.7kHz
 constexpr float kSafeDx=0.0050f;   // 400², 6.86kHz
