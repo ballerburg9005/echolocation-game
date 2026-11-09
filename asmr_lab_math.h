@@ -246,13 +246,16 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
 // the head since its center has 0.375m to all four walls.
 // F11 scales the ENTIRE physical laboratory: room, listener/source
 // silhouettes, microphones, mouth, openings, and movement.
-// Smaller-than-life worlds require more physical timesteps per
-// second. Coarsen their NORMALIZED mesh by S^(-1/3) to compensate
-// the S-fold CFL step-rate increase without exploding total work.
-// This is a deliberate resolution tradeoff, not a pitch shortcut.
-constexpr std::array<float,7> kPhysicsScales{
-    0.10f,0.20f,0.50f,1.00f,2.00f,5.00f,10.00f};
-constexpr int kDefaultPhysicsScaleIndex=3;
+// Smaller-than-life worlds need more CFL steps per real second.
+// Enlarge normalized cells by approximately (1/(0.60*S))^(1/3),
+// lowering the estimated small-room cell-updates/second by 40%
+// compared with the previous compensated work budget.
+// The substantial spatial resolution tradeoff is intentional.
+// Navigation order: 1 -> 2 -> 3 -> 4 -> .1 -> .25 -> .5 -> .75 -> 1.
+constexpr std::array<float,8> kPhysicsScales{
+    1.00f,2.00f,3.00f,4.00f,0.10f,0.25f,0.50f,0.75f};
+constexpr int kDefaultPhysicsScaleIndex=0;
+constexpr float kSmallRoomWorkFraction=0.60f;
 constexpr float kSquareMp3Gain=0.75f;
 inline int nextPhysicalScaleIndex(int index,bool reverse=false){
     const int count=(int)kPhysicsScales.size();
@@ -262,13 +265,13 @@ inline float physicalMetres(float designMetres,float scale){
     return designMetres*scale;
 }
 inline float physicalScaleDxFactor(float scale){
-    // cell updates/sec ∝ area / (S * normalized_dx^3).
-    // At S<1 the domain gets fewer normalized cells, preserving
-    // approximately the SAME workload as the selected 1x H/Q/Z.
-    // A 1% coarser grid prevents the simple SVG mic notch from
-    // aliasing closed at 0.1x/0.2x on some Z stages, and slightly
-    // reduces rather than increases the proposed workload.
-    return scale<1.0f?1.01f*std::cbrt(1.0f/scale):1.0f;
+    // Cell updates per real second ∝ area/(S*normalized_dx^3).
+    // Previous small-room work: 1/(1.01^3) of the 1x work.
+    // New small-room target: kSmallRoomWorkFraction of that.
+    // Maintain the extra 1% guard against mic raster aliasing.
+    return scale<1.0f?
+        1.01f*std::cbrt(1.0f/(scale*kSmallRoomWorkFraction)):
+        1.0f;
 }
 inline float physicalScaleDesignDx(float zoomDx,float scale){
     return zoomDx*physicalScaleDxFactor(scale);
