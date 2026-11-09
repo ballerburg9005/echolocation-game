@@ -3,9 +3,9 @@
 // Listener head is a REAL stationary 2D FDTD obstruction with two ears.
 // Artist is a collision-safe moving visual head; its mouth is a real
 // moving FDTD pressure emitter facing the listener on every path sample.
-// Live: 5mm grid, 5.5kHz band (Q cycles 5/8/10mm for weaker GPUs).
-// Offline: 2mm grid, 15kHz band to preserve >8kHz spatial effects, BEFORE
-// stutter-free 48kHz stereo WAV playback and writing an output file.
+// Live default: 3.75mm grid, 8.5kHz input passband, 48kHz stereo output.
+// Offline: original 1.5mm / 19kHz passband, processed to 48kHz stereo
+// WAV before playback. The GPU cannot change playback speed or pitch.
 #include "asmr_lab_math.h"
 #include "asmr_svg_geometry.h"
 #include "asmr_dynamic_head.h"
@@ -711,6 +711,24 @@ int main(){
         SDL_DestroyRenderer(renderer);SDL_DestroyWindow(window);
         SDL_Quit();return 1;
     }
+    // No SDL format changes are permitted: the simulator outputs
+    // exactly 48 kHz floating-point interleaved stereo. Never change
+    // the device rate based on the CUDA solver's physical timestep.
+    if(obtained.freq!=asmr::kOutputRate||obtained.channels!=2||
+       obtained.format!=AUDIO_F32SYS){
+        std::fprintf(stderr,
+            "[AUDIO CLOCK] Unexpected device format: %d Hz, %d channels "
+            "(SDL format %u). Refusing mismatched playback.\n",
+            obtained.freq,(int)obtained.channels,
+            (unsigned)obtained.format);
+        SDL_CloseAudioDevice(device);
+        SDL_DestroyRenderer(renderer);SDL_DestroyWindow(window);
+        SDL_Quit();return 1;
+    }
+    std::printf("[AUDIO CLOCK] SDL output=%d Hz, %d channels, "
+                "32-bit float PCM; FDTD temporal samples are "
+                "resampled in PHYSICAL seconds to that fixed rate.\n",
+                obtained.freq,(int)obtained.channels);
     SDL_PauseAudioDevice(device,0);
     asmr::SvgSilhouette speakerShape=asmr::speakerSilhouette();
     asmr::SvgSilhouette listenerSimple=asmr::listenerSilhouette(
@@ -729,7 +747,7 @@ int main(){
     // Default is the supplied 185.35mm mirrored PINNA silhouette,
     // not the old 17cm circle or the previous channel drawing.
     int headIndex=0; // 0 new V2, 1 explicit canal, 2 original simple
-    bool channels=true; // v2 eardrums are 8cm apart in open ports
+    bool channels=true; // V2 uses its own 12.4cm open pinna probes
     const auto* head=&listenerV2;
     SDL_Texture* speakerSprite=headTexture(
         renderer,speakerShape,237,141,98);
@@ -775,6 +793,11 @@ int main(){
     uint64_t previewStep=0;
     uint64_t clippedPreview=0,shortQueueWarnings=0;
     float previewSignalPeak=0.0f;
+    // Acoustic seconds generated and actual GPU+transfer time over
+    // each diagnostic window; report both to distinguish underruns
+    // from filter/head acoustic coloration or an output-rate issue.
+    uint64_t previewStepsWindow=0;
+    double previewComputeSecondsWindow=0.0;
     uint64_t audioDiagTime=SDL_GetTicks64();
     asmr::Vec2 artist{1.50f,1.0f},sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
@@ -816,7 +839,7 @@ int main(){
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload ~/test.mp3, D FDTD test chirp, T toggle live, "
-       "H cycle V2 pinna/channel/simple, Q 3.5/3/2.5/5/8/10mm, "
+       "H cycle V2 pinna/channel/simple, Q 3.75/3/2.5/5/8/10mm, "
        "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
@@ -1075,7 +1098,12 @@ int main(){
                     const auto points=mouthBatch(
                         {},0,live->dt(),previewStep,live->dx(),
                         sourceCursor,artist,false);
+                    const uint64_t gpuStart=SDL_GetPerformanceCounter();
                     const auto audio=live->process(points,previewStep);
+                    const uint64_t gpuEnd=SDL_GetPerformanceCounter();
+                    previewComputeSecondsWindow+=
+                        (gpuEnd-gpuStart)/perfFrequency;
+                    previewStepsWindow+=asmr::kGraphBatch;
                     previewStep+=asmr::kGraphBatch;
                     blockSamples.clear();
                     for(int n=0;n<asmr::kGraphBatch;++n)
@@ -1180,10 +1208,19 @@ int main(){
                 playbackEnqueuedCycles*frameCount,
                 pending,frameCount);
         }
-        if(SDL_GetTicks64()-audioDiagTime>=5000){
-            std::printf("[ASMR FDTD] LIVE dx=%.1fmm cells=%dx%d "
+        const uint64_t audioDiagNow=SDL_GetTicks64();
+        if(audioDiagNow-audioDiagTime>=5000){
+            const double windowWallSeconds=
+                (audioDiagNow-audioDiagTime)/1000.0;
+            const double generatedSeconds=previewStepsWindow*live->dt();
+            const double liveDelivery=generatedSeconds/
+                std::max(0.001,windowWallSeconds);
+            const double computeCapacity=generatedSeconds/
+                std::max(0.000001,previewComputeSecondsWindow);
+            std::printf("[ASMR FDTD] LIVE dx=%.2fmm cells=%dx%d "
                         "pressure steps=%llu queue=%.1fms "
                         "near-empty queues=%llu safety-clipped samples=%llu "
+                        "generated/wall=%.2fx solver/compute=%.2fx "
                         "earPeak=%.5g MP3=%s preview=%s probe=%s "
                         "(V toggles REAL CUDA wave field)\n",
                 live->dx()*1000,
@@ -1193,6 +1230,7 @@ int main(){
                     (2.0*sizeof(float)*asmr::kOutputRate),
                 (unsigned long long)shortQueueWarnings,
                 (unsigned long long)clippedPreview,
+                liveDelivery,computeCapacity,
                 previewSignalPeak,waveLoaded?"loaded":"missing",
                 previewEnabled?"on":"off",
                 diagnosticTone?"chirp":"off");
@@ -1219,7 +1257,9 @@ int main(){
                 live->dx(),live->dt()*1e6f);
             shortQueueWarnings=0;clippedPreview=0;
             previewSignalPeak=0.0f;
-            audioDiagTime=SDL_GetTicks64();
+            previewStepsWindow=0;
+            previewComputeSecondsWindow=0.0;
+            audioDiagTime=audioDiagNow;
         }
         const float progress=mode==Mode::Render&&job.total>0?
             (float)((double)job.current/job.total):0.0f;
