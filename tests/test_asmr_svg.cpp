@@ -283,7 +283,9 @@ int main(){
             const int nx=(int)std::lround(view.width/dx);
             const int ny=(int)std::lround(view.height/dx);
             const float work=asmr::physicalScaleWork(dx,view,scale);
-            assert(std::fabs(work-asmr::kZoomWorkRatios[stage])<0.015f);
+            // Calibrated 1% coarser grid saves another ~2.9% work.
+            assert(work<=asmr::kZoomWorkRatios[stage]+0.001f);
+            assert(work>=asmr::kZoomWorkRatios[stage]*0.95f);
             for(const int h:{0,1,2}){
                 const auto& shape=h==0?pinnaV2:h==1?channels:simple;
                 const auto mask=asmr::svgRoomMask(
