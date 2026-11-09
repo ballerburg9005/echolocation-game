@@ -98,6 +98,25 @@ int main(){
         {15.0,{1.5f,1.0f}},
         {22.0,{1.45f,0.8f}}
     };
+    // Exact 5/10/20s replay irrespective of acoustic FDTD dt,
+    // GPU graph overrun, or interpolator sample count.
+    for(int seconds:{5,10,20}) {
+        const size_t count=asmr::clipFrames(seconds);
+        assert(count==(size_t)seconds*48000);
+        std::vector<float> oversized(count*2+14,0.5f);
+        asmr::fitStereoClip(oversized,seconds);
+        assert(oversized.size()==count*2);
+        std::vector<float> undersized(count,0.1f);
+        asmr::fitStereoClip(undersized,seconds);
+        assert(undersized.size()==count*2);
+        assert(undersized.back()==0.0f);
+        assert(std::fabs(asmr::playbackSeconds(count,0,count)-
+                         0.0)<1e-9); // exact wrap
+        assert(std::fabs(asmr::playbackSeconds(
+            count+24000,0,count)-0.5)<1e-9);
+        assert(std::fabs(asmr::playbackSeconds(
+            count+24000,24000,count)-0.0)<1e-9);
+    }
     const auto five=asmr::selectLast(points,22.0,5.0);
     const auto ten=asmr::selectLast(points,22.0,10.0);
     const auto twenty=asmr::selectLast(points,22.0,20.0);
