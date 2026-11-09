@@ -1,12 +1,44 @@
 #include "../asmr_lab_math.h"
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <vector>
 
 int main(){
     static_assert(asmr::kGraphBatch%3==0,
                   "CUDA graph must preserve triple-buffer identity");
+    // F12 alters ONLY stereo sample amplitude, not CUDA wave updates.
+    // Raw 2D spreading is roughly pressure~1/sqrt(r); adding the
+    // 1x correction sqrt(r_ref/r) yields 3D-like pressure~1/r,
+    // hence inverse-square INTENSITY. 0x must be byte-identical.
+    static_assert(asmr::kDistanceFalloffSteps.size()==11,
+                  "F12 must expose the full 0x-20x cycle");
+    assert(asmr::kDistanceFalloffSteps.front()==0);
+    assert(asmr::kDistanceFalloffSteps.back()==20);
+    const float near=asmr::kFalloffReferenceMetres;
+    assert(std::fabs(asmr::distanceFalloffGain(0.8f,0)-1.0f)<1e-6f);
+    assert(std::fabs(asmr::distanceFalloffGain(near,20)-1.0f)<1e-6f);
+    assert(std::fabs(asmr::distanceFalloffGain(0.8f,1)-0.5f)<1e-6f);
+    assert(std::fabs(asmr::distanceFalloffGain(0.8f,2)-0.25f)<1e-6f);
+    assert(std::fabs(asmr::distanceFalloffGain(0.1f,20)-1.0f)<1e-6f);
+    assert(asmr::distanceFalloffGain(
+        std::numeric_limits<float>::quiet_NaN(),20)==0.0f);
+    assert(std::fabs(std::sqrt(near/0.8f)*
+        asmr::distanceFalloffGain(0.8f,1)-near/0.8f)<1e-6f);
+    float lastGain=1.0f;
+    for(const int strength:asmr::kDistanceFalloffSteps){
+        const float gain=asmr::distanceFalloffGain(0.8f,strength);
+        assert(std::isfinite(gain)&&gain>=0.0f&&gain<=lastGain);
+        lastGain=gain;
+    }
+    for(size_t i=1;i<asmr::kDistanceFalloffSteps.size();++i)
+        assert(asmr::kDistanceFalloffSteps[i]>
+               asmr::kDistanceFalloffSteps[i-1]);
+    // At any selected strength, greater range must never get louder.
+    for(int strength:asmr::kDistanceFalloffSteps)
+        assert(asmr::distanceFalloffGain(2.0f,strength)<=
+               asmr::distanceFalloffGain(0.5f,strength));
     assert(asmr::cells(asmr::kLiveDx)==400);
     assert(asmr::cellsY(asmr::kLiveDx)==711);
     // Every zoom is a REAL smaller FDTD room and finer dx, yet its
