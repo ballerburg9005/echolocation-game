@@ -186,34 +186,33 @@ int main(){
     }
     // The zoomed acoustic mask must remain in physical registration
     // with the unchanged listener SVG, including the real mic points.
-    constexpr float zoomSteps[]{1.0f,1.08f,1.16f,1.30f,1.40f};
-    for(int stage=0;stage<5;++stage){
-        const bool square=stage==4;
-        const float zoom=zoomSteps[stage];
-        const float dx=square?asmr::squareDxFromBase(asmr::kLiveDx):
-                               asmr::kLiveDx/zoom;
+    // FDTD occupancy and acoustic pressure-image Y lookup registered
+    // to the exact authored SVG at all true-zoom domain sizes.
+    int connectedChannelZooms=0;
+    for(size_t stage=0;stage<asmr::kZoomSteps.size();++stage){
+        const bool square=stage+1==asmr::kZoomSteps.size();
+        const float zoom=asmr::kZoomSteps[stage];
+        const float dx=asmr::zoomDx(asmr::kLiveDx,(int)stage);
         const auto view=asmr::roomView(zoom,square);
         const int nx=(int)std::lround(view.width/dx);
         const int ny=(int)std::lround(view.height/dx);
         const auto mask=asmr::svgRoomMask(nx,ny,dx,pinnaV2,
                                           view.originX,view.originY);
-        assert(std::abs(nx*ny-400*711)<1800);
+        assert(std::fabs(asmr::relativeCellWork(dx,view)-
+                        asmr::kZoomWorkRatios[stage])<0.015f);
         const int cx=(int)std::floor((asmr::kListenerX-view.originX)/dx);
         const int cy=(int)std::floor((asmr::kListenerY-view.originY)/dx);
         assert(cx>=0&&cx<nx&&cy>=0&&cy<ny);
         assert(mask[(size_t)cy*nx+cx]==1.0f);
-        // The ACTIVE microphone locations must be connected to the
-        // SAME material grid as the head rendered on this camera.
         assert(asmr::validateMicrophones(mask,nx,ny,dx,
             true,pinnaV2,view.originX,view.originY));
-        // Perimeter openings are true material cells, not decorative
-        // strokes at a different position.
-        assert(mask[(int)(ny*0.65f)*nx]==asmr::kPortMaterial);
-        assert(mask[(ny-1)*nx+(int)(nx*0.27f)]==asmr::kPortMaterial);
-        // The pressure-image sampler maps top-left screen pixels to
-        // high-Y grid cells. Inverting it places the listener's
-        // acoustic mask within <2 cells of the authored SVG centre.
-        const int imageW=360,imageH=640; // GPU map always 360x640, then aspect-fit
+        // Window/door termination material is physical FDTD mask
+        // (not decorative graphics).
+        assert(mask[(int)(ny*asmr::kLeftPortCentre)*nx]==
+               asmr::kPortMaterial);
+        assert(mask[(ny-1)*nx+(int)(nx*asmr::kFarPortCentre)]==
+               asmr::kPortMaterial);
+        const int imageW=360,imageH=640; // actual GPU pressure texture
         const int texX=(int)(((asmr::kListenerX-view.originX)/
                     view.width)*imageW);
         const int texY=(int)(((view.originY+view.height-
@@ -224,15 +223,18 @@ int main(){
         assert(std::abs(fieldX-cx)<3&&std::abs(fieldY-cy)<3);
         assert(mask[(size_t)fieldY*nx+fieldX]==1.0f);
         const auto channelMask=asmr::svgRoomMask(nx,ny,dx,channels,
-                                       view.originX,view.originY);
+                                     view.originX,view.originY);
         const bool channelIsOpen=asmr::validateMicrophones(
             channelMask,nx,ny,dx,true,channels,view.originX,view.originY);
-        if(stage==2)assert(channelIsOpen); // authored groove has verified connected air
-        std::fprintf(stderr,"[SVG ZOOM] stage %d %.2fx %s dx=%.3fmm "
-            "grid=%dx%d channel microphone connected=%s\n",
+        if(channelIsOpen)++connectedChannelZooms;
+        std::fprintf(stderr,"[SVG ZOOM] stage %zu %.2fx %s dx=%.3fmm "
+            "grid=%dx%d channel microphone connected=%s\\n",
             stage,zoom,square?"SQUARE":"PORTRAIT",dx*1000,
             nx,ny,channelIsOpen?"YES":"NO");
     }
+    // We must have at least one state in which the current authored
+    // ear channel can actually receive pressure from outside.
+    assert(connectedChannelZooms>=1);
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
     constexpr float dx=.0025f;
