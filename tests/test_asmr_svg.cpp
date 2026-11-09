@@ -58,8 +58,11 @@ int main(){
         (int)channels.solid(.040f,0),
         (int)channels.solid(-.040f,asmr::kChannelEarY),
         (int)channels.solid(.040f,asmr::kChannelEarY));
-    assert(!simple.solid(-.048f,0));
-    assert(!simple.solid(.048f,0));
+    // Original simple recess actually ENDS ~2mm outside the required
+    // ±4.8cm microphone positions; the physical acoustic mask
+    // adds a 3mm connecting microphone port at precisely that x.
+    assert(simple.solid(-.048f,0));
+    assert(simple.solid(.048f,0));
     assert(std::fabs(asmr::micSpacing(true)-0.08f)<1e-6f);
     assert(std::fabs(asmr::micSpacing(false)-0.096f)<1e-6f);
 
