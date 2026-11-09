@@ -641,22 +641,28 @@ int main(){
         asmr::HeadStyle::Simple);
     asmr::SvgSilhouette listenerChannels=asmr::listenerSilhouette(
         asmr::HeadStyle::Channels);
+    asmr::SvgSilhouette listenerV2=asmr::listenerSilhouette(
+        asmr::HeadStyle::PinnaV2);
     if(!speakerShape.present()||!listenerSimple.present()||
-       !listenerChannels.present()) {
-        std::fprintf(stderr,"[FDTD SVG] Cannot load exact head shapes. "
-            "Place listener.svg, speaker.svg and "
-            "listener_with_ear_channel.svg in HOME, "
-            "or run from the checkout with asmr_shapes/.\n");
+       !listenerChannels.present()||!listenerV2.present()) {
+        std::fprintf(stderr,"[FDTD SVG] Missing listener_v2.svg "
+            "or speaker.svg. Run from the checkout with asmr_shapes/, "
+            "or put the exact drawings in HOME.\n");
         return 4;
     }
-    bool channels=true; // default: two joined halves, OPEN ear canals
-    const auto* head=&listenerChannels;
+    // Default is the supplied 185.35mm mirrored PINNA silhouette,
+    // not the old 17cm circle or the previous channel drawing.
+    int headIndex=0; // 0 new V2, 1 explicit canal, 2 original simple
+    bool channels=true; // v2 eardrums are 8cm apart in open ports
+    const auto* head=&listenerV2;
     SDL_Texture* speakerSprite=headTexture(
         renderer,speakerShape,237,141,98);
     SDL_Texture* simpleSprite=headTexture(
         renderer,listenerSimple,38,132,218);
     SDL_Texture* channelsSprite=headTexture(
         renderer,listenerChannels,38,132,218);
+    SDL_Texture* pinnaV2Sprite=headTexture(
+        renderer,listenerV2,38,132,218);
     const std::array<float,6> qualityDx{
         asmr::kLiveDx,asmr::kMediumDx,asmr::kUltraDx,
         asmr::kSafeDx,asmr::kLowDx,asmr::kLowestDx};
@@ -704,7 +710,7 @@ int main(){
     std::printf("[CONTROLS] F5 = render last 5s, F6 = 10s, F7 = 20s "
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P replay, L reload ~/test.mp3, T toggle live, "
-       "H head SVG channel/simple, Q cycle 3.5/3/2.5/5/8/10mm, "
+       "H cycle V2 pinna/channel/simple, Q 3.5/3/2.5/5/8/10mm, "
        "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
@@ -755,23 +761,23 @@ int main(){
                     live->dt(),asmr::kOutputRate);
             }
             if(key==SDLK_h && mode==Mode::Preview){
-                const bool candidate=!channels;
-                const asmr::SvgSilhouette& shape=candidate?
-                    listenerChannels:listenerSimple;
+                const int proposed=(headIndex+1)%3;
+                const asmr::SvgSilhouette& shape=proposed==0?
+                    listenerV2:proposed==1?listenerChannels:listenerSimple;
+                const bool proposedChannels=proposed!=2;
                 const auto mask=asmr::svgRoomMask(
                     asmr::cells(live->dx()),live->dx(),shape);
                 if(!asmr::validateMicrophones(mask,
                     asmr::cells(live->dx()),live->dx(),
-                    candidate,shape)) {
-                    std::fprintf(stderr,
-                        "[SVG HEAD] %.1fmm FDTD grid does not "
-                        "resolve both proposed %s-mode microphone "
-                        "recesses. Try Q for finer cells.\n",
-                        live->dx()*1000,candidate?
-                        "ear-channel":"simple");
+                    proposedChannels,shape)) {
+                    std::fprintf(stderr,"[SVG HEAD] Mode %d at %.2fmm "
+                        "blocks the eardrum microphone. Press Q "
+                        "for finer resolution.\n",proposed,
+                        live->dx()*1000);
                 }else{
-                    channels=candidate;
-                    head=channels?&listenerChannels:&listenerSimple;
+                    headIndex=proposed;
+                    channels=proposedChannels;
+                    head=&shape;
                     SDL_ClearQueuedAudio(device);
                     highQuality.reset();live.reset();
                     live=std::make_unique<FdtdRoom>(
@@ -780,12 +786,12 @@ int main(){
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
                         live->dt(),asmr::kOutputRate);
-                    std::printf("[SVG HEAD] Mode=%s, eardrum/mic "
-                        "distance %.1fcm, y=%.1fmm. "
-                        "Both probes in REAL air cells.\n",
-                        channels?"channel":"simple",
-                        asmr::micSpacing(channels)*100,
-                        channels?asmr::kChannelEarY*1000:0.0f);
+                    std::printf("[SVG HEAD] %s, physically open mics "
+                        "%.1fcm apart.\n",
+                        headIndex==0?"listener_v2 pinna":
+                        headIndex==1?"ear-channel alternative":
+                        "original simple alternative",
+                        asmr::micSpacing(channels)*100);
                 }
             }
             if(key==SDLK_q && mode==Mode::Preview){
@@ -1049,7 +1055,8 @@ int main(){
                  mode==Mode::Render,mode==Mode::Playback,
                  mouseMode,waveTexture,showPressure,
                  *head,speakerShape,
-                 channels?channelsSprite:simpleSprite,
+                 headIndex==0?pinnaV2Sprite:
+                     headIndex==1?channelsSprite:simpleSprite,
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
@@ -1068,6 +1075,7 @@ int main(){
     if(speakerSprite)SDL_DestroyTexture(speakerSprite);
     if(simpleSprite)SDL_DestroyTexture(simpleSprite);
     if(channelsSprite)SDL_DestroyTexture(channelsSprite);
+    if(pinnaV2Sprite)SDL_DestroyTexture(pinnaV2Sprite);
     if(waveTexture)SDL_DestroyTexture(waveTexture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
