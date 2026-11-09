@@ -319,6 +319,59 @@ pressure amplitude. This difference can make a physically correct
 2D FDTD experiment sound unusually near even when its measured
 time-of-flight, head scattering, and left/right cues are consistent.
 
+### F11 — physical-scale experiment, not screen zoom
+
+Press **F11** to cycle the real physical metre scale **1× → 2× →
+5× → 10× → 1×**. **Shift+F11** moves backward. This is independent
+of H (listener model), Q (grid quality), Z (cropped acoustic room) and
+F12 (additional distance attenuation). The window title and
+five-second **[METRES]** log show the actual F11 physical dimensions,
+head/microphone range, CFL timestep and resolvable audio bandwidth.
+
+Unlike Z, **F11 does not crop, magnify, or resample the drawing on
+screen**. It interprets **every** design-world metre as S real
+metres. The authored SVG masks, speaker geometry, head/microphone
+separation, wall thickness, door/window openings, mouse movement
+and collision clearance all scale uniformly. For example:
+
+| F11 scale | Full-size (Z=1) room | V2 SVG physical size | Default live physical dx |
+|---|---|---|---|
+| 1× | 2.00 × 3.56 m | 185 × 137 mm | ~5.28 mm |
+| 2× | 4.00 × 7.11 m | 371 × 274 mm | ~10.56 mm |
+| 5× | 10.0 × 17.78 m | 927 × 684 mm | ~26.4 mm |
+| 10× | **20.0 × 35.56 m** | **1.85 × 1.37 m** | **~52.8 mm** |
+
+A sound crossing the same screen-space distance now takes S times
+longer in **real seconds**, because the CUDA graph uses
+`dt = (design_dx × S) / (343m/s × sqrt(2))`.
+The grid dimensions and number of cells per CUDA step stay fixed,
+so the **number of steps needed per simulated second decreases
+approximately 1/S** instead of requiring S² more GPU cells.
+The physical wall and window reflection coefficients remain
+unchanged: wall R≈0.82 and absorbing opening R≈0.035.
+
+**Important limitation:** At constant GPU cell count the physical
+cell spacing also grows S times, so the highest accurately
+resolvable sound frequency falls by approximately 1/S.
+At 10× full-room scale, the default live ten-cells-per-wavelength
+reference decreases from ~6.5kHz to **~650Hz**. The MP3 and
+diagnostic chirp are therefore low-pass filtered appropriately.
+The high-quality offline WAV renderer also uses the scaled physical
+CFL timestep and anti-aliased input. Keeping the original
+multi-kHz sound detail while expanding the room tenfold
+would require substantially more GPU cells and compute;
+F11 cannot provide both for free. This experiment is useful for
+testing whether the apparent room metres were wrong, **not a claim
+that they were**. Relative screen positions of head/mics/walls
+remain unchanged precisely because the entire world scales.
+
+In the most zoomed-in **Z=SQUARE** room, MP3 audio is now rendered
+at **75% of the previous output amplitude** in both live preview and
+offline WAV output. The 0.75 factor is applied **after offline
+peak normalization**, so it cannot be canceled by that stage.
+It does not affect other zoom settings and remains independent
+of F11 and F12.
+
 ### F12 — experimental 2D-to-3D distance falloff
 
 Press **F12** to cycle through **0× → 1× → 2× → 3× → 4× → 6× →
@@ -347,6 +400,11 @@ extra L/R gain may emphasize interaural level differences at
 very high settings. This approximation does **not** turn the
 2D pressure field or reflections into a true 3D wave simulation.
 
+At F11 scales above 1×, the F12 gains use the **new real
+source-to-microphone distance** rather than unscaled design units.
+This can create much stronger attenuation at large F11 scales,
+especially at 3×–20× F12; start comparisons at F12=0×.
+
 The same correction applies during live audio and to
 **F5/F6/F7 offline WAV renders**. Offline PCM is normalized
 *before* F12 attenuation so automatic gain cannot cancel the
@@ -367,6 +425,7 @@ loss or attenuation.
 | M | Toggle mouse versus WASD/arrow movement |
 | V | Toggle the **actual CUDA pressure-wave visualization** |
 | B | Toggle semi-transparent authored SVG over FDTD head mask to audit alignment |
+| F11 / Shift+F11 | Cycle uniform **physical** scale 1× / 2× / 5× / 10× and back; keeps GPU cells, changes real dx/dt/bandwidth |
 | F12 / Shift+F12 | Cycle extra source-to-microphone distance loss 0×–20× forward / backward (0× raw 2D; 1× approx. 3D amplitude) |
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
 | H / Shift+H | Next / previous listener: V2 → CHANNEL → SIMPLE; retains zoom |
@@ -424,6 +483,10 @@ raw signed pressure with adjustable exposure.
 
 ## Acoustic limitations and validation
 
+- **F11 is a genuine uniform physical metre/CFL scaling experiment**;
+  the proportions on screen are unchanged, but real room dimensions,
+  travel times, spatial bandwidth and resolving frequency all change.
+  F11 at 10× is limited to about one-tenth the former acoustic bandwidth.
 - **F12 is a post-FDTD distance-dependent microphone gain
   experiment**, not a replacement 3D propagation solver. The full
   wavefield, obstacles, and travel time stay exactly 2D; at
@@ -441,10 +504,14 @@ raw signed pressure with adjustable exposure.
   of an energy-conserving moving boundary; no hard pressure snaps.
   This preserves source motion without pretending to solve 3D
   fluid–structure coupling.
-- Outer walls now reflect strongly (R=0.82); three visible teal
-  boundary slots are modeled as absorbing impedances (R=0.035), not
-  actual wave propagation outside a geometrically cut aperture.
-  This is an approximate, frequency-independent boundary condition.
+- Outer walls reflect more strongly (R≈0.82); three teal
+  boundary slots are modeled as lossy impedance boundaries
+  (R≈0.035), not actual open windows with resolved exterior air.
+  The pressure renderer shows all material cells without a true
+  wave-energy-flux display; therefore **a visually apparent bounce
+  at a teal boundary is not by itself proof of the port's acoustic
+  reflection coefficient**. These coefficients are approximate,
+  frequency-independent boundary-model parameters.
 - The GPU load must be benchmarked in actual runtime, not inferred
   from its board's wattage. This version deliberately shrinks the
   FDTD grid domain as zoom increases: the estimated
