@@ -426,7 +426,7 @@ microphones*, not the propagation kernel, head mask, or raw
 wavefield visualization. For each channel, it multiplies the
 sampled FDTD pressure by
 
-`r0 = 0.10m × F11_scale`
+`r0 = 0.05m × F11_scale`
 
 `gain = min(1, (r0 / max(r0, source-to-mic physical distance))^(N/2))`.
 
@@ -436,7 +436,7 @@ converted to a 3D-like `1/distance` law (hence inverse-square
 **intensity**). **2×** adds twice that extra exponent, and **20×**
 is an intentionally extreme audition setting, **not a realistic
 physical acoustic law**. No correction boosts sources inside the
-F11-scaled 10cm reference radius. Each ear receives a separate gain from
+F11-scaled 5cm reference radius. Each ear receives a separate gain from
 the **physically smoothed CUDA mouth trajectory**, so original FDTD
 arrival delays and field scattering remain unchanged; the
 extra L/R gain may emphasize interaural level differences at
@@ -447,9 +447,9 @@ very high settings. This approximation does **not** turn the
 now scales uniformly with F11 just like the mouth and microphones.
 Previously the fixed 20cm radius covered most close sources in
 a 0.5× world, making even 20× gain sound nearly unchanged.
-The new 10cm × F11 radius lies inside the safe mouth-to-ear
-range. At 20×, ordinary 0.5× speaker positions should become
-much quieter. This is an amplitude post-processing experiment;
+The new 5cm × F11 reference lies inside even the **closest
+safe V2 mouth-to-ear distance** (~7.6cm at F11=1×), so at 20×
+**both ears** lose amplitude even during very close passes. This is an amplitude post-processing experiment;
 the pressure-wave visualization is unchanged.
 
 The same correction applies during live audio and to
