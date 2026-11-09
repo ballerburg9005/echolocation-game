@@ -984,6 +984,9 @@ int main(int argc,char** argv){
     // magnification yet progressively FEWER cell updates per second.
     const auto& zoomSteps=asmr::kZoomSteps;
     int zoomIndex=0;
+    int physicsScaleIndex=0; // F11 physical experiment, independent of H/Q/Z/F12
+    auto physicsScaleValue=[&](){
+        return asmr::kPhysicsScales[(size_t)physicsScaleIndex];};
     auto zoomValue=[&](){return zoomSteps[zoomIndex];};
     auto squareMode=[&](){return zoomIndex==4;};
     auto activeView=[&](){
@@ -991,8 +994,11 @@ int main(int argc,char** argv){
     auto liveDx=[&](){
         return asmr::zoomDx(qualityDx[qualityIndex],zoomIndex);
     };
-    auto liveBand=[&](){return std::min(19000.0f,
-        qualityBand[qualityIndex]*qualityDx[qualityIndex]/liveDx());};
+    auto liveBand=[&](){return std::min(
+        qualityBand[qualityIndex]*qualityDx[qualityIndex]/
+            (liveDx()*physicsScaleValue()),
+        0.90f*asmr::tenCellFrequency(
+            liveDx()*physicsScaleValue()));};
     float liveCutoff=liveBand();
     std::vector<float> fullAudio,liveAudio;
     bool waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
@@ -1011,7 +1017,7 @@ int main(int argc,char** argv){
 
     auto live=std::make_unique<FdtdRoom>(
         liveDx(),*head,channels,speakerShape,
-        zoomValue(),squareMode());
+        zoomValue(),squareMode(),physicsScaleValue());
     gView=live->view();
     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
     std::unique_ptr<FdtdRoom> highQuality;
@@ -1086,7 +1092,12 @@ int main(int argc,char** argv){
                               shape,view.originX,view.originY);
     };
     const auto selectConfiguration=[&](int h,int q,int z,
-                                      const char* changed)->bool{
+                                      const char* changed,
+                                      int requestedPhysics=-1)->bool{
+        const int physicalIndex=requestedPhysics<0?
+            physicsScaleIndex:requestedPhysics;
+        const float physicalScale=
+            asmr::kPhysicsScales[(size_t)physicalIndex];
         if(!candidateValid(h,q,z)){
             char message[256];
             std::snprintf(message,sizeof(message),
@@ -1101,13 +1112,16 @@ int main(int argc,char** argv){
             std::fprintf(stderr,"%s\n",message);
             return false;
         }
-        if(h==headIndex&&q==qualityIndex&&z==zoomIndex)return true;
+        if(h==headIndex&&q==qualityIndex&&z==zoomIndex&&
+           physicalIndex==physicsScaleIndex)return true;
         selectorNoticeUntil=0;
         const auto* newHead=h==0?&listenerV2:
                              h==1?&listenerChannels:&listenerSimple;
         const float dx=asmr::zoomDx(qualityDx[(size_t)q],z);
-        const float nextCutoff=std::min(19000.0f,
-            qualityBand[(size_t)q]*qualityDx[(size_t)q]/dx);
+        const float nextCutoff=std::min(
+            qualityBand[(size_t)q]*qualityDx[(size_t)q]/
+                (dx*physicalScale),
+            0.90f*asmr::tenCellFrequency(dx*physicalScale));
         std::vector<float> newAudio=waveLoaded?
             asmr::lowpass(fullAudio,nextCutoff,asmr::kOutputRate):
             std::vector<float>{};
@@ -1117,12 +1131,14 @@ int main(int argc,char** argv){
         SDL_ClearQueuedAudio(device);
         auto next=std::make_unique<FdtdRoom>(
             dx,*newHead,h!=2,speakerShape,zoomSteps[(size_t)z],
-            z==(int)zoomSteps.size()-1);
+            z==(int)zoomSteps.size()-1,physicalScale);
         next->uploadAudio(diagnosticTone?diagnosticAudio:newAudio);
         highQuality.reset();
         live=std::move(next);
-        const bool changedRoom=z!=zoomIndex;
+        const bool changedRoom=z!=zoomIndex ||
+                               physicalIndex!=physicsScaleIndex;
         headIndex=h;qualityIndex=q;zoomIndex=z;
+        physicsScaleIndex=physicalIndex;
         head=newHead;channels=h!=2;
         liveCutoff=nextCutoff;liveAudio=std::move(newAudio);
         gView=live->view();
@@ -1149,12 +1165,16 @@ int main(int argc,char** argv){
         std::fprintf(stderr,
             "[%s] ACTIVE head=%s Z=%.2fx%s Q=%d dx=%.3fmm "
             "room=%.3fx%.3fm cells=%dx%d expected FDTD "
-            "cell-work=%.1f%% of old 5mm full room.\n",
+            "cell-work=%.1f%% of old 5mm full room, "
+            "F11 %.0fx physical, dx %.2fmm, LP %.0fHz.\n",
             changed,h==0?"V2":h==1?"CHANNEL":"SIMPLE",
             zoomValue(),squareMode()?" SQUARE":"",qualityIndex,
             live->dx()*1000,gView.width,gView.height,
             live->nx(),live->ny(),
-            100.0f*asmr::relativeCellWork(live->dx(),gView));
+            100.0f*asmr::relativeCellWork(live->dx(),gView)/
+                physicsScaleValue(),
+            physicsScaleValue(),live->physicalDx()*1000,
+            liveCutoff);
         return true;
     };
 
@@ -1398,7 +1418,8 @@ int main(int argc,char** argv){
                     highQuality=std::make_unique<FdtdRoom>(
                         asmr::zoomDx(asmr::kOfflineDx,zoomIndex),
                         *head,channels,
-                        speakerShape,zoomValue(),squareMode());
+                        speakerShape,zoomValue(),squareMode(),
+                        physicsScaleValue());
                 highQuality->uploadAudio(fullAudio);
                 highQuality->setRenderTiming(job.selected.start,
                     (double)captureSeconds,true);
