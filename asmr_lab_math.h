@@ -17,10 +17,14 @@ constexpr float kMouthOffset=0.075f;
 constexpr float kHeadClearance=0.025f;
 constexpr float kMinimumSeparation=kHeadRadius+kArtistRadius+kHeadClearance;
 constexpr float kRoomClearance=kArtistRadius+0.025f;
-constexpr float kLiveDx=0.010f;    // low-cost live discovery, ~3.4kHz / 10 cells
-constexpr float kOfflineDx=0.0025f;// ~13.7kHz / 10 cells; 8-12kHz experiment
-constexpr float kLivePassband=2800.0f;
-constexpr float kOfflinePassband=12000.0f;
+constexpr float kLiveDx=0.005f;    // 400² cells / 6.86 kHz at 10 cells per wave
+constexpr float kMediumDx=0.008f;  // 250² cells, graceful fallback on weaker GPUs
+constexpr float kSafeDx=0.010f;    // original 200² low-power preview
+constexpr float kOfflineDx=0.002f;// 1000², 17.15kHz @ 10 cells per wave
+constexpr float kLivePassband=5500.0f;
+constexpr float kMediumPassband=4000.0f;
+constexpr float kSafePassband=2800.0f;
+constexpr float kOfflinePassband=15000.0f;
 constexpr int kOutputRate=48000;
 constexpr int kGraphBatch=126; // multiple of 3 for GPU field ring to repeat in a CUDA Graph
 constexpr float kOutsideReflection=0.32f;
@@ -41,6 +45,24 @@ inline Vec2 faceListener(Vec2 centre) {
 inline Vec2 mouth(Vec2 centre){
     return add(centre,scale(faceListener(centre),kMouthOffset));
 }
+// Source location is a continuous path through the world: smoothing
+// happens on the physics timeline, not by repeatedly moving backward
+// and forward within every GPU audio batch. The mouse's visual 1:1
+// position and collision geometry are unaffected. Source smoothing
+// removes motion-induced numerical zipper noise, not room echoes.
+inline Vec2 advanceSource(Vec2 current,Vec2 target,float dt,
+                          float responseSeconds=0.012f,
+                          float maxMetresPerSecond=2.25f) {
+    if(dt<=0.0f)return current;
+    const float alpha=1.0f-std::exp(-dt/responseSeconds);
+    Vec2 motion=scale(sub(target,current),alpha);
+    const float distance=length(motion);
+    const float maximum=maxMetresPerSecond*dt;
+    if(distance>maximum && distance>0.0f)
+        motion=scale(motion,maximum/distance);
+    return add(current,motion);
+}
+
 inline bool validArtist(Vec2 p) {
     return std::isfinite(p.x)&&std::isfinite(p.y)&&
         p.x>=kRoomClearance-1e-5f&&p.y>=kRoomClearance-1e-5f&&
