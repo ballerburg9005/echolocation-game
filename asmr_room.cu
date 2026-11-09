@@ -217,8 +217,11 @@ public:
                       const asmr::SvgSilhouette& head,
                       bool channels,
                       const asmr::SvgSilhouette& speaker,
-                      float zoom=1.0f,bool square=false):
-      dx_(resolution),dt_((float)asmr::stepSeconds(resolution)),
+                      float zoom=1.0f,bool square=false,
+                      float physicsScale=1.0f):
+      dx_(resolution),
+      dt_((float)asmr::physicalStepSeconds(resolution,physicsScale)),
+      physicsScale_(physicsScale),
       nx_((int)std::lround(
           asmr::roomView(zoom,square).width/resolution)),
       ny_((int)std::lround(
@@ -252,6 +255,16 @@ public:
                     head.widthMetres*1000,head.heightMetres*1000,
                     nx_,ny_,halfMicSeparation_*2000,dx_*1000,
                     dt_*1e6,view_.width,view_.height);
+        std::printf("[F11 PHYSICAL] room %.2fx%.2fm, "
+            "listener SVG %.1fx%.1fmm, mics %.1fmm apart, "
+            "real dx=%.2fmm, dt=%.2fus, scale=%.0fx; "
+            "grid remains %dx%d.\n",
+            view_.width*physicsScale_,view_.height*physicsScale_,
+            head.widthMetres*physicsScale_*1000,
+            head.heightMetres*physicsScale_*1000,
+            halfMicSeparation_*2000*physicsScale_,
+            dx_*physicsScale_*1000,dt_*1e6,
+            physicsScale_,nx_,ny_);
         const size_t size=mask.size()*sizeof(float);
         for(auto& p:fields_) {LAB_CUDA(cudaMalloc(&p,size));
                               LAB_CUDA(cudaMemset(p,0,size));}
@@ -365,8 +378,10 @@ public:
         LAB_CUDA(cudaMemcpy(pixels.data(),deviceImage_,
             pixels.size()*sizeof(uint32_t),cudaMemcpyDeviceToHost));
     }
-    float dx()const{return dx_;}
-    float dt()const{return dt_;}
+    float dx()const{return dx_;} // normalized coordinate cell
+    float physicalDx()const{return dx_*physicsScale_;}
+    float physicsScale()const{return physicsScale_;}
+    float dt()const{return dt_;} // real physical seconds at F11 scale
     asmr::RoomView view()const{return view_;}
     int nx()const{return nx_;}
     int ny()const{return ny_;}
@@ -387,7 +402,7 @@ public:
     FdtdRoom(const FdtdRoom&)=delete;
     FdtdRoom& operator=(const FdtdRoom&)=delete;
 private:
-    float dx_=0,dt_=0;
+    float dx_=0,dt_=0,physicsScale_=1;
     int nx_=0,ny_=0;
     asmr::RoomView view_{};
     float halfMicSeparation_=0,micYOffset_=0;
