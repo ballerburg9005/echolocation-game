@@ -3,6 +3,7 @@
 // independent ASMR experiment. CPU tests have no CUDA or SDL dependency.
 #include "acoustics.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -18,9 +19,9 @@ constexpr float kListenerY=kRoomHeightMetres/3.0f; // EXACT bottom third
 // These are explicitly user-specified experimental CHILD HEAD distances,
 // not a claim that every child has the same eardrum spacing.
 constexpr float kEardrumSeparation=0.080f; // previous 8cm experimental pair
-constexpr float kNewChannelMicSeparation=0.042f; // +/-21mm: inner cavity pair
+constexpr float kNewChannelMicSeparation=0.039f; // +/-19.5mm: inner cavity pair
 constexpr float kEarCanalLength=0.020f;
-constexpr float kChannelEarY=0.003f; // new circular-cavity mode, 3mm ABOVE head centre
+constexpr float kChannelEarY=0.002f; // inner cavity: 1mm DOWN from previous +3mm
 constexpr float kPinnaEarY=0.003f; // V2 stays 3mm ABOVE, unchanged
 
 constexpr float kOuterMicSeparation=
@@ -216,35 +217,49 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
         queuedTotalFrames-pendingFrames:0;
     return (double)(played%clipFrameCount)/sampleRate;
 }
-// Actual FDTD zoom: retain exactly the full-room cell budget and
-// shrink the PHYSICAL rectangular room around the listener. 1x is
-// unchanged. A 4x view has 4x finer dx and 1/4 room extents.
+// Five physical zooms, with deliberately smaller simulation volumes.
+// Solver cell-work per simulated second scales as area/dx^3; prior
+// same-cell-count zoom increased it *linearly* with zoom, causing
+// audible real-time underruns. These presets target 85%,81%,76%,72%
+// and 68% of the ORIGINAL full-size 5.00mm solver cell-work, while
+// genuinely refining the acoustic grid near the listener.
+// The final view is an actual 0.75m square; there is room to orbit
+// the head since its center has 0.375m to all four walls.
+constexpr std::array<float,5> kZoomSteps{1.00f,1.25f,1.55f,2.00f,2.6666667f};
+constexpr std::array<float,5> kZoomWorkRatios{0.85f,0.81f,0.76f,0.72f,0.68f};
+constexpr float kSquareRoomSide=0.75f;
 struct RoomView {
     float zoom=1, width=kRoomMetres,height=kRoomHeightMetres;
     float originX=0,originY=0;
 };
-// The last Z step is a TRUE physically square room, not a portrait
-// room stretched into the window. 1.80m side preserves enough clearance
-// for the speaking head to circle the stationary listener.
-constexpr float kSquareRoomSide=1.80f;
 inline RoomView roomView(float zoom=1.0f,bool square=false){
     if(square){
         return {zoom,kSquareRoomSide,kSquareRoomSide,
                 kListenerX-kSquareRoomSide*0.5f,
                 kListenerY-kSquareRoomSide*0.5f};
     }
-    // Do not permit old 2x/4x/8x acoustics to overload the GPU.
-    const float scale=std::clamp(zoom,1.0f,1.30f);
+    const float scale=std::clamp(zoom,1.0f,2.0f);
     const float width=kRoomMetres/scale;
     const float height=kRoomHeightMetres/scale;
     return {scale,width,height,kListenerX-width*0.5f,
             kListenerY-height/3.0f};
 }
-// Change square topology from 400x711 to ~533x533, still same
-// ~284k total cells, with a gentler 1.48x temporal workload.
-inline float squareDxFromBase(float baseDx){
-    return baseDx*kSquareRoomSide/
-           std::sqrt(kRoomMetres*kRoomHeightMetres);
+// Full-size baseline is the PREVIOUS 400x711 @5mm, not the more
+// expensive Q quality variants. Keep Q's relative dx factor, while
+// reducing its geometry workload by the same proportion at each Z.
+inline float zoomDx(float baseDx,int stage){
+    stage=std::clamp(stage,0,(int)kZoomSteps.size()-1);
+    const RoomView view=roomView(
+        kZoomSteps[(size_t)stage],stage==(int)kZoomSteps.size()-1);
+    const float fraction=(view.width*view.height)/
+                         (kRoomMetres*kRoomHeightMetres);
+    return baseDx*std::cbrt(fraction/kZoomWorkRatios[(size_t)stage]);
+}
+inline float relativeCellWork(float dx,RoomView view,
+                              float baselineDx=kLiveDx){
+    // Relative acoustic cell-updates/sec, ignoring fixed launch overhead.
+    return (view.width*view.height)/(kRoomMetres*kRoomHeightMetres)*
+           std::pow(baselineDx/dx,3.0f);
 }
 inline bool validArtistInView(Vec2 p,RoomView view){
     return validArtist(p) &&
