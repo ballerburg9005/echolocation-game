@@ -534,7 +534,7 @@ static void drawRoom(SDL_Renderer* renderer,
     asmr::Vec2 target, // exact mouse/keyboard target, not acoustic shape
     float progress,bool processing,bool playing,
     float playbackFraction,bool mouseMode,
-    SDL_Texture* waves,bool showPressure,
+    SDL_Texture* waves,bool showPressure,bool showSvgGuide,
     const asmr::SvgSilhouette& listenerShape,
     const asmr::SvgSilhouette& speakerShape,
     SDL_Texture* listenerTexture,SDL_Texture* speakerTexture,
@@ -585,18 +585,30 @@ static void drawRoom(SDL_Renderer* renderer,
                 screenX(record[i].centre.x),
                 screenY(record[i].centre.y));
     color(renderer,39,117,189);
-    // The pressure image ALREADY contains the real grid-rasterized
-    // stationary listener. Do not draw a second SVG over it: that
-    // makes two similar/aliased silhouettes look like a shifted head.
-    // When V is off, display the unmodified authored SVG instead.
-    if(!showPressure || !waves){
-        if(listenerTexture)
+    // Overlay the *authored* smooth SVG as a low-opacity co-registration
+    // guide, on top of the independent CUDA grid material. If a head
+    // is misregistered, pressing B makes the two outlines obvious
+    // instead of removing the author's drawing altogether.
+    if(listenerTexture){
+        const bool pressureVisible=showPressure && waves;
+        if(!pressureVisible || showSvgGuide){
+            SDL_SetTextureAlphaMod(listenerTexture,
+                pressureVisible?78:255);
             drawHeadSvg(renderer,listenerTexture,listenerShape,
                         asmr::listener(),0.0);
-        else
-            circle(renderer,screenX(asmr::kListenerX),
-                screenY(asmr::kListenerY),pixelsForMetres(asmr::kHeadRadius),true);
+            SDL_SetTextureAlphaMod(listenerTexture,255);
+        }
+    }else if(!showPressure || !waves){
+        circle(renderer,screenX(asmr::kListenerX),
+            screenY(asmr::kListenerY),pixelsForMetres(asmr::kHeadRadius),true);
     }
+    // Physical listener centre: matches where the CUDA SVG mask is
+    // stamped. The 2 microphone dots below are also world-registered.
+    color(renderer,245,239,195);
+    const int cx=screenX(asmr::kListenerX);
+    const int cy=screenY(asmr::kListenerY);
+    SDL_RenderDrawLine(renderer,cx-4,cy,cx+4,cy);
+    SDL_RenderDrawLine(renderer,cx,cy-4,cx,cy+4);
     color(renderer,105,203,252);
     circle(renderer,screenX(asmr::leftEar(channels,listenerShape.pinnaV2).x),
            screenY(asmr::leftEar(channels,listenerShape.pinnaV2).y),3,true);
@@ -761,6 +773,7 @@ static void printUsage(const char* executable){
         "                final 1.8m square fits full 360-degree movement\n"
         "                (fixed cell budget, up to ~1.48x timesteps)\n"
         "  V             Toggle pressure field visualization\n"
+        "  B             Toggle translucent original SVG on acoustic mask\n"
         "  9, 0          Decrease / increase pressure exposure\n"
         "  D             Toggle real-solver diagnostic chirp\n"
         "  T             Toggle live FDTD sound\n"
@@ -946,7 +959,7 @@ int main(int argc,char** argv){
     asmr::Vec2 artist{asmr::kListenerX+0.50f,asmr::kListenerY},
                 sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
-    bool showPressure=true;
+    bool showPressure=true,showSvgGuide=true;
     asmr::RoomView lastPlaybackView=asmr::roomView();
     uint64_t lastWaveRefresh=0; // 30Hz signed-pressure display; never audio
     float pressureExposure=1.0f;
@@ -988,7 +1001,7 @@ int main(int argc,char** argv){
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload selected MP3, D FDTD test chirp, T toggle live, "
        "H V2/channel/simple, Q quality, Z 1/1.08/1.16/1.30/square, "
-       "V pressure waves, 9/0 exposure, "
+       "V pressure waves, B authored mask guide, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
        "offline dx=%.1fmm ~%.0fHz with %.0fHz input lowpass.\n",
@@ -1025,6 +1038,7 @@ int main(int argc,char** argv){
             if(key==SDLK_F7||key==SDLK_2)captureSeconds=20;
             if(key==SDLK_l)reload=true;
             if(key==SDLK_v)showPressure=!showPressure;
+            if(key==SDLK_b)showSvgGuide=!showSvgGuide;
             if(key==SDLK_9)pressureExposure=std::max(
                 0.025f,pressureExposure/1.4f);
             if(key==SDLK_0)pressureExposure=std::min(
@@ -1605,7 +1619,7 @@ int main(int argc,char** argv){
         drawRoom(renderer,visibleTrail,visibleArtist,visibleSource,
                  artist,progress,mode==Mode::Render,mode==Mode::Playback,
                  lastWindow>0?(float)(playbackPhase/lastWindow):0.0f,
-                 mouseMode,displayedWaves,showPressure,
+                 mouseMode,displayedWaves,showPressure,showSvgGuide,
                  *head,speakerShape,
                  headIndex==0?pinnaV2Sprite:
                      headIndex==1?channelsSprite:simpleSprite,
