@@ -535,8 +535,12 @@ int main(int argc,char** argv){
        "High-quality 20s processing may take substantial GPU time.\n");
     while(!quit) {
         const uint64_t currentCounter=SDL_GetPerformanceCounter();
-        const float frameDt=(float)std::clamp(
-            (currentCounter-lastFrame)/perfFrequency,0.0,0.05);
+        // The recorded path has to follow REAL wall time even if GPU
+        // preview frames lag. Only input movement distance uses the
+        // capped delta, to avoid collision tunnelling after stalls.
+        const double wallSeconds=std::max(0.0,
+            (currentCounter-lastFrame)/perfFrequency);
+        const float frameDt=(float)std::min(0.05,wallSeconds);
         lastFrame=currentCounter;
         SDL_Event event;
         int captureSeconds=0;
@@ -640,7 +644,7 @@ int main(int argc,char** argv){
                 artist=asmr::moveArtist(artist,
                     {artist.x+dx,artist.y+dy});
             }
-            recordingClock+=frameDt;
+            recordingClock+=wallSeconds;
             record.push_back({recordingClock,artist});
             // Maintain an uninterrupted 60s circular time history.
             while(record.size()>2 &&
