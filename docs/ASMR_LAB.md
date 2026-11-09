@@ -155,7 +155,15 @@ the default input.
 
 Playback begins only after the full offline calculation finishes.
 The next loop copy is queued into SDL **before** the current copy
-runs out; audio playback does not wait for a CUDA kernel. The
+runs out; audio playback does not wait for a CUDA kernel.
+
+During the offline render, 24 frames/second of the **actual CUDA
+pressure field** are also saved at a reduced 256×256 *display-only*
+resolution. During looping replay, SDL's consumed audio-frame count
+advances these snapshots in sync with the animated speaker. This
+eliminates the old frozen final-pressure image in playback without
+changing the 1.5mm FDTD simulation, 48kHz stereo buffer, or MP3 input.
+The snapshots are a visual record; no sound is synthesized from them. The
 visible artist SVG follows the recorded path again, the bottom
 playhead counts each exact loop, and the title shows elapsed/
 total seconds. Press **Space** to leave looping playback.
