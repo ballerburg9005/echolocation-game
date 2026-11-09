@@ -56,12 +56,16 @@ constexpr float kLowestPassband=2800.0f;
 constexpr float kOfflinePassband=16000.0f; // below 17.15kHz 10-cell limit
 constexpr int kOutputRate=48000;
 constexpr int kGraphBatch=126; // multiple of 3 for GPU field ring to repeat in a CUDA Graph
+constexpr float kHeadReflection=0.74f;
 constexpr float kOutsideReflection=0.82f;
 constexpr float kPortMaterial=5.0f;
 constexpr float kPortReflection=0.035f;
 // This ASMR-specific impedance leaves the original arcade's wall
 // physics untouched. All materials use the same 5-point stencil.
-ECHO_HD inline float boundaryDamping(float left,float right,
+#ifdef __CUDACC__
+__host__ __device__
+#endif
+inline float boundaryDamping(float left,float right,
                                      float below,float above){
     const float values[4]{left,right,below,above};
     int head=0,wall=0,port=0;
@@ -75,7 +79,6 @@ ECHO_HD inline float boundaryDamping(float left,float right,
            echo::wallDamping(kOutsideReflection,echo::kCourant,wall)+
            echo::wallDamping(kPortReflection,echo::kCourant,port);
 }
-constexpr float kHeadReflection=0.74f;
 
 struct Vec2 {float x=0,y=0;};
 struct PathPoint {double t=0; Vec2 centre;};
