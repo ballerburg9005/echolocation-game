@@ -253,22 +253,24 @@ static bool loadSourceAudio(const std::string& filename,
     return true;
 }
 
+// GPU source positions are tracked continuously across ALL batches.
+// The old preview swept previousMouse->currentMouse AGAIN for EACH
+// batch (around 50 times per frame), audibly adding zipper/hiss artifacts.
+// The artist remains 1:1 under the cursor; only its physical mouth
+// pressure source is smoothly motion-limited through simulation time.
 static std::array<float2,asmr::kGraphBatch> mouthBatch(
     const std::vector<asmr::PathPoint>& track,double start,
     double dt,uint64_t baseStep,float dx,
-    const asmr::Vec2 liveFrom,const asmr::Vec2 liveTo,bool offline){
+    asmr::Vec2& physicalSource,const asmr::Vec2& liveTarget,
+    bool offline) {
     std::array<float2,asmr::kGraphBatch> result{};
-    for(int k=0;k<asmr::kGraphBatch;++k){
+    for(int k=0;k<asmr::kGraphBatch;++k) {
         const double elapsed=(double)(baseStep+(uint64_t)k)*dt;
-        asmr::Vec2 centre;
-        if(offline)
-            centre=asmr::interpolate(track,start+elapsed);
-        else {
-            const float alpha=(float)(k+1)/asmr::kGraphBatch;
-            centre=asmr::add(asmr::scale(liveFrom,1-alpha),
-                             asmr::scale(liveTo,alpha));
-        }
-        const auto m=asmr::mouth(centre);
+        const asmr::Vec2 target=offline?
+            asmr::interpolate(track,start+elapsed):liveTarget;
+        physicalSource=asmr::advanceSource(
+            physicalSource,target,(float)dt,0.012f,2.25f);
+        const auto m=asmr::mouth(physicalSource);
         result[k]=make_float2(m.x/dx-0.5f,m.y/dx-0.5f);
     }
     return result;
@@ -426,6 +428,7 @@ struct RenderJob {
     int window=0;
     uint64_t current=0,total=0;
     std::vector<float> samples;
+    asmr::Vec2 sourceCursor{};
     std::unique_ptr<echo::StereoLinearResampler> resampler;
 };
 enum class Mode {Preview,Render,Playback};
@@ -580,6 +583,8 @@ int main(){
                 highQuality->reset();
                 job.window=captureSeconds;
                 job.current=0;
+                job.sourceCursor=asmr::interpolate(
+                    job.selected.points,job.selected.start);
                 job.total=(uint64_t)std::ceil(
                     (job.selected.duration+0.22)/highQuality->dt());
                 job.samples.clear();
@@ -657,7 +662,7 @@ int main(){
                 const auto sources=mouthBatch(
                     job.selected.points,job.selected.start,
                     highQuality->dt(),job.current,
-                    highQuality->dx(),artist,artist,true);
+                    highQuality->dx(),job.sourceCursor,artist,true);
                 const auto samples=highQuality->process(
                     sources,job.current);
                 const uint64_t count=std::min(
