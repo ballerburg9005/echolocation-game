@@ -1095,12 +1095,30 @@ int main(int argc,char** argv){
         diagnosticAudio[i]=(float)(0.18*env*env*std::sin(phase));
     }
     bool diagnosticTone=false;
+    // Seeded, loopable broadband external environmental test signal.
+    // N passes this through FOUR distinct FDTD emitters, not through
+    // an output EQ, fake stereo panner, or injected mic noise.
+    std::vector<float> ambientNoise((size_t)asmr::kOutputRate*
+                                   asmr::kAmbientNoiseSeconds);
+    uint32_t noiseSeed=0x7B4D9E31u;
+    float lowNoise=0.0f;
+    for(float& sample:ambientNoise){
+        noiseSeed^=noiseSeed<<13;
+        noiseSeed^=noiseSeed>>17;
+        noiseSeed^=noiseSeed<<5;
+        const float white=2.0f*(noiseSeed/4294967296.0f)-1.0f;
+        lowNoise=0.986f*lowNoise+0.014f*white;
+        sample=0.10f*(0.84f*white+0.16f*lowNoise);
+    }
+    bool ambientEnabled=false;
 
     auto live=std::make_unique<FdtdRoom>(
         liveDx(),*head,channels,speakerShape,
         zoomValue(),squareMode(),physicsScaleValue());
     gView=live->view();
     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
+    live->uploadAmbient(asmr::lowpass(
+        ambientNoise,liveCutoff,asmr::kOutputRate),ambientEnabled);
     std::unique_ptr<FdtdRoom> highQuality;
     echo::StereoLinearResampler liveResampler(live->dt(),
                                                 asmr::kOutputRate);
@@ -1220,7 +1238,10 @@ int main(int argc,char** argv){
         const auto preparedDiagnostic=diagnosticTone?
             asmr::lowpass(diagnosticAudio,nextCutoff,asmr::kOutputRate):
             std::vector<float>{};
-        next->uploadAudio(diagnosticTone?preparedDiagnostic:newAudio);
+        next->uploadAudio(ambientEnabled?std::vector<float>{}:
+            diagnosticTone?preparedDiagnostic:newAudio);
+        next->uploadAmbient(asmr::lowpass(
+            ambientNoise,nextCutoff,asmr::kOutputRate),ambientEnabled);
         highQuality.reset();
         live=std::move(next);
         const bool changedRoom=z!=zoomIndex ||
@@ -1237,7 +1258,7 @@ int main(int argc,char** argv){
             live->dt(),asmr::kOutputRate);
         previewFadeFrames=0;
         primeAudioAfterSwitch=previewEnabled&&
-                              (waveLoaded||diagnosticTone);
+                              (waveLoaded||diagnosticTone||ambientEnabled);
         if(!primeAudioAfterSwitch)SDL_PauseAudioDevice(device,0);
         if(changedRoom){
             recordingClock=0.0;record.clear();
@@ -1342,7 +1363,8 @@ int main(int argc,char** argv){
                             playbackPhase*asmr::kOutputRate)));
                     auto updated=distanceShapedClip(lastPlaybackBase,
                         lastPlaybackPhysicalPath,channels,head->pinnaV2,
-                        strength,physicsScaleValue());
+                        ambientEnabled?0:strength,
+                        physicsScaleValue());
                     std::vector<float> tail(
                         updated.begin()+2*atFrame,updated.end());
                     // An instantaneous change of exponent otherwise
@@ -1415,6 +1437,10 @@ int main(int argc,char** argv){
                     asmr::lowpass(diagnosticAudio,liveCutoff,
                                   asmr::kOutputRate):
                     std::vector<float>{};
+                if(ambientEnabled){
+                    ambientEnabled=false;
+                    live->setAmbientEnabled(false);
+                }
                 live->uploadAudio(diagnosticTone?
                     filteredDiagnostic:liveAudio);
                 live->reset();previewStep=0;sourceCursor=artist;
@@ -1518,8 +1544,10 @@ int main(int argc,char** argv){
                 asmr::lowpass(diagnosticAudio,liveCutoff,
                               asmr::kOutputRate):
                 std::vector<float>{};
-            live->uploadAudio(diagnosticTone?filteredDiagnostic:liveAudio);
-            if(highQuality)highQuality->uploadAudio(fullAudio);
+            live->uploadAudio(ambientEnabled?std::vector<float>{}:
+                diagnosticTone?filteredDiagnostic:liveAudio);
+            if(highQuality)highQuality->uploadAudio(
+                ambientEnabled?std::vector<float>{}:fullAudio);
             if(mode==Mode::Preview){
                 live->reset();previewStep=0;
                 sourceCursor=artist;
@@ -1531,7 +1559,8 @@ int main(int argc,char** argv){
         if(captureSeconds>0) {
             const double now=record.empty()?0:record.back().t;
             job.selected=asmr::selectLast(record,now,captureSeconds);
-            if(job.selected.duration<0.15||!waveLoaded){
+            if(job.selected.duration<0.15||
+               (!waveLoaded&&!ambientEnabled)){
                 std::fprintf(stderr,
                     "[RENDER] Need >=0.15 seconds of path AND readable %s.\n",
                     filename.c_str());
@@ -1550,7 +1579,11 @@ int main(int argc,char** argv){
                         highQuality->physicalDx()));
                 const auto offlineAudio=asmr::lowpass(
                     fullAudio,offlineCutoff,asmr::kOutputRate);
-                highQuality->uploadAudio(offlineAudio);
+                highQuality->uploadAudio(
+                    ambientEnabled?std::vector<float>{}:offlineAudio);
+                highQuality->uploadAmbient(
+                    asmr::lowpass(ambientNoise,offlineCutoff,
+                                  asmr::kOutputRate),ambientEnabled);
                 std::printf("[F11 OFFLINE] physical dx %.2fmm, "
                     "band-limited MP3 to %.0fHz, F11 %gx.\n",
                     highQuality->physicalDx()*1000,offlineCutoff,
@@ -1619,7 +1652,8 @@ int main(int argc,char** argv){
                   record[1].t<recordingClock-60.0)
                 record.erase(record.begin());
 
-            if(previewEnabled&&(waveLoaded||diagnosticTone)){
+            if(previewEnabled&&
+               (waveLoaded||diagnosticTone||ambientEnabled)){
                 const int queuedFrames=(int)(
                     SDL_GetQueuedAudioSize(device)/(2*sizeof(float)));
                 if(previewStep>0 && queuedFrames<24)
@@ -1667,12 +1701,12 @@ int main(int argc,char** argv){
                         asmr::length(asmr::sub(physicalMouth,
                             asmr::leftEar(channels,head->pinnaV2)))*
                             physicsScaleValue(),
-                        falloffStrength());
+                        ambientEnabled?0:falloffStrength());
                     const float falloffR=asmr::distanceFalloffGain(
                         asmr::length(asmr::sub(physicalMouth,
                             asmr::rightEar(channels,head->pinnaV2)))*
                             physicsScaleValue(),
-                        falloffStrength());
+                        ambientEnabled?0:falloffStrength());
                     for(int n=0;n<asmr::kGraphBatch;++n)
                         liveResampler.push(
                             audio[n*2]*falloffL,
@@ -1771,7 +1805,8 @@ int main(int argc,char** argv){
                 lastPlaybackBase=job.samples;
                 job.samples=distanceShapedClip(lastPlaybackBase,
                     job.physicalPath,channels,head->pinnaV2,
-                    falloffStrength(),physicsScaleValue());
+                    ambientEnabled?0:falloffStrength(),
+                    physicsScaleValue());
                 char soundPath[80],trackPath[80];
                 std::snprintf(soundPath,sizeof(soundPath),
                               "asmr_last_%02ds.wav",job.window);
@@ -1916,7 +1951,7 @@ int main(int argc,char** argv){
         // target while the CUDA impedance silhouette still occupies
         // the smoothed source position. They must coincide.
         const bool livePhysicsActive=previewEnabled&&
-                                     (waveLoaded||diagnosticTone);
+                      (waveLoaded||diagnosticTone||ambientEnabled);
         const asmr::Vec2 visibleArtist=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
             asmr::interpolate(lastPlaybackPhysicalPath,playbackPhase):
