@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <queue>
 #include <string>
 #include <vector>
 
@@ -112,6 +113,42 @@ inline std::vector<float> svgRoomMask(int n,float dx,
                     const SvgSilhouette& listenerSvg){
     return svgRoomMask(n,n,dx,listenerSvg);
 }
+// A valid microphone must sample AIR connected to the room, not a
+// sealed groove that appears blue/empty but cannot receive sound.
+// Rasterizing a thin user-authored ear channel can close its neck at
+// coarse dx; do not carve the SVG or accept a silent disconnected mic.
+inline bool microphoneConnectedToRoom(const std::vector<float>& mask,
+                         int nx,int ny,float dx,Vec2 mic) {
+    if(mask.size()!=(size_t)nx*ny || nx<8 || ny<8)return false;
+    const int exterior=(ny/4)*nx+nx/4;
+    if(mask[(size_t)exterior]!=0.0f)return false;
+    const float gx=mic.x/dx-0.5f,gy=mic.y/dx-0.5f;
+    const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
+    if(ix<2||iy<2||ix+1>=nx-2||iy+1>=ny-2)return false;
+    std::vector<unsigned char> seen(mask.size(),0);
+    std::queue<int> queue;
+    // Start in whichever parts of the MIC'S 2x2 sample footprint
+    // contribute actual air pressure, not an arbitrarily chosen cell.
+    for(int oy=0;oy<2;++oy)for(int ox=0;ox<2;++ox){
+        const int id=(iy+oy)*nx+ix+ox;
+        if(mask[(size_t)id]!=0.0f)continue;
+        const float weight=(1.0f-std::fabs(gx-(ix+ox)))*
+                           (1.0f-std::fabs(gy-(iy+oy)));
+        if(weight<=0.001f)continue;
+        seen[(size_t)id]=1;queue.push(id);
+    }
+    while(!queue.empty()){
+        const int v=queue.front();queue.pop();
+        if(v==exterior)return true;
+        for(int offset:{-1,1,-nx,nx}){
+            const int to=v+offset;
+            if(to<0||to>=nx*ny||seen[(size_t)to]||
+               mask[(size_t)to]!=0.0f)continue;
+            seen[(size_t)to]=1;queue.push(to);
+        }
+    }
+    return false;
+}
 // V2 microphones sit farther out in the actual 12.4cm-separated
 // pinna recess air, with no carved artificial tunnel. The separate
 // inner-channel model keeps the original 8cm eardrum target.
@@ -143,7 +180,9 @@ inline bool validateMicrophones(const std::vector<float>& mask,int nx,int ny,
         }
         return airWeights>(svg.pinnaV2?0.98f:0.20f);
     };
-    return check(left)&&check(right);
+    return check(left)&&check(right) &&
+        microphoneConnectedToRoom(mask,nx,ny,dx,left) &&
+        microphoneConnectedToRoom(mask,nx,ny,dx,right);
 }
 inline bool validateMicrophones(const std::vector<float>& mask,int n,
                         float dx,bool channel,const SvgSilhouette& svg){
