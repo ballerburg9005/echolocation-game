@@ -431,27 +431,41 @@ public:
         const size_t bytes=(size_t)nx_*ny_*sizeof(float);
         for(auto& p:fields_)LAB_CUDA(cudaMemset(p,0,bytes));
     }
-    void uploadAudio(const std::vector<float>& source){
-        sourcePCM_=source; // full decoded track remains in host memory
+    void uploadAudio(const std::vector<float>& source,float cutoffHz){
+        // Reference the long-lived decoded song/diagnostic source;
+        // never copy a 20-minute (230MB) MP3 into each FDTD room.
+        sourcePCM_=&source;
+        sourceCutoffHz_=cutoffHz;
         cachedStart_=UINT64_MAX;
-        ensureAudioWindow(0.0);
+        ensureAudioWindow(audioTimeOrigin_);
     }
     void ensureAudioWindow(double seconds){
-        const uint64_t total=(uint64_t)sourcePCM_.size();
-        const uint64_t start=asmr::mp3WindowStart(seconds,total);
+        const uint64_t total=sourcePCM_?
+            (uint64_t)sourcePCM_->size():0;
+        const uint64_t logical=asmr::mp3WindowStart(seconds,total);
+        // The 58-second window boundary must NOT be a filter reset
+        // audible at precisely 58s. Prime the 4th-order IIR with
+        // one second of earlier input; its actual samples at 58s
+        // then have a settled filter state.
+        const uint64_t preroll=(uint64_t)asmr::kOutputRate;
+        const uint64_t start=logical>=preroll?
+            logical-preroll:0;
         if(cachedStart_==start)return;
         const int frames=(int)std::min(
             total,asmr::kMp3WindowFrames);
         const int amount=frames>0?frames+1:0;
-        // Add the first sample of the NEXT part as an interpolation
-        // guard. Wrap at true MP3 EOF, never at 60s cache boundaries.
         if(frames>0){
-            stagingPCM_.resize((size_t)amount);
+            std::vector<float> samples((size_t)amount);
             for(int i=0;i<amount;++i)
-                stagingPCM_[(size_t)i]=sourcePCM_[
+                samples[(size_t)i]=(*sourcePCM_)[
                     (size_t)((start+(uint64_t)i)%total)];
-            LAB_CUDA(cudaMemcpy(deviceAudio_,stagingPCM_.data(),
-                stagingPCM_.size()*sizeof(float),
+            // O(N) and ONLY for 60s of audio: no 20-minute FIR
+            // prefilter, no 20-minute processing per H/Z/F11 change.
+            samples=asmr::lowpassSourceWindow(
+                std::move(samples),sourceCutoffHz_,
+                asmr::kOutputRate);
+            LAB_CUDA(cudaMemcpy(deviceAudio_,samples.data(),
+                samples.size()*sizeof(float),
                 cudaMemcpyHostToDevice));
         }
         LAB_CUDA(cudaMemcpy(deviceAudioFrames_,&amount,sizeof(int),
@@ -463,10 +477,11 @@ public:
         cachedStart_=start;
         if(total>asmr::kMp3WindowFrames)
             std::fprintf(stderr,
-                "[MP3 STREAM] GPU cache %.1f-%.1fs / %.1fs full song.\n",
+                "[MP3 STREAM] Filtered/cache %.1f-%.1fs / %.1fs "
+                "complete track at %.0fHz.\n",
                 (double)start/asmr::kOutputRate,
                 (double)(start+(uint64_t)frames)/asmr::kOutputRate,
-                (double)total/asmr::kOutputRate);
+                (double)total/asmr::kOutputRate,sourceCutoffHz_);
     }
     void uploadAmbient(const std::vector<float>& pcm,bool enabled){
         const int amount=(int)std::min(pcm.size(),
@@ -561,7 +576,8 @@ private:
     float* deviceOutput_=nullptr;
     int* deviceAudioFrames_=nullptr;
     uint64_t* deviceAudioStart_=nullptr,*deviceAudioTotal_=nullptr;
-    std::vector<float> sourcePCM_,stagingPCM_;
+    const std::vector<float>* sourcePCM_=nullptr;
+    float sourceCutoffHz_=19000.0f;
     uint64_t cachedStart_=UINT64_MAX;
     double audioTimeOrigin_=0.0;
     float* deviceAmbientPCM_=nullptr;
