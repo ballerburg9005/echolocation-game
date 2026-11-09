@@ -128,31 +128,47 @@ cell-updates per acoustic second are as follows:
 | 1.00× | 2.00 × 3.56 m | ~5.28 mm | **85%** |
 | 1.25× | 1.60 × 2.84 m | ~4.62 mm | **81%** |
 | 1.55× | 1.29 × 2.29 m | ~4.09 mm | **76%** |
-| 2.00× | 1.00 × 1.78 m | ~3.51 mm | **72%** |
-| Square | 0.75 × 0.75 m | ~2.44 mm | **68%** |
+| 2.00× | 1.00 × 1.78 m | ~3.58 mm | **68.4%** |
+| Square | 0.75 × 0.75 m | ~3.31 mm | **27.2%** |
 
 All percentages compare against the former full-size 400×711,
-5.00mm live solver. The base stage saves approximately 15% of
-grid cell-updates, and the closest stage saves **a further 20%
-relative to that already-reduced baseline**. This is a computational
-estimate from *area/dx³*, not a claim that GPU wall-clock time,
-kernel scheduling overhead, or power draw decreases by exactly
-those percentages. At the close-up stage the physical head has
-roughly twice as many acoustic grid points across its outline,
-even though the total number of room cells is smaller.
+5.00mm live solver. The second-last stage reduces its previous
+72% work target by **5%** (to 68.4%). The square stage now
+reduces its previous 68% work target by **60%** (to 27.2%
+of the original solver work). These targets derive from
+*area/dx³*, not measured GPU power or elapsed kernel times.
+The square view is still a true close-up of a 0.75m room,
+but its acoustic dx is 3.31mm rather than 2.44mm and its
+grid is approximately 226×226 cells. Consequently some
+fine-wave detail is sacrificed to meet the substantially
+lower compute target.
 
-**H and Z are independent.** H requests the next authored listener
-and never modifies Z; Z changes the acoustic room only and never
-modifies H. Q likewise preserves both. An invalid microphone
-placement is refused at its current grid, with an explicit
-console message and no hidden substitute model. Z skips
-incompatible grid stages but keeps the current head. Therefore,
-if the channel cavity is sealed at the largest room, select V2
-with H before returning to 1.00×. Rebuilding CUDA geometry
-pauses SDL audio until a newly computed 160ms queue is ready;
-a 50ms signal fade reduces audible reset clicks. The CUDA batch
-limit scales with the acoustic timestep so close-up modes can
-actually refill their output queue. Offline WAV replay still
+**H and Z now use a single, predictable navigation state.**
+H always advances exactly one listener model, Z advances exactly
+one zoom level, and Q cycles grid quality. Each preserves the
+other two dimensions. **Shift+H, Shift+Z and Shift+Q reverse the
+respective cycle.** The currently selected model and zoom are
+visible in the window title. If any combination is invalid, the
+attempt is rejected without mutating the selection, and a
+visible four-second title message explains why.
+
+The inner-ear channel retains its real small cavity and narrow
+SVG-authored throat. At coarse dx, simple center-point rasterizing
+sealed that throat and disabled H/Z modes. We now find an actual
+connected pathway through transparent pixels of the authored
+0.4mm SVG raster and project it as a **one-cell-wide, subgrid
+topology-preserving airway** onto the coarser FDTD mask.
+The drawing itself is left byte-for-byte unchanged, and no
+new straight tunnel is added. This is an approximation: a very
+narrow physical canal becomes at least one full coarse FDTD
+cell wide, so its transmission is not quantitatively reliable.
+**CPU tests verify that both ear-channel microphones can receive
+sound through an open path at all five zoom levels.**
+
+Rebuilding CUDA geometry pauses SDL audio until a newly computed
+160ms queue is ready; a 50ms signal fade reduces audible reset
+clicks. The CUDA batch limit scales with timestep size so
+close-up modes can refill their output queue. Offline WAV replay
 uses the matching physical geometry and its own finer mesh.
 
 The outer walls now reflect sound with an approximate **R=0.82**
@@ -199,18 +215,17 @@ coarse a resolution, the program refuses a microphone position that
 cannot sample air reliably **or whose sampled air is isolated from the
 outside room**. User-edited SVG necks can seal when rasterized at
 5mm or another dx; press Q for a finer grid or inspect the SVG path.
-We do not delete material to fake a connected ear channel.
-**H** advances deterministically through V2 → CHANNEL → SIMPLE,
-but changes only the listener model. If a proposed head cannot
-sample air connected to the room at the current grid spacing,
-it remains unchanged and prints **[H] REFUSED**; press H again
-to try the next head, or change Q/Z explicitly. Conversely, Z
-never changes the head: it skips incompatible grid stages and
-leaves the currently selected SVG untouched. Thin SVG grooves
-can rasterize as connected at some dx values but not others,
-so finer resolution does not guarantee monotonic connectivity.
-The terminal's **[SVG LOAD]** prints the exact SVG path opened,
-and **[H] ACTIVE** prints the actual selected model.
+The unchanged SVG is the source for both high-resolution artwork
+and the FDTD mask. The narrow ear channel uses a topology-preserving
+subgrid rasterization only when required at coarse dx, with no
+fabricated direct tunnel: every reopened FDTD cell must intersect
+air from an actually connected transparent SVG path.
+All five default-Q zooms support CHANNEL, including the original
+full-size room and the square close-up. H/Z never silently substitute
+a different head or zoom, and impossible alternative Q settings
+provide an explicit visible error message.
+The terminal's **[SVG LOAD]** prints the original SVG path opened,
+and **[H]/[Z] ACTIVE** print the actual model and room.
 
 Press **H** in live mode to cycle the alternative geometries:
 `listener_v2.svg` (default), `listener_with_ear_channel.svg`, and
@@ -313,9 +328,9 @@ solver or audio; the numerical room scale is still auditable.
 | V | Toggle the **actual CUDA pressure-wave visualization** |
 | B | Toggle semi-transparent authored SVG over FDTD head mask to audit alignment |
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
-| H | V2 → CHANNEL → SIMPLE, leaves zoom unchanged; invalid mics are refused |
-| Q | Cycle real-time acoustic grid resolution |
-| Z | Real acoustic zoom: **1× / 1.25× / 1.55× / 2× / 0.75m square**; retains H |
+| H / Shift+H | Next / previous listener: V2 → CHANNEL → SIMPLE; retains zoom |
+| Q / Shift+Q | Next / previous compatible acoustic grid quality |
+| Z / Shift+Z | Next / previous real zoom: **1× / 1.25× / 1.55× / 2× / 0.75m square**; retains H |
 | F5 / 5 | Render and then **loop exactly 5 s** |
 | F6 / 1 | Render and then **loop exactly 10 s** |
 | F7 / 2 | Render and then **loop exactly 20 s** |
@@ -387,7 +402,7 @@ raw signed pressure with adjustable exposure.
 - The GPU load must be benchmarked in actual runtime, not inferred
   from its board's wattage. This version deliberately shrinks the
   FDTD grid domain as zoom increases: the estimated
-  85%/81%/76%/72%/68% relative cell-update budgets do not include
+  85%/81%/76%/68.4%/27.2% relative cell-update budgets do not include
   CUDA graph launch overhead, visualization transfer time, or driver
   scheduling. Offline processing can still be slower than real time,
   but the completed audio plays at its requested 48kHz sample rate.
