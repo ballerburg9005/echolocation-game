@@ -83,10 +83,18 @@ int main(){
             assert(std::isfinite(work));
             assert(nx>=40&&ny>=40&&nx<=baseNx&&ny<=baseNy);
             const float expectedRatio=physical<1?
-                asmr::kSmallRoomWorkFraction*
-                std::pow(1.0f/1.01f,3.0f):1.0f/physical;
+                asmr::kSmallRoomWorkFraction/
+                std::pow(asmr::kSmallRoomRasterGuard,3.0f):
+                1.0f/physical;
             assert(std::fabs(work-baseWork*expectedRatio)
                    <baseWork*0.001f);
+            if(physical<1.0f){
+                // Previous small-world preset used 1.01x raster
+                // guard and full baseline work. Require >=40% cut.
+                const float previousWork=baseWork/
+                    (1.01f*1.01f*1.01f);
+                assert(work<=previousWork*0.6001f);
+            }
             if(physical<1){
                 assert(factor>1.0f&&nx<baseNx&&ny<baseNy);
             }else{
