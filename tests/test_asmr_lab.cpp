@@ -9,6 +9,32 @@ int main(){
                   "CUDA graph must preserve triple-buffer identity");
     assert(asmr::cells(asmr::kLiveDx)==400);
     assert(asmr::cellsY(asmr::kLiveDx)==711);
+    // Zoom refines dx and shrinks physical room on both axes while
+    // keeping the exact same 400x711 CUDA pressure-field buffer.
+    for(float zoom:{1.0f,2.0f,4.0f,6.0f,8.0f}){
+        const auto view=asmr::roomView(zoom);
+        const float dx=asmr::kLiveDx/zoom;
+        assert(asmr::cells(dx*zoom)==400);
+        assert(asmr::cellsY(dx*zoom)==711);
+        assert(std::fabs(view.width*zoom-asmr::kRoomMetres)<1e-5f);
+        assert(std::fabs(view.height*zoom-asmr::kRoomHeightMetres)<1e-5f);
+        assert(std::fabs((asmr::kListenerX-view.originX)/view.width-0.5f)<1e-5f);
+        assert(std::fabs((asmr::kListenerY-view.originY)/view.height-1.0f/3)<1e-5f);
+        const asmr::Vec2 nearFront{asmr::kListenerX,
+            asmr::kListenerY+asmr::kMinimumSeparation+0.002f};
+        assert(asmr::validArtistInView(nearFront,view));
+        const auto clamped=asmr::restrictCentreInView(
+            {asmr::kListenerX,asmr::kListenerY},view);
+        assert(asmr::validArtistInView(clamped,view));
+    }
+    assert(std::fabs(asmr::micSpacing(true)-0.042f)<1e-6f);
+    assert(std::fabs(asmr::micOffsetY(true)-(-0.007f))<1e-6f);
+    assert(std::fabs(asmr::micOffsetY(true,true)-0.003f)<1e-6f);
+    // Reflecting walls lose less pressure than the three door slots.
+    assert(asmr::kOutsideReflection>0.78f);
+    assert(asmr::kPortReflection<0.05f);
+    assert(asmr::boundaryDamping(asmr::kPortMaterial,0,0,0)>
+           asmr::boundaryDamping(echo::kOuterBoundaryMaterial,0,0,0));
     // Aspect conversion preserves total live cells within 0.2%.
     assert(std::abs(asmr::cells(asmr::kLiveDx)*
                 asmr::cellsY(asmr::kLiveDx)-533*533)<600);
