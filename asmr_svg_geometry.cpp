@@ -86,10 +86,12 @@ std::string svgLocation(const char* filename) {
     return std::string("asmr_shapes/")+filename;
 }
 SvgSilhouette listenerSilhouette(HeadStyle style){
-    SvgSilhouette shape=renderSvg(svgLocation(
-        style==HeadStyle::Channels?
-        "listener_with_ear_channel.svg":"listener.svg"));
-    shape.channels=style==HeadStyle::Channels;
+    const char* filename=style==HeadStyle::PinnaV2?"listener_v2.svg":
+                         style==HeadStyle::Channels?
+                         "listener_with_ear_channel.svg":"listener.svg";
+    SvgSilhouette shape=renderSvg(svgLocation(filename));
+    shape.channels=style!=HeadStyle::Simple;
+    shape.pinnaV2=style==HeadStyle::PinnaV2;
     return shape;
 }
 SvgSilhouette speakerSilhouette(){
