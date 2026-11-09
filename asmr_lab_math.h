@@ -17,9 +17,10 @@ constexpr float kListenerY=kRoomHeightMetres/3.0f; // EXACT bottom third
 // Leaves 1/3 (1.19m) behind and 2/3 (2.37m) in front (+Y).
 // These are explicitly user-specified experimental CHILD HEAD distances,
 // not a claim that every child has the same eardrum spacing.
-constexpr float kEardrumSeparation=0.080f;
+constexpr float kEardrumSeparation=0.080f; // previous 8cm experimental pair
+constexpr float kNewChannelMicSeparation=0.042f; // +/-21mm: inner cavity pair
 constexpr float kEarCanalLength=0.020f;
-constexpr float kChannelEarY=0.003f; // exact SVG groove sits 3mm above centre
+constexpr float kChannelEarY=-0.007f; // 7mm below central horizontal axis
 
 constexpr float kOuterMicSeparation=
     kEardrumSeparation+0.8f*kEarCanalLength; // 9.6cm simple notch mics
@@ -184,6 +185,67 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
         queuedTotalFrames-pendingFrames:0;
     return (double)(played%clipFrameCount)/sampleRate;
 }
+// Actual FDTD zoom: retain exactly the full-room cell budget and
+// shrink the PHYSICAL rectangular room around the listener. 1x is
+// unchanged. A 4x view has 4x finer dx and 1/4 room extents.
+struct RoomView {
+    float zoom=1, width=kRoomMetres,height=kRoomHeightMetres;
+    float originX=0,originY=0;
+};
+inline RoomView roomView(float zoom=1.0f){
+    const float width=kRoomMetres/zoom;
+    const float height=kRoomHeightMetres/zoom;
+    return {zoom,width,height,kListenerX-width*0.5f,
+            kListenerY-height/3.0f};
+}
+inline bool validArtistInView(Vec2 p,RoomView view){
+    return validArtist(p) &&
+        p.x>=view.originX+kRoomClearance-1e-5f &&
+        p.x<=view.originX+view.width-kRoomClearance+1e-5f &&
+        p.y>=view.originY+kRoomClearance-1e-5f &&
+        p.y<=view.originY+view.height-kRoomClearance+1e-5f;
+}
+inline Vec2 restrictCentreInView(Vec2 p,RoomView view){
+    const float minX=view.originX+kRoomClearance;
+    const float maxX=view.originX+view.width-kRoomClearance;
+    const float minY=view.originY+kRoomClearance;
+    const float maxY=view.originY+view.height-kRoomClearance;
+    p.x=std::clamp(p.x,minX,maxX);
+    p.y=std::clamp(p.y,minY,maxY);
+    if(validArtistInView(p,view))return p;
+    // Search valid head positions on the close front/back arcs.
+    const Vec2 c=listener();
+    Vec2 best=p;float bestDist=1e20f;
+    for(int i=0;i<360;++i){
+        const float angle=2.0f*echo::kPi*i/360.0f;
+        Vec2 q{c.x+(kMinimumSeparation+0.001f)*std::cos(angle),
+               c.y+(kMinimumSeparation+0.001f)*std::sin(angle)};
+        if(!validArtistInView(q,view))continue;
+        const float d=length(sub(q,p));
+        if(d<bestDist){bestDist=d;best=q;}
+    }
+    return bestDist<1e19f?best:p;
+}
+inline Vec2 moveArtistInView(Vec2 current,Vec2 target,RoomView view){
+    // Restrict to zoomed physical walls while preserving continuous
+    // collision sliding against the stationary head.
+    current=restrictCentreInView(current,view);
+    target=restrictCentreInView(target,view);
+    Vec2 diff=sub(target,current);
+    const int steps=std::max(1,(int)std::ceil(length(diff)/0.006f));
+    const Vec2 d=scale(diff,1.0f/steps);
+    for(int i=0;i<steps;++i){
+        const Vec2 next=add(current,d);
+        if(validArtistInView(next,view))current=next;
+        else{
+            const Vec2 slideX={next.x,current.y};
+            const Vec2 slideY={current.x,next.y};
+            if(validArtistInView(slideX,view))current=slideX;
+            else if(validArtistInView(slideY,view))current=slideY;
+        }
+    }
+    return current;
+}
 inline int cells(float dx){return (int)std::lround(kRoomMetres/dx);} // X cells
 inline int cellsY(float dx){return (int)std::lround(kRoomHeightMetres/dx);}
 inline double stepSeconds(float dx){
@@ -196,16 +258,26 @@ inline float tenCellFrequency(float dx){
 // Fixed listener head shadow and rubber-like room boundary, both
 // represented directly in the SAME FDTD grid. Artist remains a
 // collision-checked visual body so it never causes hard wall pops.
-inline std::vector<float> roomMask(int nx,int ny,float dx){
+inline std::vector<float> roomMask(int nx,int ny,float dx,
+                                   float originX=0,float originY=0){
     std::vector<float> mask((size_t)nx*ny,0.0f);
     const int border=std::max(2,(int)std::ceil(0.012f/dx));
     for(int y=0;y<ny;++y)for(int x=0;x<nx;++x){
         const int id=y*nx+x;
         if(x<border||y<border||x>=nx-border||y>=ny-border){
-            mask[id]=echo::kOuterBoundaryMaterial;continue;
+            // Three small sound-absorbing slots across the perimeter;
+            // all remaining walls are substantially reflective.
+            const float u=((float)x+0.5f)/nx;
+            const float v=((float)y+0.5f)/ny;
+            const bool port=(x<border && v>0.62f && v<0.70f)||
+                (x>=nx-border && v>0.20f && v<0.29f)||
+                (y>=ny-border && u>0.23f && u<0.34f);
+            mask[id]=port?echo::kAbsorbingPortMaterial:
+                         echo::kOuterBoundaryMaterial;
+            continue;
         }
-        const float px=((float)x+0.5f)*dx;
-        const float py=((float)y+0.5f)*dx;
+        const float px=originX+((float)x+0.5f)*dx;
+        const float py=originY+((float)y+0.5f)*dx;
         if(std::hypot(px-kListenerX,py-kListenerY)<=kHeadRadius)
             mask[id]=1.0f;
     }
@@ -217,12 +289,12 @@ inline std::vector<float> roomMask(int nx,int ny,float dx){
         // exact mic centre.
         const float a=kListenerX+sign*(kEarOffset-2.0f*dx);
         const float b=kListenerX+sign*(kHeadRadius+.007f);
-        const int x0=std::max(0,(int)std::floor(std::min(a,b)/dx-.5f));
-        const int x1=std::min(nx-1,(int)std::ceil(std::max(a,b)/dx-.5f));
+        const int x0=std::max(0,(int)std::floor((std::min(a,b)-originX)/dx-.5f));
+        const int x1=std::min(nx-1,(int)std::ceil((std::max(a,b)-originX)/dx-.5f));
         const int y0=std::max(0,(int)std::floor(
-            (kListenerY-std::max(.004f,1.5f*dx))/dx-.5f));
+            (kListenerY-std::max(.004f,1.5f*dx)-originY)/dx-.5f));
         const int y1=std::min(ny-1,(int)std::ceil(
-            (kListenerY+std::max(.004f,1.5f*dx))/dx-.5f));
+            (kListenerY+std::max(.004f,1.5f*dx)-originY)/dx-.5f));
         for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x)
             if(mask[(size_t)y*nx+x]==1.0f)mask[(size_t)y*nx+x]=0.0f;
     }
@@ -233,8 +305,8 @@ inline std::vector<float> roomMask(int n,float dx){
     return roomMask(n,n,dx);
 }
 inline bool probeInAir(const std::vector<float>& mask,int nx,int ny,
-                       Vec2 p,float dx) {
-    const float gx=p.x/dx,gy=p.y/dx;
+                       Vec2 p,float dx,float originX=0,float originY=0) {
+    const float gx=(p.x-originX)/dx,gy=(p.y-originY)/dx;
     const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
     if(ix<2||iy<2||ix+1>=nx-2||iy+1>=ny-2)return false;
     return mask[(size_t)iy*nx+ix]==0 &&
@@ -250,7 +322,7 @@ inline bool probeInAir(const std::vector<float>& mask,int n,
 constexpr float kPinnaMicSeparation=0.124f;
 inline float micSpacing(bool earChannels=false,bool pinnaV2=false){
     return pinnaV2?kPinnaMicSeparation:
-        earChannels?kEardrumSeparation:kOuterMicSeparation;
+        earChannels?kNewChannelMicSeparation:kOuterMicSeparation;
 }
 inline Vec2 leftEar(bool earChannels=false,bool pinnaV2=false){
     return {kListenerX-0.5f*micSpacing(earChannels,pinnaV2),
