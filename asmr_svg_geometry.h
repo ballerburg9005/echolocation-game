@@ -146,10 +146,17 @@ inline std::vector<float> svgRoomMask(int nx,int ny,float dx,
     // For the inner-ear SVG only, preserve each actually transparent
     // airway at any dx. No new air path is permitted unless its
     // high-resolution SVG pixels are connected all the way outside.
-    if(listenerSvg.channels && !listenerSvg.pinnaV2){
-        preserveSvgAirway(mask,nx,ny,dx,listenerSvg,leftEar(true),
+    if(listenerSvg.channels &&
+       (!listenerSvg.pinnaV2||dx>0.008f)){
+        // When F11/Z budgeting coarsens V2 beyond 8mm, its REAL
+        // transparent pinna recess can disappear at cell centers.
+        // Preserve only the authored 0.4mm-raster air-connected
+        // passage. Fine V2 grids retain their original strict mask.
+        preserveSvgAirway(mask,nx,ny,dx,listenerSvg,
+                          leftEar(true,listenerSvg.pinnaV2),
                           originX,originY);
-        preserveSvgAirway(mask,nx,ny,dx,listenerSvg,rightEar(true),
+        preserveSvgAirway(mask,nx,ny,dx,listenerSvg,
+                          rightEar(true,listenerSvg.pinnaV2),
                           originX,originY);
     }
     // V2 microphones are IN AUTHORED AIR at +-62mm. Do not erase
@@ -258,7 +265,13 @@ inline bool validateMicrophones(const std::vector<float>& mask,int nx,int ny,
             airWeights+=(1-std::fabs(gx-(ix+x)))*
                         (1-std::fabs(gy-(iy+y)));
         }
-        return airWeights>(svg.pinnaV2?0.98f:0.20f);
+        // At coarse grid spacings a fully transparent real pinna
+        // cavity can occupy <1 whole cell. Mask-aware mic sampling
+        // renormalizes air weights; the true SVG mic pixel must
+        // still be transparent and BFS must connect to exterior.
+        const float minimum=svg.pinnaV2?
+            (dx<=0.008f?0.98f:0.12f):0.20f;
+        return airWeights>minimum;
     };
     return check(left)&&check(right) &&
         microphoneConnectedToRoom(mask,nx,ny,dx,left,originX,originY) &&
