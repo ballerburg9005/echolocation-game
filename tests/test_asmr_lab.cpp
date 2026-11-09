@@ -34,11 +34,14 @@ int main(){
     assert(asmr::cells(asmr::kSafeDx)==400);
     assert(asmr::cells(asmr::kLowDx)==250);
     assert(asmr::cells(asmr::kLowestDx)==200);
-    assert(asmr::cells(asmr::kOfflineDx)==1333);
-    assert(asmr::cellsY(asmr::kOfflineDx)==2370);
+    assert(asmr::cells(asmr::kOfflineDx)==1000);
+    assert(asmr::cellsY(asmr::kOfflineDx)==1778);
+    // Offline also retains its OLD 1333x1333 total grid cells.
+    assert(std::abs(asmr::cells(asmr::kOfflineDx)*
+                    asmr::cellsY(asmr::kOfflineDx)-1333*1333)<2000);
     assert(asmr::tenCellFrequency(asmr::kLiveDx)>6800.0f);
     assert(asmr::kLivePassband<asmr::tenCellFrequency(asmr::kLiveDx));
-    assert(asmr::tenCellFrequency(asmr::kOfflineDx)>22800.0f);
+    assert(asmr::tenCellFrequency(asmr::kOfflineDx)>17000.0f);
     assert(asmr::kOfflinePassband<24000.0f);
     assert(asmr::kOfflinePassband>=8000.0f);
     assert(asmr::kOfflinePassband<asmr::tenCellFrequency(asmr::kOfflineDx));
@@ -204,17 +207,17 @@ int main(){
     };
     assert(rms(liveLow)>0.5);
     assert(rms(liveHigh)<0.18); // 10kHz above the 6kHz lowpass
-    // A still-higher 18kHz component must be represented offline
-    // but rejected by all preview settings.
+    // A 14kHz component can be represented on the same-cell-budget
+    // offline grid, but remains rejected by the economical live grid.
     std::vector<float> veryHigh(N);
     for(int i=0;i<N;++i)
-        veryHigh[i]=std::sin(2*echo::kPi*18000.0f*i/rate);
-    const auto preview18=asmr::lowpass(veryHigh,
+        veryHigh[i]=std::sin(2*echo::kPi*14000.0f*i/rate);
+    const auto preview14=asmr::lowpass(veryHigh,
         asmr::kLivePassband,rate);
-    const auto offline18=asmr::lowpass(veryHigh,
+    const auto offline14=asmr::lowpass(veryHigh,
         asmr::kOfflinePassband,rate);
-    assert(rms(preview18)<0.08);
-    assert(rms(offline18)>0.35);
+    assert(rms(preview14)<0.08);
+    assert(rms(offline14)>0.35);
     assert(rms(offlineHigh)>0.45);
-    std::puts("ASMR lab: 5/4.5/3.75/3/2.5/6/8/10mm live, 1.5mm offline 2x3.56m FDTD, ~25% fewer cell updates, correct 440Hz-to-48kHz clock, 8.5k/19k filters passed");
+    std::puts("ASMR lab: 5/4.5/3.75/3/2.5/6/8/10mm live, 2mm offline 2x3.56m FDTD, exact ~284k/1.78M grid budgets, correct 440Hz-to-48kHz clock, 6k/16k filters passed");
 }
