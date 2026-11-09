@@ -228,6 +228,22 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
 constexpr std::array<float,5> kZoomSteps{1.00f,1.25f,1.55f,2.00f,2.6666667f};
 constexpr std::array<float,5> kZoomWorkRatios{0.85f,0.81f,0.76f,0.684f,0.272f};
 constexpr float kSquareRoomSide=0.75f;
+// Explicit, testable navigation state: H, Z and Q may each change
+// ONLY their own axis. Cycles are stable in both directions, with
+// no hidden cursor that can get out of sync after a rejected change.
+struct LabSelection {int head=0,quality=0,zoom=0;};
+inline LabSelection nextSelection(LabSelection current,char key,
+                                  bool reverse=false,int qualities=8){
+    const int step=reverse?-1:1;
+    auto cycle=[&](int index,int count){
+        return (index+count+step)%count;
+    };
+    if(key=='H')current.head=cycle(current.head,3);
+    else if(key=='Z')current.zoom=cycle(current.zoom,(int)kZoomSteps.size());
+    else if(key=='Q'&&qualities>0)
+        current.quality=cycle(current.quality,qualities);
+    return current;
+}
 struct RoomView {
     float zoom=1, width=kRoomMetres,height=kRoomHeightMetres;
     float originX=0,originY=0;
