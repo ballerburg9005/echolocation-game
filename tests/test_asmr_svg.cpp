@@ -118,6 +118,51 @@ int main(){
             (asmr::kListenerX+0.5f-asmr::kMouthOffset)/dx);
         assert(b[(int)(asmr::kListenerY/dx)*nx+sourceX]==0.0f);
     }
+    // Rectangular field texture and the authored SVG use the same
+    // physical (X,Y) coordinates. Previously they appeared as two
+    // vertically offset heads in the UI; verify the raster mask
+    // occupies EXACTLY the same local world geometry, rather than
+    // trying to hide a real mapping error with an arbitrary offset.
+    {
+        constexpr float dx=asmr::kLiveDx;
+        const int nx=asmr::cells(dx),ny=asmr::cellsY(dx);
+        const auto mask=asmr::svgRoomMask(nx,ny,dx,pinnaV2);
+        int checked=0,filled=0;
+        const int x0=(int)std::floor((asmr::kListenerX-
+            pinnaV2.widthMetres*0.5f-2*dx)/dx);
+        const int x1=(int)std::ceil((asmr::kListenerX+
+            pinnaV2.widthMetres*0.5f+2*dx)/dx);
+        const int y0=(int)std::floor((asmr::kListenerY-
+            pinnaV2.heightMetres*0.5f-2*dx)/dx);
+        const int y1=(int)std::ceil((asmr::kListenerY+
+            pinnaV2.heightMetres*0.5f+2*dx)/dx);
+        for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
+            const float localX=(x+0.5f)*dx-asmr::kListenerX;
+            const float localY=(y+0.5f)*dx-asmr::kListenerY;
+            if(std::fabs(localX)<0.002f)continue; // authored seam weld
+            const bool authored=pinnaV2.solid(localX,localY);
+            const bool acoustic=mask[(size_t)y*nx+x]==1.0f;
+            assert(authored==acoustic);
+            ++checked;
+            if(acoustic)++filled;
+        }
+        assert(checked>500 && filled>100);
+        // Test exact viewport -> pressure texture -> physical field
+        // lookup used by CUDA, including the Y-axis reversal.
+        constexpr int screenW=540,screenH=960;
+        constexpr int textureW=360,textureH=640;
+        const float screenX=asmr::kListenerX/asmr::kRoomMetres*screenW;
+        const float screenY=(asmr::kRoomHeightMetres-asmr::kListenerY)/
+                                asmr::kRoomHeightMetres*screenH;
+        const int texX=(int)(screenX/screenW*textureW);
+        const int texY=(int)(screenY/screenH*textureH);
+        const int fieldX=std::min(nx-1,(int)(((float)texX+0.5f)*nx/textureW));
+        const int fieldY=std::min(ny-1,(int)(
+            ((float)(textureH-texY)-0.5f)*ny/textureH));
+        assert(std::fabs(((fieldX+0.5f)*dx)-asmr::kListenerX)<2*dx);
+        assert(std::fabs(((fieldY+0.5f)*dx)-asmr::kListenerY)<2*dx);
+        assert(mask[(size_t)fieldY*nx+fieldX]==1.0f);
+    }
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
     constexpr float dx=.0025f;
