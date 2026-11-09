@@ -273,25 +273,19 @@ int main(){
     // seal an authored mic or disable H/Z navigation. Check every
     // listener at each small F11 scale and acoustic zoom.
     int shrinkConfigurationsFailing=0;
-    for(const float scale:{0.1f,0.25f,0.5f,0.75f}){
+    for(const float scale:asmr::kPhysicsScales){
         for(size_t stage=0;stage<asmr::kZoomSteps.size();++stage){
             const auto view=asmr::roomView(
                 asmr::kZoomSteps[stage],
                 stage+1==asmr::kZoomSteps.size());
-            const float dx=asmr::physicalScaleDesignDx(
-                asmr::zoomDx(asmr::kLiveDx,(int)stage),scale);
+            const float dx=asmr::budgetedLiveDx(
+                asmr::kLiveDx,(int)stage,scale);
             const int nx=(int)std::lround(view.width/dx);
             const int ny=(int)std::lround(view.height/dx);
             const float work=asmr::physicalScaleWork(dx,view,scale);
-            // Full small-room target is 0.60 of the prior 1.01x
-            // compensated FDTD cell-work/real-second baseline.
-            const float prev=asmr::kZoomWorkRatios[stage]/
-                                  (1.01f*1.01f*1.01f);
-            const float newTarget=asmr::kZoomWorkRatios[stage]*
-                asmr::kSmallRoomWorkFraction/
-                std::pow(asmr::kSmallRoomRasterGuard,3.0f);
-            assert(work<=prev*0.6001f); // requested 40% work cut
-            assert(std::fabs(work-newTarget)<newTarget*0.005f);
+            // Combined domain + physical CFL budget now caps total
+            // real-time cell-updates even in the largest portrait view.
+            assert(work<=asmr::kLiveCellWorkCeiling*1.0002f);
             for(const int h:{0,1,2}){
                 const auto& shape=h==0?pinnaV2:h==1?channels:simple;
                 const auto mask=asmr::svgRoomMask(
@@ -341,8 +335,8 @@ int main(){
     }
     if(shrinkConfigurationsFailing)
         std::fprintf(stderr,
-            "[F11 SVG] %d of 60 configurations fail "
-            "at 60-percent-work scaled dx; tune geometry to pass.\\n",
+            "[F11 SVG] %d of 120 configurations fail "
+            "at capped F11/Z/Q dx; tune geometry to pass.\\n",
             shrinkConfigurationsFailing);
     assert(shrinkConfigurationsFailing==0);
     // Real CUDA moving-scatterer stencil samples exactly the same
