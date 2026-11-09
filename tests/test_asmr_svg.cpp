@@ -63,7 +63,7 @@ int main(){
         assert(reachable(a,n,dx,asmr::rightEar(false)));
         assert(b[n/2*n+n/2]==1.0f); // TWO halves join as solid
         assert(a[n/4*n+n/4]==0.0f); // no phantom 17cm circle
-        assert(b[0]==asmr::kOuterBoundaryMaterial);
+        assert(b[0]==echo::kOuterBoundaryMaterial);
         const int sourceX=(int)std::lround(
             (asmr::kListenerX+0.5f-asmr::kMouthOffset)/dx);
         assert(b[n/2*n+sourceX]==0.0f);
