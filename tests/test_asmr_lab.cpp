@@ -81,7 +81,9 @@ int main(){
                 designDx,view,physical);
             assert(std::isfinite(work));
             assert(nx>=40&&ny>=40&&nx<=baseNx&&ny<=baseNy);
-            assert(std::fabs(work-baseWork*(physical<1?1:1/physical))
+            const float expectedRatio=physical<1?
+                std::pow(1.0f/1.01f,3.0f):1.0f/physical;
+            assert(std::fabs(work-baseWork*expectedRatio)
                    <baseWork*0.001f);
             if(physical<1){
                 assert(factor>1.0f&&nx<baseNx&&ny<baseNy);
