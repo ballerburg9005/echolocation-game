@@ -39,60 +39,83 @@ int main(){
     for(int strength:asmr::kDistanceFalloffSteps)
         assert(asmr::distanceFalloffGain(2.0f,strength)<=
                asmr::distanceFalloffGain(0.5f,strength));
-    // F11 changes PHYSICAL scale, not relative pixel geometry:
-    // SVG dimensions, mics, mouths, walls, collision clearance,
-    // and travel distance all scale together by S. Field Nx,Ny
-    // stay exactly constant at the same Z and Q. Each timestep is
-    // S times as long, hence the physical acoustic frequency cutoff
-    // and steps/sec fall by 1/S. This is not a display-only zoom.
-    static_assert(asmr::kPhysicsScales.size()==4);
-    assert(asmr::kPhysicsScales.front()==1.0f);
+    // F11 physical worlds include 10x smaller as well as 10x larger.
+    // Shift+F11 from default 1x moves immediately to 0.5x, not
+    // through the large-room presets. Every step is reversible.
+    static_assert(asmr::kPhysicsScales.size()==7);
+    assert(asmr::kDefaultPhysicsScaleIndex==3);
+    assert(asmr::kPhysicsScales.front()==0.1f);
     assert(asmr::kPhysicsScales.back()==10.0f);
-    // F11 selection is a stable, independent 4-way cycle in both
-    // directions. No hidden index or change to H/Z/Q/F12 is required.
-    for(int i=0;i<4;++i){
-        assert(asmr::nextPhysicalScaleIndex(i)==(i+1)%4);
-        assert(asmr::nextPhysicalScaleIndex(i,true)==(i+3)%4);
+    assert(asmr::kPhysicsScales[
+        (size_t)asmr::kDefaultPhysicsScaleIndex]==1.0f);
+    assert(asmr::kPhysicsScales[(size_t)
+        asmr::nextPhysicalScaleIndex(
+            asmr::kDefaultPhysicsScaleIndex,true)]==0.5f);
+    for(int i=0;i<7;++i){
+        assert(asmr::nextPhysicalScaleIndex(i)==(i+1)%7);
+        assert(asmr::nextPhysicalScaleIndex(i,true)==(i+6)%7);
         assert(asmr::nextPhysicalScaleIndex(
             asmr::nextPhysicalScaleIndex(i),true)==i);
     }
-    // Exact close-up output amplitude, applied after offline gain.
     assert(asmr::kSquareMp3Gain==0.75f);
     assert(0.55f*asmr::kSquareMp3Gain<0.55f);
+    // Large worlds preserve the normalized grid count; small worlds
+    // deliberately reduce normalized Nx,Ny. Their physical dx is
+    // enlarged by the cube-root compensation so that the reduced
+    // area balances more CFL steps/sec. All metric geometry scales,
+    // independently of the numerical mesh chosen.
     for(size_t z=0;z<asmr::kZoomSteps.size();++z){
-        const bool sq=z+1==asmr::kZoomSteps.size();
-        const auto view=asmr::roomView(asmr::kZoomSteps[z],sq);
-        const float designDx=asmr::zoomDx(asmr::kLiveDx,(int)z);
-        const int nx=(int)std::lround(view.width/designDx);
-        const int ny=(int)std::lround(view.height/designDx);
-        const double baseDt=asmr::physicalStepSeconds(designDx,1.0f);
+        const bool square=z+1==asmr::kZoomSteps.size();
+        const auto view=asmr::roomView(asmr::kZoomSteps[z],square);
+        const float baseDx=asmr::zoomDx(asmr::kLiveDx,(int)z);
+        const int baseNx=(int)std::lround(view.width/baseDx);
+        const int baseNy=(int)std::lround(view.height/baseDx);
+        const float baseWork=asmr::physicalScaleWork(baseDx,view,1.0f);
         for(float physical:asmr::kPhysicsScales){
-            assert((int)std::lround(
-                (view.width*physical)/(designDx*physical))==nx);
-            assert((int)std::lround(
-                (view.height*physical)/(designDx*physical))==ny);
-            assert(std::fabs(asmr::physicalStepSeconds(
-                designDx,physical)/baseDt-physical)<1e-5);
-            assert(std::fabs(asmr::tenCellFrequency(
-                designDx*physical)*physical-
-                asmr::tenCellFrequency(designDx))<0.01f);
-            const float travel=asmr::length(asmr::sub(
+            const float factor=asmr::physicalScaleDxFactor(physical);
+            const float designDx=asmr::physicalScaleDesignDx(
+                baseDx,physical);
+            const int nx=(int)std::lround(view.width/designDx);
+            const int ny=(int)std::lround(view.height/designDx);
+            const float work=asmr::physicalScaleWork(
+                designDx,view,physical);
+            assert(std::isfinite(work));
+            assert(nx>=40&&ny>=40&&nx<=baseNx&&ny<=baseNy);
+            assert(std::fabs(work-baseWork*(physical<1?1:1/physical))
+                   <baseWork*0.001f);
+            if(physical<1){
+                assert(factor>1.0f&&nx<baseNx&&ny<baseNy);
+            }else{
+                assert(factor==1.0f&&nx==baseNx&&ny==baseNy);
+            }
+            const double dt=asmr::physicalStepSeconds(
+                designDx,physical);
+            assert(std::fabs(
+                dt/asmr::physicalStepSeconds(baseDx,1.0f)-
+                physical*factor)<0.0001);
+            const float cutoff=asmr::tenCellFrequency(
+                designDx*physical);
+            assert(std::fabs(cutoff-
+                asmr::tenCellFrequency(baseDx)/(physical*factor))<
+                std::max(0.1f,cutoff*0.0001f));
+            const float waveDistance=asmr::length(asmr::sub(
                 asmr::mouth({asmr::kListenerX+0.50f,asmr::kListenerY}),
                 asmr::leftEar(true,true)));
-            assert(std::fabs(travel*physical/
-                            echo::kSpeedOfSound/
-                     (travel/echo::kSpeedOfSound)-physical)<1e-5f);
+            assert(std::fabs(
+                ((waveDistance*physical)/echo::kSpeedOfSound)/
+                (waveDistance/echo::kSpeedOfSound)-physical)<1e-5f);
             assert(std::fabs(asmr::physicalMetres(
                 view.width,physical)-view.width*physical)<1e-5f);
         }
     }
     assert(std::fabs(asmr::physicalMetres(
+        asmr::kRoomHeightMetres,0.1f)-0.3555556f)<0.00001f);
+    assert(std::fabs(asmr::physicalMetres(
+        asmr::kRoomMetres,0.1f)-0.2f)<1e-6f);
+    assert(std::fabs(asmr::physicalMetres(
         asmr::kRoomHeightMetres,10.0f)-35.55556f)<0.0001f);
     assert(std::fabs(asmr::physicalMetres(
         asmr::kRoomMetres,10.0f)-20.0f)<1e-6f);
-    assert(std::fabs(asmr::physicalStepSeconds(
-        asmr::kLiveDx,10.0f)/
-        asmr::physicalStepSeconds(asmr::kLiveDx,1.0f)-10.0)<1e-5);
     // Ports are physically different from reflecting wall material.
     assert(asmr::kOutsideReflection>0.8f);
     assert(asmr::kPortReflection<0.04f);
