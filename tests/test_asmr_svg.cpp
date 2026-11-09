@@ -53,6 +53,10 @@ int main(){
     assert(channels.channels&&!simple.channels);
     // The exact subject-provided speaker recess is on its local -Y.
     assert(!speaker.solid(0,-asmr::kMouthOffset));
+    // The acoustic 2x2 source stencil must be AIR at live 3.5mm dx.
+    for(float x:{-0.0035f,0.0035f})
+        for(float y:{-0.0035f,0.0035f})
+            assert(!speaker.solid(x,-asmr::kMouthOffset+y));
     assert(speaker.solid(0,0));
     // The ear opening in channel SVG is 3mm above the drawn centre:
     // the author's 8cm separation should land in its OPEN groove.
@@ -78,6 +82,13 @@ int main(){
     assert(simple.solid(.048f,0));
     assert(std::fabs(asmr::micSpacing(true)-0.08f)<1e-6f);
     assert(std::fabs(asmr::micSpacing(false)-0.096f)<1e-6f);
+    assert(std::fabs(asmr::micSpacing(true,true)-0.124f)<1e-6f);
+    // V2's old 40mm ear location is SOLID in the unmodified SVG.
+    // Its actual open recess starts farther out, clear at 62mm.
+    assert(pinnaV2.solid(-0.040f,asmr::kChannelEarY));
+    assert(pinnaV2.solid(0.040f,asmr::kChannelEarY));
+    assert(!pinnaV2.solid(-0.062f,asmr::kChannelEarY));
+    assert(!pinnaV2.solid(0.062f,asmr::kChannelEarY));
 
     for(float dx:{0.0035f,0.0030f,0.0025f,0.0015f}) {
         const int n=asmr::cells(dx);
@@ -91,8 +102,12 @@ int main(){
         assert(asmr::validateMicrophones(c,n,dx,true,pinnaV2));
         assert(reachable(b,n,dx,asmr::leftEar(true)));
         assert(reachable(b,n,dx,asmr::rightEar(true)));
-        assert(reachable(c,n,dx,asmr::leftEar(true)));
-        assert(reachable(c,n,dx,asmr::rightEar(true)));
+        assert(reachable(c,n,dx,asmr::leftEar(true,true)));
+        assert(reachable(c,n,dx,asmr::rightEar(true,true)));
+        // No silent cheat: no cut-through to the old 40mm v2 points.
+        const int xSolid=(int)std::floor((asmr::kListenerX+0.040f)/dx);
+        const int ySolid=(int)std::floor((asmr::kListenerY+asmr::kChannelEarY)/dx);
+        assert(c[(size_t)ySolid*n+xSolid]==1.0f);
         assert(reachable(a,n,dx,asmr::leftEar(false)));
         assert(reachable(a,n,dx,asmr::rightEar(false)));
         assert(b[n/2*n+n/2]==1.0f); // TWO halves join as solid
@@ -128,5 +143,5 @@ int main(){
         speaker,{1.5f,1.0f},m,speakerForward));
     std::printf("Exact Inkscape SVG masks passed: 129.82mm simple, "
       "170.23mm channels, 185.35mm new pinna V2, 134.48mm sender; "
-      "8.0cm/9.6cm real-air ear spacing, open channel and source recess\n");
+      "8cm channel / 9.6cm simple / 12.4cm V2 real-air mic spacing, open channel and source recess\n");
 }
