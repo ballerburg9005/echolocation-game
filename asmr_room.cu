@@ -769,9 +769,9 @@ static void printUsage(const char* executable){
         "  WASD, arrows  Move speaker in keyboard mode\n"
         "  H             Cycle listener SVG geometries\n"
         "  Q             Cycle acoustic grid quality\n"
-        "  Z             Gentle FDTD zoom 1.00/1.08/1.16/1.30/SQUARE\n"
-        "                final 1.8m square fits full 360-degree movement\n"
-        "                (fixed cell budget, up to ~1.48x timesteps)\n"
+        "  Z             True FDTD zoom 1.00/1.25/1.55/2.00/SQUARE\n"
+        "                last view is a 0.75m square, still orbitable\n"
+        "                (~85% -> 68% of original full-room cell-work)\n"
         "  V             Toggle pressure field visualization\n"
         "  B             Toggle translucent original SVG on acoustic mask\n"
         "  9, 0          Decrease / increase pressure exposure\n"
@@ -905,18 +905,16 @@ int main(int argc,char** argv){
         asmr::kUltraPassband,5000.0f,
         asmr::kLowPassband,asmr::kLowestPassband};
     int qualityIndex=0;
-    // Very gentle 8%, 16%, 30% true grid refinements. Final stage
-    // changes 400x711 to ~533x533, not a ridiculous 8x CFL burden.
-    const std::array<float,5> zoomSteps{1.0f,1.08f,1.16f,1.30f,1.40f};
+    // Zoom area and dx are budgeted together: higher physical
+    // magnification yet progressively FEWER cell updates per second.
+    const auto& zoomSteps=asmr::kZoomSteps;
     int zoomIndex=0;
     auto zoomValue=[&](){return zoomSteps[zoomIndex];};
     auto squareMode=[&](){return zoomIndex==4;};
     auto activeView=[&](){
         return asmr::roomView(zoomValue(),squareMode());};
     auto liveDx=[&](){
-        return squareMode()?
-            asmr::squareDxFromBase(qualityDx[qualityIndex]):
-            qualityDx[qualityIndex]/zoomValue();
+        return asmr::zoomDx(qualityDx[qualityIndex],zoomIndex);
     };
     auto liveBand=[&](){return std::min(19000.0f,
         qualityBand[qualityIndex]*qualityDx[qualityIndex]/liveDx());};
@@ -1000,7 +998,7 @@ int main(int argc,char** argv){
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload selected MP3, D FDTD test chirp, T toggle live, "
-       "H V2/channel/simple, Q quality, Z 1/1.08/1.16/1.30/square, "
+       "H V2/channel/simple, Q quality, Z 1/1.25/1.55/2/square, "
        "V pressure waves, B authored mask guide, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
@@ -1321,9 +1319,8 @@ int main(int argc,char** argv){
             } else {
                 if(!highQuality)
                     highQuality=std::make_unique<FdtdRoom>(
-                        squareMode()?
-                            asmr::squareDxFromBase(asmr::kOfflineDx):
-                            asmr::kOfflineDx/zoomValue(),*head,channels,
+                        asmr::zoomDx(asmr::kOfflineDx,zoomIndex),
+                        *head,channels,
                         speakerShape,zoomValue(),squareMode());
                 highQuality->uploadAudio(fullAudio);
                 highQuality->setRenderTiming(job.selected.start,
