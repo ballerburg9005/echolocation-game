@@ -1,187 +1,196 @@
-# ASMR FDTD room — WAV playback and recorded movement paths
+# ASMR spatial audio laboratory — real CUDA FDTD + MP3
 
-**Experimental branch:** experiment/asmr-fdtd-wav-path-lab
+**Experiment branch:** `experiment/asmr-fdtd-wav-path-lab`  
+**Base:** the working arcade physics branch; the arcade binary remains separate.
 
-**Build and run locally:**
+This program uses **2D pressure-wave FDTD**. The source recording is
+decoded from MP3 into mono PCM once, and the samples are added as
+a moving pressure source **inside** the acoustic CUDA grid. Every pressure
+time step uses the actual second-order finite-difference wave stencil
+with a Courant-stable step, fixed listener-head obstacle, room reflections,
+and two independently sampled virtual microphones. There is **no HRTF
+convolution, ray tracing, sine-ring illustration, or artificial stereo pan**.
 
-    git fetch origin
-    git switch experiment/asmr-fdtd-wav-path-lab
-    git pull --ff-only
-    make test
-    make asmr
-    ./build/asmr_room
+## Build and start
 
-By default the application reads **test.wav** from the current working directory.
-For another filename, run:
+The program **always reads `~/test.mp3`** (from the OS user's HOME
+directory), regardless of the working directory. There is no input
+filename argument and no need to convert anything to WAV manually.
 
-    ./build/asmr_room /path/to/whisper-or-brushing.wav
+```bash
+git fetch origin
+git switch experiment/asmr-fdtd-wav-path-lab
+git pull --ff-only
+sudo apt-get install libmpg123-dev libsdl2-dev
+make test
+make asmr
+./build/asmr_room
+```
 
-The repository deliberately does NOT include a test.wav. If no file is
-available, the room and movement recording work but are silent, and the
-offline render buttons explain that they need a WAV. There is no
-fabricated oscillator substituting for the intended input.
+To place your file locally:
 
-## How to push your recording later
+```bash
+cp /path/to/your/recording.mp3 ~/test.mp3
+./build/asmr_room
+```
 
-    git fetch origin
-    git switch experiment/asmr-fdtd-wav-path-lab
-    git pull --ff-only
-    cp /path/to/your/recording.wav test.wav
-    git add test.wav
-    git commit -m "Add ASMR input recording"
-    git push origin experiment/asmr-fdtd-wav-path-lab
+If you **want to commit and push the MP3** into this experiment branch
+rather than keeping it on your own computer:
 
-For private speech, you can instead leave test.wav untracked locally
-and never upload it. Only push recordings you are allowed to distribute.
-The program loads SDL2-compatible WAV PCM, downmixes to **one mono artist
-source**, and converts it to 48 kHz float PCM. The first **60 seconds**
-are used, looping with a 20ms crossfade where necessary.
+```bash
+git switch experiment/asmr-fdtd-wav-path-lab
+cp ~/test.mp3 test.mp3
+git add test.mp3
+git commit -m "Add ASMR source recording"
+git push origin experiment/asmr-fdtd-wav-path-lab
+```
+
+**Note:** The running application still reads `~/test.mp3`, not the
+copy in the repository. Only push recordings you have the rights to
+share. You do **not** need to push your recording to run the program.
+
+Press **L** to reload it after replacement. The native libmpg123
+decoder handles MP3 and passes 16-bit PCM to SDL for 48 kHz float
+mono conversion. The first 60 seconds are used, with a 20 ms crossfade
+when looping. The source is independently low-pass-filtered for live
+and offline resolutions, then uploaded once into CUDA memory.
 
 ## Controls
 
-| Key | Action |
+| Key or control | Action |
 |---|---|
-| Mouse | Direct absolute movement of the artist head with room/head collisions |
-| M | Toggle 1:1 pointer mouse mode (default ON) |
-| WASD or arrows | Move artist when mouse mode is OFF |
-| F5 or 5 | Render the **last 5 seconds** of recorded path, then play |
-| F6 or 1 | Render the **last 10 seconds**, then play |
-| F7 or 2 | Render the **last 20 seconds**, then play |
-| P | Replay the latest completed high-resolution clip without rendering again |
-| L | Reload test.wav or the supplied WAV |
-| T | Toggle the lower-quality live sound preview |
-| R | Reset path history and live wave field |
-| Esc | Exit |
+| Mouse | Absolute artist-head position in the 2m room, with solid head/wall collision |
+| M | Toggle mouse mode; when off, use WASD or arrow keys |
+| **V** | Show/hide **the actual GPU FDTD pressure field** (default visible) |
+| **9 / 0** | Decrease/increase pressure visualization exposure, **no change to physics or audio** |
+| **Q** | Cycle live FDTD resolution: **5 mm (default) → 8 mm → 10 mm**; use if the GPU misses live deadlines |
+| F5 or 5 | Select last 5 seconds, offline render, save and play |
+| F6 or 1 | Select last 10 seconds |
+| F7 or 2 | Select last 20 seconds |
+| P | Replay last fully processed file without running CUDA again |
+| L | Reload `~/test.mp3` |
+| T | Enable/disable FDTD live preview sound |
+| R | Reset live pressure and recorded movement path |
+| Esc | Quit |
 
-Position history is **automatically recorded** while navigating in live
-mode, retaining up to 60 seconds of artist motion. When you render
-and replay, the path clock pauses, so the next capture isn't polluted
-with minutes of GPU render time. A short history yields an equally
-short clip rather than inventing unrecorded movement.
+The **cyan and magenta wavefronts** in the window are colored real values
+from the SAME CUDA pressure field that drives the ear audio. The static
+head is blue inside that grid. The movable orange artist head is
+collision-checked, but is not a hard moving FDTD wall because stamping
+hard pressure cells when turning can generate artificial gunshot-like
+transients. The yellow spot is at the **actual bilinearly placed
+pressure-emitting mouth**, which may lag sudden mouse motion by a few
+milliseconds to prevent source-position zipper noise.
 
-During the high-resolution render a progress bar advances. The
-expensive simulation is carried out **first**. Only once all frames
-are ready does the program queue the complete stereo waveform for
-normal SDL playback, so **render slowness cannot interrupt playback**.
-The program also writes two local outputs for each selected duration:
+## Real acoustics, geometry and spatialization
 
-- **asmr_last_05s.wav**, **asmr_last_10s.wav**, or **asmr_last_20s.wav**:
-  finished 48 kHz stereo 16-bit PCM generated by high-resolution FDTD.
-- **asmr_last_05s_path.csv**, etc.: recorded timestamps in seconds,
-  head and mouth position in metres, and mouth angle towards listener.
+The room is a 2m by 2m empty chamber with broad-band lossy
+outer reflection R=0.32. A fixed 17cm-diameter listener head is
+a **real hard FDTD mask**. The two virtual ear microphones are separated
+by 21 cm and sample independently on opposite sides of this head.
+The orange 17cm artist head always points its mouth toward the
+listener's centre, and its moving MP3 samples enter the room field.
 
-Repeated renders of the same duration overwrite the previous pair.
-Copy successful trials elsewhere if you want to keep them. These
-generated files are gitignored; test.wav is not.
+Pressure propagation around the stationary listener creates actual
+**planar** acoustic shadow, reflection, diffraction and left/right
+wave timing/pressure differences. This is still 2D acoustic physics,
+not a calibrated 3D HRTF, individual pinnae, ear canals or elevation.
 
-## Room and head acoustics
+The real pressure field is displayed as colorful wavefronts; there is
+no procedural graphics animation substituted for the physics.
+Press **V** to compare with a static-map view and **9/0** if waves appear
+too bright or faint. A pressure image snapshot adds a small GPU readback
+cost; the solver itself is unchanged by visualization exposure.
 
-The room is a quiet, empty **2m by 2m planar acoustic chamber** with
-a fixed low-reflection **R=0.32 perimeter**, an approximation of an
-absorptive/rubber-like surface (not measured frequency-dependent rubber).
+## Why mouse movement previously sounded grainy
 
-The stationary blue listener has a **17cm-diameter hard circular head
-inside the real FDTD pressure field**; the ears are microphones at
-x=0.895m and x=1.105m, a 21cm separation just outside the head. The
-cyan and purple dots show exactly where each microphone samples the
-pressure. The artist is the orange **17cm-diameter movable circle**.
-The yellow mouth marker is 7.5cm toward the listener's centre. The
-artist's angle *always points towards the listener*, and WAV samples
-enter the FDTD grid at the moving mouth with normalized 2x2 sub-cell
-weights rather than snapping between integer cells.
+The previous live version repeatedly interpolated **the same old mouse
+position to the same new mouse position once for EACH of 50+ CUDA
+audio batches per frame**. So a single physical movement was
+repeated many times, producing an unintended zipper/sawtooth
+modulation that can sound like hiss. It also always applied
+`0.42*tanh(2*p)` to the ear pressure, introducing artificial harmonics.
 
-The moving artist circle is represented visually and for movement
-collision, **not as a hard moving FDTD wall**, to avoid new pressure
-whips. Its mouth source is physically propagated, and the listener
-head really does occlude/shadow waves. This provides modeled two-ear
-time and level differences and some planar head shadow without fake
-stereo panning. But it is still **2D**, with no external pinnae,
-individualized head shapes, head-related transfer functions, height
-or ceiling/floor reflections. The guide ring around the listener
-marks the approximate 30cm peripersonal space; it doesn't emit sound.
+The new renderer maintains **one continuous pressure-source trajectory
+across batch boundaries**. Source movement is interpolated *once* on the
+physics time grid, with about 12ms smoothing and a conservative maximum
+movement rate. This is a change to source geometry, **not an audio
+denoising filter**; the FDTD scattering and high-frequency bandwidth
+remain. The listener still hears raw left/right FDTD pressure with
+only a single linear volume gain and a last-resort safety clip.
 
-Absolute mouse mode maps the cursor to the corresponding world
-position directly, except for the legally enforced 17cm artist/body
-collision with the listener and outside perimeter. The movement
-path is substepped to avoid tunnelling through the listener if you
-move the cursor rapidly from one side to another.
+Audio from many small pressure batches is now consolidated into one
+SDL queue operation per display update. The program prints
+`[ASMR FDTD]` diagnostics with pressure steps, live grid resolution,
+near-empty audio queues and safety-clipped sample counts. If you still
+hear hiss, compare slow versus fast cursor motion and share those
+lines. An MP3 can also contain its own compression artifacts.
 
-## Live versus high-resolution replay
+## Quality and offline capture
 
-| | Preview | Recorded replay |
+| | Default live preview | High-resolution offline render |
 |---|---:|---:|
-| Physical cell size | 10mm | 2.5mm |
-| Room grid | 200 x 200 | 800 x 800 |
-| FDTD time steps/s | approximately 48,500 | approximately 194,000 |
-| Approximate ten-cells/wavelength limit | 3.43kHz | 13.72kHz |
-| WAV low-pass cutoff before FDTD | 2.8kHz | **12kHz** |
+| Cell size | **5 mm** | **2 mm** |
+| Grid | 400×400 | 1000×1000 |
+| Physical FDTD steps/s | ~97,000 | ~243,000 |
+| 10-cells-per-wavelength frequency | ~6.86 kHz | ~17.15 kHz |
+| Input low-pass before FDTD | **5.5 kHz** | **15 kHz** |
+| Source file | `~/test.mp3` | the same MP3 |
+| Audio to headphones | Real-time preview if the GPU keeps up | ONLY after complete rendering |
 
-The offline experiment can preserve **8kHz and higher spectral
-information**, to about 12kHz. It cannot model the entire 24kHz Nyquist
-band of a 48kHz WAV accurately: the source is bandlimited to the
-numerically resolved frequency range. This is a high-resolution
-render *for this 2D simulation*, not lossless full-band audio
-or anatomically exact ASMR spatial sound.
+Pressing F5/F6/F7 freezes the path and processes the selected
+5-, 10-, or 20-second window on the finer grid. This
+runs the SAME 2D FDTD pressure solver at higher spatial and
+temporal resolution and feeds the SAME decoded source PCM, but
+with an up-to-15kHz passband to explore frequencies above 8kHz.
 
-Offline uses **4x as many acoustic time steps and 16x as many room
-cells**, about **64x more cell updates per rendered second** than
-the preview. A 20s recording can require trillions of cell updates;
-it may take many minutes or longer on an RTX 3090 and much longer on
-a weak GPU. This is deliberate and never sold as realtime.
+The completed stereo samples are stored in RAM, written as
+`asmr_last_05s.wav` / `10s` / `20s`, then played through SDL without
+render-time stuttering. The saved companion
+`asmr_last_05s_path.csv` etc records artist/mouth trajectory and angles.
+Generated WAV/CSV files are ignored by Git. They overwrite earlier
+captures of the same duration; copy promising takes elsewhere.
 
-To avoid a CPU kernel launch every ~5 microseconds, the FDTD runner
-captures a reusable graph with **126 sequential CUDA pressure kernels**.
-The triple-pressure-buffer pointers return to their initial ordering
-after 126 steps (multiple of three), and both ear samples are read
-directly in the pressure kernel. Only a 126-point source-position array
-and step counter are refreshed per chunk. The complete rendered audio
-is then queued once for SDL playback.
+The offline grid has **6.25 times as many cells** as the default
+5mm live grid and 2.5 times as many steps per second: about
+**15.6x** more pressure-cell updates per second of recorded audio.
+For comparison with the old 10mm/2.5mm configuration, offline
+work is also substantially higher. Power draw such as 120W on a
+nominal 350W RTX 3090 does *not* imply that the GPU has a
+particular percentage of spare realtime capacity. For a weaker
+GPU, press **Q** to lower live resolution without reducing the
+15kHz offline passband.
 
-The offline clip uses one conservative constant gain, along with
-short fades at the clip boundaries, to retain the movement's
-relative amplitude changes while protecting against gross peaks.
-Start headphone volume low; this is not calibrated to real sound
-pressure levels.
+A reusable CUDA Graph advances 126 sequential acoustic pressure
+steps before the CPU needs to launch another graph. Since 126 is
+divisible by 3, the triple pressure-field buffers line up across
+graph boundaries. The pressure field is not synthesized directly
+at the headphones: only the two ear samples are read out.
 
-## ASMR exploration: useful candidate paths, not proven triggers
+**Headphone safety:** begin at low volume; no physical SPL
+calibration is available. A safety amplitude limit protects against
+unexpected numerical extremes, but should not be mistaken for a
+measured acoustic level.
 
-The paper *The Proximity Prediction Hypothesis* (Flockton,
-Preston & McCall, 2025) specifically discusses near-ear
-interaural differences, head-shadowing at frequencies above 8kHz,
-and soft sounds with slow envelopes. It proposes a mechanism;
-it **does not establish that a particular movement reliably
-produces ASMR**.
+## ASMR exploration
 
-Candidate comparisons using the SAME input WAV and volume:
+The *Proximity Prediction Hypothesis* paper (Flockton et al., 2025)
+discusses near-ear spatial signals and the importance of high-frequency
+shadow cues above 8kHz. It is a theoretical account, not evidence
+that any one movement is guaranteed to induce ASMR.
 
-1. Hold the mouth near one ear for a few seconds versus farther away.
-2. Approach slowly over 5–10s, stop near the listener, then retreat.
-3. Sweep around the listener from left to right, with the mouth
-   automatically aimed at the centre.
-4. Add gentle pauses and asymmetric paths; compare both ear sides.
-5. Replay the same saved path after high-resolution rendering and
-   note whether higher-frequency shadows improve the subjective effect.
+Useful comparisons include stationary near-ear playback,
+slow approach–pause–withdrawal, moving from left to right
+around the head while the mouth faces the listener, and alternating
+near/far distances with a consistent source and headphone level.
 
-Keep notes about your reactions separately. The device does not
-measure neurological responses, touch prediction or ASMR.
-
-**Source:** Josephine R. Flockton, Catherine E. J. Preston and
-Cade McCall (2025), The Proximity Prediction Hypothesis: How
-predictive coding of CT-touch explains Autonomous Sensory Meridian
-Response and its therapeutic applications, Frontiers in Behavioral
-Neuroscience, volume 19, article 1688172.
 https://doi.org/10.3389/fnbeh.2025.1688172
 
-## Known limitations
+## Validation status
 
-- CI can compile the CUDA executable and run CPU geometry/audio
-  tests but cannot prove good headphone perception, no XRuns or
-  speed on your actual GPU.
-- The listener circle is an **acoustic** reflector; the artist
-  circle is a collision-checked visual head, not a moving
-  pressure-blocking head.
-- No 3D field, pinna response, measured near-field HRTF,
-  ear canals or individual physiology.
-- 60s WAV input limit, 60s path history, automatic output overwrite.
-- GPU progress is displayed between complete graph batches;
-  a slow graph launch can temporarily lower UI frame rate.
+- CPU physics, geometry and path-timing tests run in GitHub Actions.
+- CUDA CI compiles the executable, without running a GPU/audio session.
+- Your own headphone testing is required for actual image quality,
+  moving-source hiss, deadline performance and perceived head-shadow.
+- **Not** a calibrated binaural HRTF/3D acoustics model or
+  a clinical demonstration of ASMR.
