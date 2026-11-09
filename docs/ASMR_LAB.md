@@ -108,23 +108,35 @@ increasing the live buffer or GPU power.
 
 ### True acoustic zoom and reflective room walls
 
-Press **Z** to cycle through **1×, 2×, 4×, 6× and 8×**. This is not
-just display magnification: the room dimensions shrink about the
-listener, and **dx shrinks by the same factor**, preserving the
-**400×711 live grid cell budget** at the default quality. The
-listener remains in the lower third of the zoomed area. For example,
-**4×** produces a 0.50m × 0.889m physical room around the listener
-with a **1.25mm** live cell. The offline renderer similarly keeps its
-1000×1778 grid at 2mm/Z. If a zoom/grid combination blocks the
-microphone cavity, the program skips it. **High zoom demands proportionally
-more CUDA timesteps per physical second**; 8× may be far too slow for
-crackle-free live audio even at the same cell count. Use completed
-F5/F6/F7 playback to judge the sound instead.
+Press **Z** to cycle **1.00× → 1.08× → 1.16× → 1.30× → SQUARE → 1.00×**.
+These are gentle *actual FDTD* resolutions, not a 2×/4×/8×
+timestep explosion. The original **2.0 × 3.5556m** full-size portrait
+room is always available at 1.00×. The intermediate stages preserve
+the **400×711 = 284,400** cells while refining dx 8%, 16% and 30%.
+The final stage is a **1.8 × 1.8m physically square room** centered
+on the listener, with approximately **533×533 cells**, essentially
+the same GPU cell budget. The square room is drawn in a true square
+540×540 viewport in the center of the 540×960 window; it is not
+stretched to portrait. All stages preserve real sound speed, mic
+locations and the unmodified SVG dimensions. The square stage has
+about **1.48× the acoustic time steps per second** relative to 1.00×,
+not 8×. Offline WAV rendering matches the selected physical room
+at its independent high-quality cell budget. High zoom may still
+cost too much for live audio; completed offline playback is unaffected.
+
+Pressing **Z** at the last stage returns to the original giant room.
+If the narrow channel mics cannot connect at 1.00×, Z explicitly
+changes the displayed head back to V2 and logs that fact instead of
+silently showing stale material. The window title states the active
+head and zoom.
 
 The outer walls now reflect sound with an approximate **R=0.82**
 impedance rather than the previous R=0.32. Three asymmetrically placed
 teal openings—one on the left wall, one on the right and one on the
 front wall—use **R≈0.035 locally absorbing termination material**.
+They are now fixed at physically sized **28cm, 32cm and 22cm**
+across their respective walls, with a single perimeter drawn in
+exactly the same viewport as the FDTD grid.
 They function like door/window *acoustic exits*, not simulated space
 on the other side of a true hole. This leaves other surfaces reflective
 and deliberately breaks some persistent rectangular-room modes, without
@@ -151,9 +163,10 @@ experiment**, not the same as an 8 cm eardrum pair.
 
 In the **newly redrawn central-cavity**
 `listener_with_ear_channel.svg` mode, the microphones are now only
-**4.2cm apart** (±21mm from listener center), **7mm below** the head's
-horizontal centerline. Their physical positions are approximately
-**(0.979m, 1.178m)** and **(1.021m, 1.178m)**. This new placement
+**4.2cm apart** (±21mm from listener center), now **3mm above**
+the head's horizontal centerline (raised 10mm after feedback).
+Their physical positions are approximately
+**(0.979m, 1.188m)** and **(1.021m, 1.188m)**. This new placement
 supersedes the earlier 8cm experimental ear-channel separation; it
 is a sound-position probe configuration, not a universal anatomical
 measurement. At too
@@ -161,9 +174,14 @@ coarse a resolution, the program refuses a microphone position that
 cannot sample air reliably **or whose sampled air is isolated from the
 outside room**. User-edited SVG necks can seal when rasterized at
 5mm or another dx; press Q for a finer grid or inspect the SVG path.
-We do not delete material to fake a connected ear channel. When **H**
-cycles listener styles, any invalid/disconnected alternative is skipped,
-so the working default V2 and simple shape remain reachable.
+We do not delete material to fake a connected ear channel. **H**
+advances deterministically V2 → CHANNEL → SIMPLE: no more silent
+substitution with the simple SVG. If CHANNEL fails at the selected
+grid size, the program tests the gentle square-room grid and chooses
+it if it connects. Otherwise the head remains unchanged and a clear
+error is printed. The terminal's **[SVG LOAD]** line prints the
+exact SVG path and dimensions, and **[H] ACTIVE** prints which model
+actually feeds CUDA.
 
 Press **H** in live mode to cycle the alternative geometries:
 `listener_v2.svg` (default), `listener_with_ear_channel.svg`, and
@@ -201,13 +219,16 @@ The underlying physical source smoothing and 1:1 mouse target mapping
 are unchanged. During looping offline replay, the head also follows
 its **recorded physical FDTD movement**, not the unsmoothed cursor path.
 
-When **V** is enabled, the displayed listener is the **actual pixelated
-acoustic mask only**. Rendering the authored SVG over that same mask
-made it look like there were two offset heads. Press **V** again to
-see the original high-resolution SVG alone. CPU tests verify the SVG
-solid occupancy and the pixelated mask agree in the shared metre-scale
-coordinates and that the 9:16 texture lookup resolves the listener
-position within two grid cells.
+When **V** is enabled, the listener mask is the **actual pixelated
+acoustic material**, now positioned in the very same aspect-correct
+viewport as all microphone markers and the smooth SVG. Press **V**
+again to see the authored high-resolution SVG. CPU tests independently
+verify the SVG-to-material occupancy at physical metre coordinates,
+including the actual GPU image-lookup Y inversion at each zoom.
+The authored source is loaded from the current checkout's
+`asmr_shapes/` first; a same-named older file under HOME can no
+longer unexpectedly replace the current drawing. The [SVG LOAD]
+messages print the path actually opened.
 
 A physical **25 cm ruler** appears at the bottom of the view. The
 window title includes the computed **mouth-to-listener range (metres)**
@@ -238,7 +259,9 @@ uses **2mm / 16kHz** to preserve the **old offline cell budget**, too.
 Every five seconds the terminal prints `[METRES]` with the actual
 listener, mouse target, smoothed acoustic head, mouth, left/right
 source-to-microphone distances and predicted flight times at **343m/s**.
-The grid's physical width/height remain 2.0m × 3.5556m. **A true 2D
+At 1× the grid's physical width/height are 2.0m × 3.5556m;
+gentle zoom and the final square use the actual cropped dimensions
+printed by [METRES]. **A true 2D
 wave spreads as approximately 1/sqrt(distance)**, weaker attenuation
 than the approximately 1/distance of a freely spreading 3D wave.
 The ear outline also lacks full 3D pinna cues, so a 2m geometry may
@@ -254,9 +277,9 @@ solver or audio; the numerical room scale is still auditable.
 | M | Toggle mouse versus WASD/arrow movement |
 | V | Toggle the **actual CUDA pressure-wave visualization** |
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
-| H | Cycle the three *real FDTD* listener SVG shapes, default V2 |
+| H | V2 → CHANNEL → SIMPLE, never silently substitute an invalid SVG |
 | Q | Cycle real-time acoustic grid resolution |
-| Z | Actual FDTD zoom: **1× / 2× / 4× / 6× / 8×**, fixed number of cells |
+| Z | Gentle FDTD zoom: **1× / 1.08× / 1.16× / 1.30× / square / back to 1×** |
 | F5 / 5 | Render and then **loop exactly 5 s** |
 | F6 / 1 | Render and then **loop exactly 10 s** |
 | F7 / 2 | Render and then **loop exactly 20 s** |
