@@ -9,6 +9,13 @@ int main(){
                   "CUDA graph must preserve triple-buffer identity");
     assert(asmr::cells(asmr::kLiveDx)==400);
     assert(asmr::cellsY(asmr::kLiveDx)==711);
+    // Aspect conversion preserves total live cells within 0.2%.
+    assert(std::abs(asmr::cells(asmr::kLiveDx)*
+                asmr::cellsY(asmr::kLiveDx)-533*533)<600);
+    // Position is EXACTLY the lower third, leaving twice the
+    // listener-to-back-wall distance in the forward (+Y) direction.
+    assert(std::fabs(asmr::kListenerY-asmr::kRoomHeightMetres/3.0f)<1e-6f);
+    assert(std::fabs(asmr::kListenerX-asmr::kRoomMetres/2.0f)<1e-6f);
     assert(std::fabs(asmr::kRoomHeightMetres/
                      asmr::kRoomMetres-16.0/9.0)<1e-6);
     // New 9:16 room with 5mm preview uses about 25% fewer cell updates
@@ -50,23 +57,23 @@ int main(){
         assert(mask[(size_t)(hy-1)*nx+hx-1]==1.0f);
         assert(asmr::probeInAir(mask,nx,ny,asmr::leftEar(),dx));
         assert(asmr::probeInAir(mask,nx,ny,asmr::rightEar(),dx));
-        const auto mouth=asmr::mouth({1.42f,1.0f});
+        const auto mouth=asmr::mouth({1.42f,asmr::kListenerY});
         assert(asmr::probeInAir(mask,nx,ny,mouth,dx));
-        assert(asmr::probeInAir(mask,nx,ny,{0.75f,1.0f},dx));
+        assert(asmr::probeInAir(mask,nx,ny,{0.75f,asmr::kListenerY},dx));
     }
 
     // Body-circle constraints apply even when the cursor jumps from one
     // end of the window to the other: no tunnelling through the listener.
-    asmr::Vec2 p{1.50f,1.0f};
+    asmr::Vec2 p{1.50f,asmr::kListenerY};
     assert(asmr::validArtist(p));
-    p=asmr::moveArtist(p,{0.40f,1.0f});
+    p=asmr::moveArtist(p,{0.40f,asmr::kListenerY});
     assert(asmr::validArtist(p));
     assert(p.x>asmr::kListenerX);
     for(int a=0;a<=360;++a){
         const float radians=2*echo::kPi*a/360.0f;
         const asmr::Vec2 desired{
             1.0f+0.10f*std::cos(radians),
-            1.0f+0.10f*std::sin(radians)};
+            asmr::kListenerY+0.10f*std::sin(radians)};
         const auto restricted=asmr::restrictCentre(desired);
         assert(asmr::validArtist(restricted));
         const auto mouth=asmr::mouth(restricted);
@@ -80,7 +87,7 @@ int main(){
     // mouth from old mouse position to new within each mini-batch.
     // This produces artificial grain when the mouse is moving.
     const asmr::Vec2 target{1.40f,1.50f};
-    asmr::Vec2 smoothed{1.52f,1.0f};
+    asmr::Vec2 smoothed{1.52f,asmr::kListenerY};
     float previousDistance=asmr::length(asmr::sub(smoothed,target));
     float previousStep=0.0f;
     const float dt=(float)asmr::stepSeconds(asmr::kLiveDx);
@@ -101,7 +108,7 @@ int main(){
     // A 3150-step interval is ~24ms at 5mm; a max-velocity
     // source correctly covers only a few centimetres in that time.
     assert(previousDistance<
-        asmr::length(asmr::sub(asmr::Vec2{1.52f,1.0f},target))-0.03f);
+        asmr::length(asmr::sub(asmr::Vec2{1.52f,asmr::kListenerY},target))-0.03f);
     assert(previousStep>=0.0f);
     assert(asmr::length(asmr::sub(
         asmr::advanceSource(smoothed,target,0.0f),smoothed))<1e-7f);
