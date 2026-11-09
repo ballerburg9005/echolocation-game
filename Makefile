@@ -20,7 +20,7 @@ build/asmr_svg_geometry.o: asmr_svg_geometry.cpp asmr_svg_geometry.h asmr_lab_ma
 	mkdir -p build
 	$(CXX) -std=c++17 -O2 $(shell pkg-config --cflags librsvg-2.0 cairo) -c -o $@ asmr_svg_geometry.cpp
 
-build/asmr_room: asmr_room.cu asmr_lab_math.h asmr_mp3_audio.h asmr_svg_geometry.h build/asmr_svg_geometry.o acoustics.h source_model.h
+build/asmr_room: asmr_room.cu asmr_lab_math.h asmr_dynamic_head.h asmr_mp3_audio.h asmr_svg_geometry.h build/asmr_svg_geometry.o acoustics.h source_model.h
 	mkdir -p build
 	$(NVCC) $(NVCCFLAGS) -o $@ asmr_room.cu build/asmr_svg_geometry.o -lSDL2 -lmpg123 $(shell pkg-config --libs librsvg-2.0 cairo) -lpthread
 
