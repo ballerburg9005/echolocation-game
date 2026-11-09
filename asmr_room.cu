@@ -1456,6 +1456,28 @@ int main(int argc,char** argv){
                     strength,oldStrength,
                     asmr::kFalloffReferenceMetres*
                     physicsScaleValue()*100.0f);
+                // Auditable F12 result at the *current real source
+                // geometry*: helps distinguish a true no-op/ambient
+                // bypass from a perceptually unusual attenuation.
+                const asmr::Vec2 currentMouth=asmr::mouth(sourceCursor);
+                const float dLeft=asmr::length(asmr::sub(
+                    currentMouth,asmr::leftEar(channels,head->pinnaV2)))*
+                    physicsScaleValue();
+                const float dRight=asmr::length(asmr::sub(
+                    currentMouth,asmr::rightEar(channels,head->pinnaV2)))*
+                    physicsScaleValue();
+                const float gLeft=asmr::distanceFalloffGain(
+                    dLeft,strength,physicsScaleValue());
+                const float gRight=asmr::distanceFalloffGain(
+                    dRight,strength,physicsScaleValue());
+                std::fprintf(stderr,
+                    "[F12 GAIN] source-to-mic L %.3fm R %.3fm; "
+                    "multipliers %.6f / %.6f (%.1f / %.1f dB), "
+                    "ambient bypass=%s.\\n",
+                    dLeft,dRight,gLeft,gRight,
+                    20.0f*std::log10(std::max(gLeft,1e-12f)),
+                    20.0f*std::log10(std::max(gRight,1e-12f)),
+                    ambientEnabled?"YES":"NO");
                 if(mode==Mode::Playback && !lastPlaybackBase.empty()){
                     // Reapply instantly to the *existing* offline FDTD
                     // recording, without rerendering a single CUDA step
