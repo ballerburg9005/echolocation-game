@@ -559,7 +559,7 @@ static void drawRoom(SDL_Renderer* renderer,
     color(renderer,58,110,132);
     circle(renderer,screenX(asmr::kListenerX),
            screenY(asmr::kListenerY),screenX(0.30f),false);
-    // 25cm physical ruler: 100 pixels in a 2m wide 800px room.
+    // 25cm ruler: scaled to the physical 2m horizontal width.
     color(renderer,186,184,160);
     SDL_RenderDrawLine(renderer,24,kWindowH-20,
                        24+screenX(0.25f),kWindowH-20);
@@ -836,7 +836,7 @@ int main(){
     uint64_t lastFrame=SDL_GetPerformanceCounter();
     const double perfFrequency=(double)SDL_GetPerformanceFrequency();
 
-    std::printf("\n[ASMR LAB] Room 2x2m. A fixed blue listener head has two "
+    std::printf("\n[ASMR LAB] Room 2.0x3.56m (portrait 9:16). A fixed blue listener head has two "
        "FDTD ears; moving orange artist aims mouth at its centre.\n");
     std::printf("[CONTROLS] Mouse follows cursor 1:1 (M toggles mouse). "
        "WASD/arrows move with mouse disabled.\n");
@@ -1057,7 +1057,7 @@ int main(){
                   job.selected.duration,asmr::kOfflineDx*1000,
                   asmr::kOfflinePassband,
                   (double)job.total*asmr::cells(asmr::kOfflineDx)*
-                      asmr::cells(asmr::kOfflineDx)/1e6);
+                      asmr::cellsY(asmr::kOfflineDx)/1e6);
             }
         }
         if(mode==Mode::Preview){
@@ -1162,7 +1162,7 @@ int main(){
                                 kReplayPressureFps){
                 std::vector<uint32_t> frame;
                 highQuality->pressureImage(frame,pressureExposure,
-                                            kReplayW);
+                                            kReplayW,kReplayH);
                 job.waveFrames.push_back(std::move(frame));
                 ++job.nextWaveFrame;
             }
@@ -1187,7 +1187,7 @@ int main(){
                 while(job.waveFrames.size()<targetWaveFrames)
                     job.waveFrames.push_back(job.waveFrames.empty()?
                         std::vector<uint32_t>((size_t)kReplayW*
-                            kReplayW,0xff150e09u):
+                            kReplayH,0xff150e09u):
                         job.waveFrames.back());
                 lastPlaybackWaves.swap(job.waveFrames);
                 startReplay();
@@ -1230,7 +1230,7 @@ int main(){
                         "earPeak=%.5g MP3=%s preview=%s probe=%s "
                         "(V toggles REAL CUDA wave field)\n",
                 live->dx()*1000,
-                asmr::cells(live->dx()),asmr::cells(live->dx()),
+                asmr::cells(live->dx()),asmr::cellsY(live->dx()),
                 (unsigned long long)previewStep,
                 1000.0*SDL_GetQueuedAudioSize(device)/
                     (2.0*sizeof(float)*asmr::kOutputRate),
@@ -1255,7 +1255,7 @@ int main(){
                 "mouth=(%.3f,%.3f), centreRange=%.3fm, "
                 "micSeparation=%.3fm, L=%.3fm/%.2fms, "
                 "R=%.3fm/%.2fms; physics dx=%.4fm dt=%.2fus\n",
-                asmr::kRoomMetres,asmr::kRoomMetres,
+                asmr::kRoomMetres,asmr::kRoomHeightMetres,
                 artist.x,artist.y,actualMouth.x,actualMouth.y,
                 dCentre,asmr::micSpacing(channels,head->pinnaV2),
                 dL,1000.0f*dL/echo::kSpeedOfSound,
@@ -1284,12 +1284,15 @@ int main(){
                 displayedPlaybackWave=index;
             }
             displayedWaves=replayWaveTexture;
-        }else if(showPressure && waveTexture){
+        }else if(showPressure && waveTexture &&
+                 SDL_GetTicks64()-lastWaveRefresh>=33){
+            // GPU visualization at <=30Hz, never decimate the solver.
             FdtdRoom* active=(mode==Mode::Render && highQuality)?
                 highQuality.get():live.get();
             active->pressureImage(pressurePixels,pressureExposure);
             SDL_UpdateTexture(waveTexture,nullptr,
                 pressurePixels.data(),kPressureW*sizeof(uint32_t));
+            lastWaveRefresh=SDL_GetTicks64();
         }
         const asmr::Vec2 visibleArtist=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
