@@ -49,11 +49,44 @@ bound on solver throughput, including GPU transfer/synchronization
 but not UI rendering. A `solver/compute` figure below 1x suggests
 hardware cannot keep pace; a nearly empty queue plus frequent
 `near-empty queues` supports underruns. Neither causes the device
-sample rate to change automatically. A low-pass at 8.5kHz, 2D room
+sample rate to change automatically. A low-pass at 6kHz in the economical live preset, 2D room
 resonances and partially transmissive artist geometry may instead
 color the live timbre. The **offline 1.5mm/19kHz WAV is fully
 precomputed** and therefore does not play at a lower pitch when
 rendering takes longer than real time.
+
+### Portrait room and live crackle investigation
+
+The room is now **2.0m wide × 3.5556m long**, an actual 9:16
+**rectangular FDTD grid** rather than a stretched picture. The
+listener stays at **(1m, 1m)**, leaving approximately **2.56m** in
+front (+Y) and **1m** behind, with full width to circle either side.
+Mouse movement, collisions, 25cm ruler, source-to-mic travel times,
+SVG physical dimensions, and offline paths share these metre units.
+The window is **540 × 960**. Signed-pressure visual readback runs at
+up to **30 fps** with a **360 × 640** preview, whereas the solver still
+runs at its required physical rate. The completed offline WAV keeps
+**1.5mm FDTD grid and 19kHz passband**, but with more cells it may
+need longer to render; 9:16 replay snapshots are 180 × 320 pixels.
+
+The default live grid is now **5mm**, approximately **400 × 711**
+cells, with a 6kHz input filter. This is about **25% less live cell
+work per simulated second** than the previous 533×533 grid at 3.75mm,
+even though the room area has increased. This estimate is not a
+promise about GPU wattage or actual frame rate. Press **Q** to select
+4.5mm, 3.75mm, finer or coarser settings if useful. The audio queue
+aims to retain **120ms** of stereo audio to tolerate scheduling jitter.
+Audio continues at 48kHz regardless of FDTD cell size. The lower
+live low-pass can sound softer; always compare it to a full-quality
+**F5 offline replay** before blaming the acoustic boundary shape.
+
+The crackle is **not yet proven** to be GPU starvation. Compare
+`solver/compute` (solver capacity), `near-empty queues` (starvation),
+`safety-clipped samples` (output clipping), `earPeak` and the `D`
+calibration chirp, then compare live sound to the finished WAV. If
+crackling persists offline at normal headphone level, investigate the
+moving emitter, sample reconstruction and geometry rather than just
+increasing the live buffer or GPU power.
 
 ### Head geometries and eardrums
 
@@ -111,27 +144,25 @@ speaker and outside-wall collision clearance. A physical
 
 | Property | Default live | Offline 5/10/20 s render |
 |---|---:|---:|
-| Physical room | 2.0 × 2.0 m | 2.0 × 2.0 m |
-| Grid cell | **3.75 mm** | **1.5 mm** |
-| Acoustic cells per side | ~533 | ~1333 |
-| Wave steps/s (CFL) | ~129k | ~323k |
-| Ten-cells/wavelength reference | ~9.15 kHz | ~22.9 kHz |
-| Source low-pass | **8.5 kHz** | **19 kHz** |
+| Physical room | **2.0 × 3.56 m** | **2.0 × 3.56 m** |
+| Grid cell | **5.0 mm** | **1.5 mm** |
+| Acoustic grid X × Y | **400 × 711** | **1333 × 2370** |
+| Wave steps/s (CFL) | ~97k | ~323k |
+| Ten-cells/wavelength reference | ~6.86 kHz | ~22.9 kHz |
+| Source low-pass | **6.0 kHz** | **19 kHz** |
 | Sound capture | two FDTD microphones | same two microphones |
 
-Press **Q** to cycle 3.75 / 3 / 2.5 / 5 / 8 / 10 mm live grid
-settings, with corresponding input passbands. This replaces the 3.5mm
-default with ~19% fewer space-time pressure updates (an analytical
-estimate, not a measured 19% wall-time or GPU-watt reduction). The same
-2m physical room, 8.5kHz live low-pass, 48kHz stereo device output,
-and physical-time resampler remain in use. Offline stays at 1.5 mm,
-independently of the preview resolution; it may take substantially
-longer than realtime to render even a short clip.
+Press **Q** to cycle 5 / 4.5 / 3.75 / 3 / 2.5 / 6 / 8 / 10mm live
+resolutions (unsupported coarse-grid mic placements are skipped).
+The default aims to free GPU time rather than simulate a physically
+smaller room. The previous 3.75mm / 8.5kHz preview is still available
+as a more demanding option. The high-quality offline grid remains
+**1.5mm / 19kHz**, independent of the live resolution.
 
 The room dimensions are **not 50 cm**. Every five seconds the terminal
 prints `[METRES]` showing source position in metres, actual left/right
 source-to-microphone distance, predicted flight time using
-343 m/s, exact 2m room side, dx and dt. The 2D pressure field
+343 m/s, exact 2m width / 3.56m height, dx and dt. The 2D pressure field
 decays differently from 3D spherical waves — that can make distance
 changes feel weaker, even when the grid scale is correct. We have
 not added artificial 3D distance gain or HRTF processing.
@@ -140,7 +171,7 @@ not added artificial 3D distance gain or HRTF processing.
 
 | Control | Action |
 |---|---|
-| Mouse | Position the artist absolutely in the 2 × 2 m room |
+| Mouse | Position the artist absolutely in the 2 × 3.56 m room |
 | M | Toggle mouse versus WASD/arrow movement |
 | V | Toggle the **actual CUDA pressure-wave visualization** |
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
@@ -181,7 +212,7 @@ The next loop copy is queued into SDL **before** the current copy
 runs out; audio playback does not wait for a CUDA kernel.
 
 During the offline render, 24 frames/second of the **actual CUDA
-pressure field** are also saved at a reduced 256×256 *display-only*
+pressure field** are also saved at a reduced 180×320 *display-only*
 resolution. During looping replay, SDL's consumed audio-frame count
 advances these snapshots in sync with the animated speaker. This
 eliminates the old frozen final-pressure image in playback without
