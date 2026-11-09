@@ -1041,6 +1041,57 @@ int main(){
                         liveCutoff);
                 }
             }
+            if(key==SDLK_z && mode==Mode::Preview){
+                // True acoustic zoom: the FDTD array remains Nx x Ny,
+                // while its cells and physical wall-to-wall area shrink.
+                // Skip any mode with blocked or isolated microphone ports.
+                const int previousZoom=zoomIndex;
+                bool found=false;
+                for(size_t trial=0;trial<zoomSteps.size();++trial){
+                    const int proposed=(zoomIndex+1)%(int)zoomSteps.size();
+                    zoomIndex=proposed;
+                    const float zoom=zoomValue(),dx=liveDx();
+                    const auto view=asmr::roomView(zoom);
+                    const int nx=asmr::cells(dx*zoom);
+                    const int ny=asmr::cellsY(dx*zoom);
+                    const auto mask=asmr::svgRoomMask(nx,ny,dx,*head,
+                                      view.originX,view.originY);
+                    if(asmr::validateMicrophones(mask,nx,ny,dx,
+                        channels,*head,view.originX,view.originY)){
+                        found=true;break;
+                    }
+                    std::fprintf(stderr,
+                        "[ZOOM] %.0fx rejected: mic blocked or air "
+                        "cavity disconnected on this grid.\n",zoom);
+                }
+                if(found && zoomIndex!=previousZoom){
+                    highQuality.reset();
+                    SDL_ClearQueuedAudio(device);
+                    live.reset();
+                    liveCutoff=liveBand();
+                    if(waveLoaded)liveAudio=asmr::lowpass(
+                        fullAudio,liveCutoff,asmr::kOutputRate);
+                    live=std::make_unique<FdtdRoom>(
+                        liveDx(),*head,channels,speakerShape,zoomValue());
+                    live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
+                    gView=live->view();
+                    artist=asmr::restrictCentreInView(artist,gView);
+                    sourceCursor=artist;
+                    previewStep=0;
+                    liveResampler=echo::StereoLinearResampler(
+                        live->dt(),asmr::kOutputRate);
+                    recordingClock=0;record.clear();
+                    record.push_back({0.0,artist});
+                    SDL_WarpMouseInWindow(window,
+                        screenX(artist.x),screenY(artist.y));
+                    std::printf("[ZOOM] %.0fx REAL FDTD dx=%.3fmm "
+                        "room=%.3fx%.3fm grid=%dx%d, input LP %.0fHz. "
+                        "GPU steps/sec increase with zoom.\n",
+                        zoomValue(),live->dx()*1000,
+                        gView.width,gView.height,live->nx(),live->ny(),
+                        liveCutoff);
+                }else if(!found){zoomIndex=previousZoom;}
+            }
             if(key==SDLK_r){
                 record.clear();recordingClock=0;
                 record.push_back({0,artist});
@@ -1090,7 +1141,8 @@ int main(){
             } else {
                 if(!highQuality)
                     highQuality=std::make_unique<FdtdRoom>(
-                        asmr::kOfflineDx,*head,channels,speakerShape);
+                        asmr::kOfflineDx/zoomValue(),*head,channels,
+                        speakerShape,zoomValue());
                 highQuality->uploadAudio(fullAudio);
                 highQuality->setRenderTiming(job.selected.start,
                     (double)captureSeconds,true);
@@ -1116,12 +1168,13 @@ int main(){
                     highQuality->dt(),asmr::kOutputRate);
                 SDL_ClearQueuedAudio(device);
                 mode=Mode::Render;
+                gView=highQuality->view();
                 std::printf("[RENDER] Captured last %.2fs; "
                   "offline %.1fmm / %.0fHz. %.0f million grid steps.\n",
-                  job.selected.duration,asmr::kOfflineDx*1000,
+                  job.selected.duration,highQuality->dx()*1000,
                   asmr::kOfflinePassband,
-                  (double)job.total*asmr::cells(asmr::kOfflineDx)*
-                      asmr::cellsY(asmr::kOfflineDx)/1e6);
+                  (double)job.total*highQuality->nx()*
+                      highQuality->ny()/1e6);
             }
         }
         if(mode==Mode::Preview){
@@ -1129,11 +1182,10 @@ int main(){
                 int x=0,y=0;
                 SDL_GetMouseState(&x,&y);
                 const asmr::Vec2 wanted{
-                    asmr::kRoomMetres*
-                        ((float)x+0.5f)/kWindowW,
-                    asmr::kRoomHeightMetres*
+                    gView.originX+gView.width*((float)x+0.5f)/kWindowW,
+                    gView.originY+gView.height*
                         (1.0f-((float)y+0.5f)/kWindowH)};
-                artist=asmr::moveArtist(artist,wanted);
+                artist=asmr::moveArtistInView(artist,wanted,gView);
             }else{
                 const Uint8* keys=SDL_GetKeyboardState(nullptr);
                 const float step=frameDt*0.40f;
@@ -1142,8 +1194,8 @@ int main(){
                 if(keys[SDL_SCANCODE_S]||keys[SDL_SCANCODE_DOWN])dy-=step;
                 if(keys[SDL_SCANCODE_A]||keys[SDL_SCANCODE_LEFT])dx-=step;
                 if(keys[SDL_SCANCODE_D]||keys[SDL_SCANCODE_RIGHT])dx+=step;
-                artist=asmr::moveArtist(artist,
-                    {artist.x+dx,artist.y+dy});
+                artist=asmr::moveArtistInView(artist,
+                    {artist.x+dx,artist.y+dy},gView);
             }
             recordingClock+=wallSeconds;
             record.push_back({recordingClock,artist});
@@ -1167,7 +1219,8 @@ int main(){
                 while(need>0 && batches<144){
                     const auto points=mouthBatch(
                         {},0,live->dt(),previewStep,live->dx(),
-                        sourceCursor,artist,false);
+                        sourceCursor,artist,false,
+                        live->view().originX,live->view().originY);
                     const uint64_t gpuStart=SDL_GetPerformanceCounter();
                     const auto audio=live->process(points,previewStep);
                     const uint64_t gpuEnd=SDL_GetPerformanceCounter();
@@ -1206,7 +1259,9 @@ int main(){
                 const auto sources=mouthBatch(
                     job.selected.points,job.selected.start,
                     highQuality->dt(),job.current,
-                    highQuality->dx(),job.sourceCursor,artist,true);
+                    highQuality->dx(),job.sourceCursor,artist,true,
+                    highQuality->view().originX,
+                    highQuality->view().originY);
                 const auto samples=highQuality->process(
                     sources,job.current);
                 const uint64_t count=std::min(
@@ -1250,6 +1305,7 @@ int main(){
                 writeTrajectory(trackPath,job.selected);
                 lastWindow=job.window;
                 lastPlaybackPath=job.selected;
+                lastPlaybackView=highQuality->view();
                 lastPlaybackPhysicalPath.swap(job.physicalPath);
                 lastPlayback.swap(job.samples);
                 while(job.waveFrames.size()<targetWaveFrames)
@@ -1339,6 +1395,8 @@ int main(){
             previewComputeSecondsWindow=0.0;
             audioDiagTime=audioDiagNow;
         }
+        gView=mode==Mode::Render&&highQuality?highQuality->view():
+              mode==Mode::Playback?lastPlaybackView:live->view();
         const float progress=mode==Mode::Render&&job.total>0?
             (float)((double)job.current/job.total):0.0f;
         SDL_Texture* displayedWaves=waveTexture;
@@ -1390,16 +1448,18 @@ int main(){
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR FDTD | %s | range %.2fm | mouse lag %.2fm | MP3:%s | path %.1fs | REPLAY %.2f/%.0fs | %.0fHz / %.0fHz",
+            "ASMR FDTD | %s | Z=%.0fx dx %.2fmm | range %.2fm | lag %.2fm | MP3:%s | path %.1fs | replay %.2f/%.0fs",
             mode==Mode::Render?"HIGH-RES RENDER":mode==Mode::Playback?
                 "VISIBLE LOOP":"LIVE RECORDING",
+            gView.zoom,
+            mode==Mode::Render&&highQuality?highQuality->dx()*1000:
+                live->dx()*1000,
             asmr::length(asmr::sub(asmr::mouth(visibleSource),
                                    asmr::listener())),
             asmr::length(asmr::sub(artist,sourceCursor)),
             diagnosticTone?"FDTD TEST":waveLoaded?"READY":"MISSING",
             record.empty()?0:record.back().t-record.front().t,
-            playbackPhase,(double)lastWindow,
-            liveCutoff,asmr::kOfflinePassband);
+            playbackPhase,(double)lastWindow);
         SDL_SetWindowTitle(window,title);
         SDL_Delay(6);
     }
