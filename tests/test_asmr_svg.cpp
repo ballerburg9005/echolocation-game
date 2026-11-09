@@ -287,7 +287,10 @@ int main(){
             // compensated FDTD cell-work/real-second baseline.
             const float prev=asmr::kZoomWorkRatios[stage]/
                                   (1.01f*1.01f*1.01f);
-            const float newTarget=prev*asmr::kSmallRoomWorkFraction;
+            const float newTarget=asmr::kZoomWorkRatios[stage]*
+                asmr::kSmallRoomWorkFraction/
+                std::pow(asmr::kSmallRoomRasterGuard,3.0f);
+            assert(work<=prev*0.6001f); // requested 40% work cut
             assert(std::fabs(work-newTarget)<newTarget*0.005f);
             for(const int h:{0,1,2}){
                 const auto& shape=h==0?pinnaV2:h==1?channels:simple;
