@@ -7,7 +7,9 @@
 #include <vector>
 
 namespace asmr {
-constexpr float kRoomMetres=2.0f;
+constexpr float kRoomMetres=2.0f; // width, retained for existing geometry
+constexpr float kRoomHeightMetres=kRoomMetres*16.0f/9.0f; // 9:16 portrait
+// Listener remains at y=1m: ~2.56m in front (+Y) and 1m behind.
 constexpr float kListenerX=1.0f;
 constexpr float kListenerY=1.0f;
 // These are explicitly user-specified experimental CHILD HEAD distances,
@@ -29,14 +31,18 @@ constexpr float kRoomClearance=kArtistRadius+0.018f;
 // FULL 2m room, never a 50cm scaled model.
 // Default costs about 19% fewer 2D space-time cell updates than 3.5mm
 // (533² / 571² times 3.5 / 3.75). Keep 8.5kHz input and 48kHz output.
-constexpr float kLiveDx=0.00375f;  // 533², 9.15kHz at 10 cells / lambda
+constexpr float kLiveDx=0.0050f;  // 400x711 in 9:16 room; ~25% less live cell-work
+constexpr float kBalancedDx=0.0045f; // optional higher-quality live preview
+constexpr float kPreviousDx=0.00375f; // optional former live preset
 constexpr float kMediumDx=0.0030f; // 667², 11.4kHz
 constexpr float kUltraDx=0.0025f;  // 800², 13.7kHz
 constexpr float kSafeDx=0.0050f;   // 400², 6.86kHz
 constexpr float kLowDx=0.0080f;    // 250² fallback
 constexpr float kLowestDx=0.0100f; // 200² fallback
 constexpr float kOfflineDx=0.0015f;// 1333², 22.9kHz at 10 cells / wave
-constexpr float kLivePassband=8500.0f;
+constexpr float kLivePassband=6000.0f; // <6.86kHz ten-cell numerical limit
+constexpr float kBalancedPassband=6800.0f;
+constexpr float kPreviousPassband=8500.0f;
 constexpr float kMediumPassband=9800.0f;
 constexpr float kUltraPassband=12000.0f;
 constexpr float kSafePassband=5500.0f;
@@ -85,12 +91,12 @@ inline bool validArtist(Vec2 p) {
     return std::isfinite(p.x)&&std::isfinite(p.y)&&
         p.x>=kRoomClearance-1e-5f&&p.y>=kRoomClearance-1e-5f&&
         p.x<=kRoomMetres-kRoomClearance+1e-5f&&
-        p.y<=kRoomMetres-kRoomClearance+1e-5f&&
+        p.y<=kRoomHeightMetres-kRoomClearance+1e-5f&&
         length(sub(p,listener()))>=kMinimumSeparation-1e-5f;
 }
 inline Vec2 restrictCentre(Vec2 p) {
     p.x=std::clamp(p.x,kRoomClearance,kRoomMetres-kRoomClearance);
-    p.y=std::clamp(p.y,kRoomClearance,kRoomMetres-kRoomClearance);
+    p.y=std::clamp(p.y,kRoomClearance,kRoomHeightMetres-kRoomClearance);
     const Vec2 v=sub(p,listener());
     const float d=length(v);
     if(d<kMinimumSeparation){
@@ -175,7 +181,8 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
         queuedTotalFrames-pendingFrames:0;
     return (double)(played%clipFrameCount)/sampleRate;
 }
-inline int cells(float dx){return (int)std::lround(kRoomMetres/dx);}
+inline int cells(float dx){return (int)std::lround(kRoomMetres/dx);} // X cells
+inline int cellsY(float dx){return (int)std::lround(kRoomHeightMetres/dx);}
 inline double stepSeconds(float dx){
     return (double)dx/((double)echo::kSpeedOfSound*
                           (double)echo::kSqrtTwo);
@@ -186,12 +193,12 @@ inline float tenCellFrequency(float dx){
 // Fixed listener head shadow and rubber-like room boundary, both
 // represented directly in the SAME FDTD grid. Artist remains a
 // collision-checked visual body so it never causes hard wall pops.
-inline std::vector<float> roomMask(int n,float dx){
-    std::vector<float> mask((size_t)n*n,0.0f);
+inline std::vector<float> roomMask(int nx,int ny,float dx){
+    std::vector<float> mask((size_t)nx*ny,0.0f);
     const int border=std::max(2,(int)std::ceil(0.012f/dx));
-    for(int y=0;y<n;++y)for(int x=0;x<n;++x){
-        const int id=y*n+x;
-        if(x<border||y<border||x>=n-border||y>=n-border){
+    for(int y=0;y<ny;++y)for(int x=0;x<nx;++x){
+        const int id=y*nx+x;
+        if(x<border||y<border||x>=nx-border||y>=ny-border){
             mask[id]=echo::kOuterBoundaryMaterial;continue;
         }
         const float px=((float)x+0.5f)*dx;
@@ -208,24 +215,32 @@ inline std::vector<float> roomMask(int n,float dx){
         const float a=kListenerX+sign*(kEarOffset-2.0f*dx);
         const float b=kListenerX+sign*(kHeadRadius+.007f);
         const int x0=std::max(0,(int)std::floor(std::min(a,b)/dx-.5f));
-        const int x1=std::min(n-1,(int)std::ceil(std::max(a,b)/dx-.5f));
+        const int x1=std::min(nx-1,(int)std::ceil(std::max(a,b)/dx-.5f));
         const int y0=std::max(0,(int)std::floor(
             (kListenerY-std::max(.004f,1.5f*dx))/dx-.5f));
-        const int y1=std::min(n-1,(int)std::ceil(
+        const int y1=std::min(ny-1,(int)std::ceil(
             (kListenerY+std::max(.004f,1.5f*dx))/dx-.5f));
         for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x)
-            if(mask[(size_t)y*n+x]==1.0f)mask[(size_t)y*n+x]=0.0f;
+            if(mask[(size_t)y*nx+x]==1.0f)mask[(size_t)y*nx+x]=0.0f;
     }
     return mask;
 }
-inline bool probeInAir(const std::vector<float>& mask,int n,
+// The 3-argument overloads support older square-only geometry checks.
+inline std::vector<float> roomMask(int n,float dx){
+    return roomMask(n,n,dx);
+}
+inline bool probeInAir(const std::vector<float>& mask,int nx,int ny,
                        Vec2 p,float dx) {
     const float gx=p.x/dx,gy=p.y/dx;
     const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
-    if(ix<2||iy<2||ix+1>=n-2||iy+1>=n-2)return false;
-    return mask[iy*n+ix]==0 && mask[iy*n+ix+1]==0 &&
-           mask[(iy+1)*n+ix]==0 && mask[(iy+1)*n+ix+1]==0;
+    if(ix<2||iy<2||ix+1>=nx-2||iy+1>=ny-2)return false;
+    return mask[(size_t)iy*nx+ix]==0 &&
+           mask[(size_t)iy*nx+ix+1]==0 &&
+           mask[(size_t)(iy+1)*nx+ix]==0 &&
+           mask[(size_t)(iy+1)*nx+ix+1]==0;
 }
+inline bool probeInAir(const std::vector<float>& mask,int n,
+                       Vec2 p,float dx){return probeInAir(mask,n,n,p,dx);}
 // The v2 open pinna recess is air around x=+-62mm at y=+3mm.
 // These OUTER ear probes differ from the 8cm eardrum spacing, still
 // available in the separately selectable ear-channel head (H).
