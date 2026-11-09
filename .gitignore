@@ -1,0 +1,8 @@
+# Build artifacts and audio recordings produced by the ASMR lab
+build/
+asmr_last_*.wav
+asmr_last_*_path.csv
+
+# Optional local measurement / GPU debug files
+*.nsys-rep
+*.ncu-rep
