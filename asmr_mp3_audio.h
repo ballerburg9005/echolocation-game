@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -32,6 +33,12 @@ inline bool decodeMP3(const std::string& filename,
         error="libmpg123 decoder allocation failed";
         mpg123_exit();return false;
     }
+    // mpg123 can resynchronize after a damaged MPEG frame.
+    // Its internal side-info warnings are NOT proof that the whole
+    // track failed. Silence repeated per-frame spew; report a
+    // bounded summary and any fatal error at the application level.
+    mpg123_param(mh,MPG123_ADD_FLAGS,MPG123_QUIET,0.0);
+    mpg123_param(mh,MPG123_RESYNC_LIMIT,524288,0.0);
     const auto closeDecoder=[&](){
         mpg123_delete(mh);
         mpg123_exit();
@@ -62,6 +69,23 @@ inline bool decodeMP3(const std::string& filename,
     const uint64_t maximum=secondsLimit>0?
         (uint64_t)nativeRate*(uint64_t)secondsLimit:UINT64_MAX;
     uint64_t nativeFrames=0;
+    const off_t expected=mpg123_length(mh);
+    if(expected>0){
+        const double estimated=(double)expected*
+            (double)outputRate/(double)nativeRate;
+        // Preallocate ~one full 20-minute track to avoid costly
+        // reallocation/copying of ~230MB on every growth step.
+        if(estimated>0.0&&estimated<(double)outputRate*7200.0)
+            pcm.reserve((size_t)std::ceil(estimated)+4096);
+    }
+    std::fprintf(stderr,
+        "[MP3] Decoding complete source %s, %ldHz -> %dHz. "
+        "Long tracks load progressively; waiting for first room startup.\n",
+        filename.c_str(),nativeRate,outputRate);
+    std::fflush(stderr);
+    int recoveries=0;
+    int consecutiveProblems=0;
+    uint64_t nextProgress=(uint64_t)nativeRate*30;
     bool valid=true;
     const auto drain=[&]()->bool{
         while(SDL_AudioStreamAvailable(stream)>0){
@@ -98,13 +122,52 @@ inline bool decodeMP3(const std::string& filename,
             nativeFrames+=frames;
             if(!drain()){valid=false;break;}
         }
+        if(nativeFrames>=nextProgress){
+            std::fprintf(stderr,
+                "[MP3] Decoded %.0f seconds so far ...\n",
+                (double)nativeFrames/(double)nativeRate);
+            std::fflush(stderr);
+            nextProgress+=30ULL*(uint64_t)nativeRate;
+        }
         if(status==MPG123_DONE)break;
+        if(status==MPG123_NEW_FORMAT){
+            long rate=0;int ch=0,enc=0;
+            if(mpg123_getformat(mh,&rate,&ch,&enc)!=MPG123_OK||
+               rate!=nativeRate||ch!=channels||
+               enc!=MPG123_ENC_SIGNED_16){
+                error="MP3 unexpectedly changed sample format";
+                valid=false;break;
+            }
+            consecutiveProblems=0;
+            continue;
+        }
+        if(status==MPG123_ERR||status==MPG123_NEED_MORE){
+            // mpg123 already resynchronizes by scanning past invalid
+            // frames. Retry only while the decoder is making
+            // progress; never spin forever on a corrupt/truncated
+            // file or silently claim a 20-minute song was loaded.
+            ++recoveries;
+            if(frames>0)consecutiveProblems=0;
+            else ++consecutiveProblems;
+            if(consecutiveProblems>16||recoveries>256){
+                error=std::string("MP3 resynchronization stalled after ")+
+                      std::to_string(nativeFrames/(uint64_t)nativeRate)+
+                      "s: "+mpg123_strerror(mh);
+                valid=false;break;
+            }
+            continue;
+        }
         if(status!=MPG123_OK){
-            error=std::string("MP3 decoding failed: ")+
+            error=std::string("MP3 decoder stopped: ")+
                   mpg123_strerror(mh);
             valid=false;break;
         }
-        if(received==0)break;
+        if(frames>0)consecutiveProblems=0;
+        else if(++consecutiveProblems>16){
+            error="MP3 decoder returned no data repeatedly; "
+                  "input may be truncated";
+            valid=false;break;
+        }
     }
     if(valid&&SDL_AudioStreamFlush(stream)<0){
         error=std::string("MP3 resampler flush: ")+SDL_GetError();
@@ -114,6 +177,11 @@ inline bool decodeMP3(const std::string& filename,
     SDL_FreeAudioStream(stream);
     closeDecoder();
     if(!valid)return false;
+    if(recoveries>0)
+        std::fprintf(stderr,
+            "[MP3] Recovered %d damaged-frame/format events; "
+            "continuing with %.1f seconds of decoded audio.\n",
+            recoveries,pcm.size()/(double)outputRate);
     if(pcm.size()<128){
         error="MP3 decoded to fewer than 128 audio frames";
         pcm.clear();return false;
