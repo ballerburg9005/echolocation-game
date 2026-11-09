@@ -5,9 +5,11 @@
 
 ## Build and run
 
-The input recording is always **`~/test.mp3`**. No command-line audio file
-parameter is needed; the system `libmpg123` decoder feeds the moving
-**FDTD mouth emitter**, not the speakers directly.
+The input recording defaults to **`~/test.mp3`**, but **`--mp3 FILE`**
+selects any readable MP3 file (relative or absolute path). The system
+`libmpg123` decoder feeds the moving **FDTD mouth emitter**, not the
+speakers directly. **`--help`** documents all command-line options and
+keys without starting a GUI, SDL or CUDA.
 
 ```bash
 git fetch origin
@@ -17,10 +19,12 @@ sudo apt-get install -y libmpg123-dev libsdl2-dev librsvg2-dev libcairo2-dev pkg
 make test
 make asmr
 ./build/asmr_room
+./build/asmr_room --help
+./build/asmr_room --mp3 "/path/to/recording.mp3"
 ```
 
-To supply or replace your private input: copy it to `~/test.mp3` and press
-**L** to reload. The recording need not be committed to GitHub.
+Press **L** to reload whichever input you selected using `--mp3` or
+the default `~/test.mp3`. The recording need not be committed to GitHub.
 
 Both head drawings have physically specified **millimetre** viewBoxes and
 are rendered with librsvg/Cairo at sub-millimetre spatial detail, including
@@ -102,28 +106,57 @@ crackling persists offline at normal headphone level, investigate the
 moving emitter, sample reconstruction and geometry rather than just
 increasing the live buffer or GPU power.
 
+### True acoustic zoom and reflective room walls
+
+Press **Z** to cycle through **1×, 2×, 4×, 6× and 8×**. This is not
+just display magnification: the room dimensions shrink about the
+listener, and **dx shrinks by the same factor**, preserving the
+**400×711 live grid cell budget** at the default quality. The
+listener remains in the lower third of the zoomed area. For example,
+**4×** produces a 0.50m × 0.889m physical room around the listener
+with a **1.25mm** live cell. The offline renderer similarly keeps its
+1000×1778 grid at 2mm/Z. If a zoom/grid combination blocks the
+microphone cavity, the program skips it. **High zoom demands proportionally
+more CUDA timesteps per physical second**; 8× may be far too slow for
+crackle-free live audio even at the same cell count. Use completed
+F5/F6/F7 playback to judge the sound instead.
+
+The outer walls now reflect sound with an approximate **R=0.82**
+impedance rather than the previous R=0.32. Three asymmetrically placed
+teal openings—one on the left wall, one on the right and one on the
+front wall—use **R≈0.035 locally absorbing termination material**.
+They function like door/window *acoustic exits*, not simulated space
+on the other side of a true hole. This leaves other surfaces reflective
+and deliberately breaks some persistent rectangular-room modes, without
+increasing the FDTD stencil cost. The material is frequency-independent,
+not a measured physical wall. This only changes the ASMR experiment,
+not the arcade's original acoustics.
+
 ### Head geometries and eardrums
 
 **The default listener is YOUR `listener_v2.svg`** — both mirrored halves
 and the large pinna openings, rather than the old simple round head.
 Its original **185.348 × 136.859 mm** viewBox maps to exactly
-**0.185348 × 0.136859 m** in the FDTD field, centred at (1m,1m).
+**0.185348 × 0.136859 m** in the FDTD field, centred at (1.000m,1.185m).
 The two authored half-paths are stitched only across their central
 straight seam. Their contours are static sound-reflecting SOLID cells.
 
 The **default V2** probes have been moved **outward into the real
-open pinna recesses**, at **(0.938 m, 1.003 m)** and **(1.062 m,
-1.003 m)**, **12.4 cm apart**. The prior ±4 cm probes were literally
+open pinna recesses**, at **(0.938m, 1.188m)** and **(1.062m, 1.188m)**, **12.4cm apart**. The prior ±4 cm probes were literally
 inside the V2 SVG solid; the program cut artificial ear passages to
 reach them. V2 no longer cuts those passages: the probes are in
 SVG-authored air, and the GPU sampler requires virtually its entire
 bilinear stencil to remain in air. This is an **outer-recess microphone
 experiment**, not the same as an 8 cm eardrum pair.
 
-To preserve your earlier **8 cm child eardrum-to-eardrum** assumption,
-press **H** for `listener_with_ear_channel.svg`: that independent
-model retains the 8 cm target. It is an experimental dimensional
-assumption, not a universal claim about children's anatomy. At too
+In the **newly redrawn central-cavity**
+`listener_with_ear_channel.svg` mode, the microphones are now only
+**4.2cm apart** (±21mm from listener center), **7mm below** the head's
+horizontal centerline. Their physical positions are approximately
+**(0.979m, 1.178m)** and **(1.021m, 1.178m)**. This new placement
+supersedes the earlier 8cm experimental ear-channel separation; it
+is a sound-position probe configuration, not a universal anatomical
+measurement. At too
 coarse a resolution, the program refuses a microphone position that
 cannot sample air reliably **or whose sampled air is isolated from the
 outside room**. User-edited SVG necks can seal when rasterized at
@@ -136,7 +169,7 @@ Press **H** in live mode to cycle the alternative geometries:
 `listener_v2.svg` (default), `listener_with_ear_channel.svg`, and
 `listener.svg`. The previous simple listener uses the experimental
 8 cm + 0.8×2 cm ear-canal allowance, giving **9.6 cm outer-recess mic
-spacing**. Only the explicit ear-channel mode uses the 8 cm target.
+spacing**. The inner-cavity channel mode now uses the 4.2cm target.
 
 The moving artist is YOUR **`speaker.svg`** (134.483 × 130.034 mm),
 rotated so its recessed mouth always faces the listener's centre.
@@ -223,6 +256,7 @@ solver or audio; the numerical room scale is still auditable.
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
 | H | Cycle the three *real FDTD* listener SVG shapes, default V2 |
 | Q | Cycle real-time acoustic grid resolution |
+| Z | Actual FDTD zoom: **1× / 2× / 4× / 6× / 8×**, fixed number of cells |
 | F5 / 5 | Render and then **loop exactly 5 s** |
 | F6 / 1 | Render and then **loop exactly 10 s** |
 | F7 / 2 | Render and then **loop exactly 20 s** |
@@ -230,7 +264,7 @@ solver or audio; the numerical room scale is still auditable.
 | **Space** | Stop playback and return to live movement/recording |
 | D | Toggle in-solver FDTD test chirp even without MP3 |
 | T | Toggle live FDTD audio preview |
-| L | Reload `~/test.mp3` |
+| L | Reload the input selected by `--mp3` (or default `~/test.mp3`) |
 | R | Reset live wave field and path history |
 | Esc | Quit |
 
@@ -287,8 +321,10 @@ raw signed pressure with adjustable exposure.
   of an energy-conserving moving boundary; no hard pressure snaps.
   This preserves source motion without pretending to solve 3D
   fluid–structure coupling.
-- Outer walls use a lower broad-band reflection coefficient for
-  rubber-like attenuation; no measured rubber frequency response.
+- Outer walls now reflect strongly (R=0.82); three visible teal
+  boundary slots are modeled as absorbing impedances (R=0.035), not
+  actual wave propagation outside a geometrically cut aperture.
+  This is an approximate, frequency-independent boundary condition.
 - The GPU load must be benchmarked in actual runtime, not inferred
   from its board's wattage. The 2mm 9:16 offline grid preserves
   the old square grid's ~1.78 million cells rather than growing to
