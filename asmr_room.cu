@@ -989,6 +989,89 @@ int main(int argc,char** argv){
     };
     uint64_t lastFrame=SDL_GetPerformanceCounter();
     const double perfFrequency=(double)SDL_GetPerformanceFrequency();
+    bool primeAudioAfterSwitch=false;
+    size_t previewFadeFrames=2400; // 50ms attack after solver state reset
+    // One atomic transition for ALL H, Q and Z changes. In particular,
+    // neither H nor Z is ever allowed to mutate the other dimension.
+    // Invalid channel air simply refuses that candidate configuration.
+    const auto candidateValid=[&](int h,int q,int z){
+        const auto& shape=h==0?listenerV2:
+                          h==1?listenerChannels:listenerSimple;
+        const auto view=asmr::roomView(
+            zoomSteps[(size_t)z],z==(int)zoomSteps.size()-1);
+        const float dx=asmr::zoomDx(qualityDx[(size_t)q],z);
+        const int nx=(int)std::lround(view.width/dx);
+        const int ny=(int)std::lround(view.height/dx);
+        const auto mask=asmr::svgRoomMask(nx,ny,dx,shape,
+                                        view.originX,view.originY);
+        return asmr::validateMicrophones(mask,nx,ny,dx,h!=2,
+                              shape,view.originX,view.originY);
+    };
+    const auto selectConfiguration=[&](int h,int q,int z,
+                                      const char* changed)->bool{
+        if(!candidateValid(h,q,z)){
+            std::fprintf(stderr,
+                "[%s] REFUSED head=%s, Z=%.2fx%s, Q=%d: "
+                "mic cavity solid/disconnected at this dx. "
+                "Keeping current H/Z/Q unchanged.\\n",
+                changed,h==0?"V2":h==1?"CHANNEL":"SIMPLE",
+                zoomSteps[(size_t)z],z==4?" SQUARE":"",q);
+            return false;
+        }
+        if(h==headIndex&&q==qualityIndex&&z==zoomIndex)return true;
+        const auto* newHead=h==0?&listenerV2:
+                             h==1?&listenerChannels:&listenerSimple;
+        const float dx=asmr::zoomDx(qualityDx[(size_t)q],z);
+        const float nextCutoff=std::min(19000.0f,
+            qualityBand[(size_t)q]*qualityDx[(size_t)q]/dx);
+        std::vector<float> newAudio=waveLoaded?
+            asmr::lowpass(fullAudio,nextCutoff,asmr::kOutputRate):
+            std::vector<float>{};
+        // SDL is paused during CUDA graph construction, preventing
+        // an empty live queue from generating crackling while switching.
+        SDL_PauseAudioDevice(device,1);
+        SDL_ClearQueuedAudio(device);
+        auto next=std::make_unique<FdtdRoom>(
+            dx,*newHead,h!=2,speakerShape,zoomSteps[(size_t)z],
+            z==(int)zoomSteps.size()-1);
+        next->uploadAudio(diagnosticTone?diagnosticAudio:newAudio);
+        highQuality.reset();
+        live=std::move(next);
+        const bool changedRoom=z!=zoomIndex;
+        headIndex=h;qualityIndex=q;zoomIndex=z;
+        head=newHead;channels=h!=2;
+        liveCutoff=nextCutoff;liveAudio=std::move(newAudio);
+        gView=live->view();
+        artist=asmr::restrictCentreInView(artist,gView);
+        sourceCursor=artist;
+        previewStep=0;
+        liveResampler=echo::StereoLinearResampler(
+            live->dt(),asmr::kOutputRate);
+        previewFadeFrames=0;
+        primeAudioAfterSwitch=previewEnabled&&
+                              (waveLoaded||diagnosticTone);
+        if(!primeAudioAfterSwitch)SDL_PauseAudioDevice(device,0);
+        if(changedRoom){
+            recordingClock=0.0;record.clear();
+            record.push_back({0.0,artist});
+            SDL_WarpMouseInWindow(window,
+                screenX(artist.x),screenY(artist.y));
+        }
+        // A completed WAV used the previous head/room, and must not
+        // be replayed with the newly selected visible geometry.
+        lastPlayback.clear();lastPlaybackWaves.clear();
+        lastPlaybackPhysicalPath.clear();
+        std::fprintf(stderr,
+            "[%s] ACTIVE head=%s Z=%.2fx%s Q=%d dx=%.3fmm "
+            "room=%.3fx%.3fm cells=%dx%d expected FDTD "
+            "cell-work=%.1f%% of old 5mm full room.\\n",
+            changed,h==0?"V2":h==1?"CHANNEL":"SIMPLE",
+            zoomValue(),squareMode()?" SQUARE":"",qualityIndex,
+            live->dx()*1000,gView.width,gView.height,
+            live->nx(),live->ny(),
+            100.0f*asmr::relativeCellWork(live->dx(),gView));
+        return true;
+    };
 
     std::printf("\n[ASMR LAB] Room 2.0x3.56m (portrait 9:16). A fixed blue listener head has two "
        "FDTD ears; moving orange artist aims mouth at its centre.\n");
@@ -1062,213 +1145,38 @@ int main(int argc,char** argv){
                     live->dt(),asmr::kOutputRate);
             }
             if(key==SDLK_h && mode==Mode::Preview){
-                // H has a deterministic V2 -> CHANNEL -> SIMPLE cycle.
-                // NEVER quietly substitute the simple SVG for CHANNEL.
+                // H never changes the room scale. Even a channel
+                // blocked by coarse dx cannot silently force a zoom.
                 headCycleIndex=(headCycleIndex+1)%3;
-                const int requested=headCycleIndex;
-                const auto& candidate=requested==0?listenerV2:
-                                      requested==1?listenerChannels:
-                                                   listenerSimple;
-                const bool requestedChannels=requested!=2;
-                auto validCandidate=[&](const asmr::RoomView& v,
-                                        float dx){
-                    const int nx=(int)std::lround(v.width/dx);
-                    const int ny=(int)std::lround(v.height/dx);
-                    const auto mask=asmr::svgRoomMask(nx,ny,dx,candidate,
-                                        v.originX,v.originY);
-                    return asmr::validateMicrophones(mask,nx,ny,dx,
-                        requestedChannels,candidate,v.originX,v.originY);
-                };
-                bool valid=validCandidate(live->view(),live->dx());
-                bool changedZoom=false;
-                if(!valid && requested==1){
-                    // The authored channel groove is a narrow path
-                    // whose raster connectivity is not monotonic in
-                    // dx. Test each gentle stage instead of falsely
-                    // assuming the finest/square grid is valid.
-                    const int originalZoom=zoomIndex;
-                    for(int z=0;z<(int)zoomSteps.size();++z){
-                        if(z==originalZoom)continue;
-                        const bool sq=z==(int)zoomSteps.size()-1;
-                        const float zoom=zoomSteps[z];
-                        const auto view=asmr::roomView(zoom,sq);
-                        const float dx=sq?
-                            asmr::squareDxFromBase(qualityDx[qualityIndex]):
-                            qualityDx[qualityIndex]/zoom;
-                        if(validCandidate(view,dx)){
-                            zoomIndex=z;
-                            valid=true;
-                            changedZoom=true;
-                            std::fprintf(stderr,
-                                "[H] CHANNEL can sample connected air at "
-                                "Z=%.2fx%s, dx %.3fmm; switching to "
-                                "the REAL channel SVG at this gentle "
-                                "acoustic grid.\n",
-                                zoom,sq?" SQUARE":"",dx*1000);
-                            break;
-                        }
-                    }
-                }
-                if(!valid){
-                    std::fprintf(stderr,
-                        "[H] Cannot select %s: its microphone is "
-                        "blocked or disconnected at %.2fmm. "
-                        "Still showing %s; press H for next model, "
-                        "or Q for finer geometry.\n",
-                        requested==0?"V2":requested==1?"CHANNEL":"SIMPLE",
-                        live->dx()*1000,
-                        headIndex==0?"V2":headIndex==1?"CHANNEL":"SIMPLE");
-                }else{
-                    headIndex=requested;
-                    channels=requestedChannels;
-                    head=&candidate;
-                    if(changedZoom){
-                        liveCutoff=liveBand();
-                        if(waveLoaded)liveAudio=asmr::lowpass(
-                            fullAudio,liveCutoff,asmr::kOutputRate);
-                        gView=activeView();
-                        artist=asmr::restrictCentreInView(artist,gView);
-                        SDL_WarpMouseInWindow(window,
-                            screenX(artist.x),screenY(artist.y));
-                        recordingClock=0;
-                        record.clear();record.push_back({0.0,artist});
-                    }
-                    SDL_ClearQueuedAudio(device);
-                    highQuality.reset();live.reset();
-                    live=std::make_unique<FdtdRoom>(
-                        liveDx(),*head,channels,speakerShape,
-                        zoomValue(),squareMode());
-                    live->uploadAudio(diagnosticTone?diagnosticAudio:
-                                      liveAudio);
-                    sourceCursor=artist;previewStep=0;
-                    liveResampler=echo::StereoLinearResampler(
-                        live->dt(),asmr::kOutputRate);
-                    std::fprintf(stderr,
-                        "[H] ACTIVE %s (original SVG), %.1fmm mic "
-                        "separation, y offset %.1fmm, %.2fmm dx.\n",
-                        requested==0?"listener_v2.svg":
-                        requested==1?"listener_with_ear_channel.svg":
-                                     "listener.svg",
-                        asmr::micSpacing(channels,head->pinnaV2)*1000,
-                        asmr::micOffsetY(channels,head->pinnaV2)*1000,
-                        live->dx()*1000);
-                }
+                selectConfiguration(headCycleIndex,qualityIndex,
+                                    zoomIndex,"H");
             }
             if(key==SDLK_q && mode==Mode::Preview){
-                // Never silently use 10mm cells for a 3mm-wide
-                // ear groove if its microphone is blocked at this
-                // resolution; skip any such unsupported grid.
-                const int old=qualityIndex;
-                for(size_t trial=0;trial<qualityDx.size();++trial) {
-                    qualityIndex=(qualityIndex+1)%
-                        (int)qualityDx.size();
-                    const float dx=liveDx();
-                    const auto view=activeView();
-                    const int side=(int)std::lround(view.width/dx);
-                    const int length=(int)std::lround(view.height/dx);
-                    const auto mask=asmr::svgRoomMask(side,length,dx,*head,
-                        view.originX,view.originY);
-                    if(asmr::validateMicrophones(
-                        mask,side,length,dx,channels,*head,
-                        view.originX,view.originY))
-                        break;
+                bool applied=false;
+                for(size_t trial=1;trial<qualityDx.size();++trial){
+                    const int q=(qualityIndex+(int)trial)%
+                                    (int)qualityDx.size();
+                    if(selectConfiguration(headIndex,q,zoomIndex,"Q")){
+                        applied=true;break;
+                    }
                 }
-                if(old!=qualityIndex) {
-                    liveCutoff=liveBand();
-                    if(waveLoaded)liveAudio=asmr::lowpass(
-                        fullAudio,liveCutoff,asmr::kOutputRate);
-                    SDL_ClearQueuedAudio(device);
-                    live.reset();
-                    live=std::make_unique<FdtdRoom>(
-                        liveDx(),*head,channels,speakerShape,
-        zoomValue(),squareMode());
-                    live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
-                    previewStep=0;sourceCursor=artist;
-                    liveResampler=echo::StereoLinearResampler(
-                        live->dt(),asmr::kOutputRate);
-                    std::printf("[QUALITY] %.2fx%s physical FDTD room "
-                        "dx=%.2fmm, %dx%d acoustic cells, "
-                        "spatial 10-cell band %.0fHz, "
-                        "input MP3 LP %.0fHz\n",
-                        zoomValue(),squareMode()?" SQUARE":"",
-                        live->dx()*1000,live->nx(),live->ny(),
-                        asmr::tenCellFrequency(live->dx()),
-                        liveCutoff);
-                }
+                if(!applied)std::fprintf(stderr,
+                    "[Q] No compatible quality preset for this H/Z.\\n");
             }
             if(key==SDLK_z && mode==Mode::Preview){
-                // True acoustic zoom: the FDTD array remains Nx x Ny,
-                // while its cells and physical wall-to-wall area shrink.
-                // Skip any mode with blocked or isolated microphone ports.
-                const int previousZoom=zoomIndex;
-                bool found=false;
-                for(size_t trial=0;trial<zoomSteps.size();++trial){
-                    const int proposed=(zoomIndex+1)%(int)zoomSteps.size();
-                    zoomIndex=proposed;
-                    const float zoom=zoomValue(),dx=liveDx();
-                    const auto view=activeView();
-                    const int nx=(int)std::lround(view.width/dx);
-                    const int ny=(int)std::lround(view.height/dx);
-                    const auto mask=asmr::svgRoomMask(nx,ny,dx,*head,
-                                      view.originX,view.originY);
-                    if(asmr::validateMicrophones(mask,nx,ny,dx,
-                        channels,*head,view.originX,view.originY)){
-                        found=true;break;
+                // Zoom never changes the selected head. Walk past
+                // incompatible cell sizes while retaining H and Q.
+                bool applied=false;
+                for(size_t trial=1;trial<zoomSteps.size();++trial){
+                    const int z=(zoomIndex+(int)trial)%
+                                 (int)zoomSteps.size();
+                    if(selectConfiguration(headIndex,qualityIndex,z,"Z")){
+                        applied=true;break;
                     }
-                    // Always allow returning to the huge original 1x
-                    // room: if the CHANNEL cavity is too fine for 5mm
-                    // cells, explicitly switch to the valid V2 head.
-                    // No misleading stale pressure field/SVG pairing.
-                    if(zoomIndex==0 && headIndex==1){
-                        const auto v2=asmr::svgRoomMask(
-                            nx,ny,dx,listenerV2,
-                            view.originX,view.originY);
-                        if(asmr::validateMicrophones(v2,nx,ny,dx,true,
-                            listenerV2,view.originX,view.originY)){
-                            headIndex=0;headCycleIndex=0;
-                            head=&listenerV2;channels=true;
-                            std::fprintf(stderr,
-                                "[Z] Returning to original full 1x room. "
-                                "CHANNEL mics cannot connect at %.2fmm, "
-                                "so changing ACTIVE head to V2.\n",
-                                dx*1000);
-                            found=true;break;
-                        }
-                    }
-                    std::fprintf(stderr,
-                        "[ZOOM] %.2fx%s rejected: mic blocked or "
-                        "disconnected on this grid.\n",
-                        zoom,squareMode()?" SQUARE":"");
                 }
-                if(found && zoomIndex!=previousZoom){
-                    highQuality.reset();
-                    SDL_ClearQueuedAudio(device);
-                    live.reset();
-                    liveCutoff=liveBand();
-                    if(waveLoaded)liveAudio=asmr::lowpass(
-                        fullAudio,liveCutoff,asmr::kOutputRate);
-                    live=std::make_unique<FdtdRoom>(
-                        liveDx(),*head,channels,speakerShape,
-        zoomValue(),squareMode());
-                    live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
-                    gView=live->view();
-                    artist=asmr::restrictCentreInView(artist,gView);
-                    sourceCursor=artist;
-                    previewStep=0;
-                    liveResampler=echo::StereoLinearResampler(
-                        live->dt(),asmr::kOutputRate);
-                    recordingClock=0;record.clear();
-                    record.push_back({0.0,artist});
-                    SDL_WarpMouseInWindow(window,
-                        screenX(artist.x),screenY(artist.y));
-                    std::printf("[ZOOM] %.2fx%s REAL FDTD dx=%.3fmm "
-                        "room=%.3fx%.3fm grid=%dx%d, input LP %.0fHz. "
-                        "GPU time-step rate relative to 1x: %.2fx.\n",
-                        zoomValue(),squareMode()?" SQUARE":"",
-                        live->dx()*1000,
-                        gView.width,gView.height,live->nx(),live->ny(),
-                        liveCutoff,qualityDx[qualityIndex]/live->dx());
-                }else if(!found){zoomIndex=previousZoom;}
+                if(!applied)std::fprintf(stderr,
+                    "[Z] No compatible physical zoom for this head/Q; "
+                    "head and room left unchanged.\\n");
             }
             if(key==SDLK_r){
                 record.clear();recordingClock=0;
