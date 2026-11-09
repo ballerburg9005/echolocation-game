@@ -766,7 +766,8 @@ static void makeSafePlayback(std::vector<float>& audio){
 static std::vector<float> distanceShapedClip(
     const std::vector<float>& reference,
     const std::vector<asmr::PathPoint>& physicalPath,
-    bool channel,bool pinnaV2,int strength){
+    bool channel,bool pinnaV2,int strength,
+    float physicsScale=1.0f){
     std::vector<float> result=reference;
     if(strength<=0||physicalPath.empty())return result;
     const size_t frames=result.size()/2;
@@ -790,9 +791,9 @@ static std::vector<float> distanceShapedClip(
         const auto m=asmr::mouth(source);
         return std::array<float,2>{
             asmr::distanceFalloffGain(
-                asmr::length(asmr::sub(m,earL)),strength),
+                asmr::length(asmr::sub(m,earL))*physicsScale,strength),
             asmr::distanceFalloffGain(
-                asmr::length(asmr::sub(m,earR)),strength)};
+                asmr::length(asmr::sub(m,earR))*physicsScale,strength)};
     };
     constexpr size_t segment=96; // 2ms at 48kHz
     for(size_t first=0;first<frames;first+=segment){
@@ -841,6 +842,9 @@ static void printUsage(const char* executable){
         "                1.00/1.25/1.55/2.00/SQUARE 0.75m\n"
         "                last view is a 0.75m square, still orbitable\n"
         "                (~85% -> 27.2% of original full-room cell-work)\n"
+        "  F11 / Shift+F11 Cycle real physics metre scale 1/2/5/10x\n"
+        "                room, listener, artist, mics, wall/ports ALL scale\n"
+        "                same GPU grid; physical dx/dt and LP change\n"
         "  F12           Cycle distance falloff: raw, 1,2,3,4,6,8,\n"
         "                10,12,16,20x extra 2D-to-3D pressure loss\n"
         "  Shift+F12     Previous distance-falloff strength\n"
@@ -1187,6 +1191,7 @@ int main(int argc,char** argv){
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload selected MP3, D FDTD test chirp, T toggle live, "
        "H V2/channel/simple, Q quality, Z 1/1.25/1.55/2/square, "
+       "F11 physical metres 1/2/5/10x, "
        "F12 distance 0x-20x (Shift reverses), "
        "V pressure waves, B authored mask guide, 9/0 exposure, "
        "R reset, Esc exit.\n");
@@ -1253,7 +1258,7 @@ int main(int argc,char** argv){
                             playbackPhase*asmr::kOutputRate)));
                     auto updated=distanceShapedClip(lastPlaybackBase,
                         lastPlaybackPhysicalPath,channels,head->pinnaV2,
-                        strength);
+                        strength,physicsScaleValue());
                     std::vector<float> tail(
                         updated.begin()+2*atFrame,updated.end());
                     // An instantaneous change of exponent otherwise
@@ -1340,6 +1345,30 @@ int main(int argc,char** argv){
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
             }
+            if(key==SDLK_F11){
+                if(mode==Mode::Preview){
+                    const bool reverse=(event.key.keysym.mod&KMOD_SHIFT)!=0;
+                    const int count=(int)asmr::kPhysicsScales.size();
+                    const int next=(physicsScaleIndex+count+
+                        (reverse?-1:1))%count;
+                    selectConfiguration(headIndex,qualityIndex,zoomIndex,
+                                        "F11",next);
+                    char notice[200];
+                    std::snprintf(notice,sizeof(notice),
+                        "F11 PHYSICS %.0fx | ROOM %.1fx%.1fm | "
+                        "REAL DX %.1fmm | BAND %.0fHz | Q%d Z %.2fx",
+                        physicsScaleValue(),
+                        live->view().width*physicsScaleValue(),
+                        live->view().height*physicsScaleValue(),
+                        live->physicalDx()*1000,
+                        liveCutoff,qualityIndex,zoomValue());
+                    selectorNotice=notice;
+                    selectorNoticeUntil=SDL_GetTicks64()+3500;
+                }else{
+                    selectorNotice="F11: press SPACE / return to LIVE first";
+                    selectorNoticeUntil=SDL_GetTicks64()+3500;
+                }
+            }
             if(key==SDLK_h && mode==Mode::Preview){
                 const bool reverse=(event.key.keysym.mod&KMOD_SHIFT)!=0;
                 const auto next=asmr::nextSelection(
@@ -1420,7 +1449,17 @@ int main(int argc,char** argv){
                         *head,channels,
                         speakerShape,zoomValue(),squareMode(),
                         physicsScaleValue());
-                highQuality->uploadAudio(fullAudio);
+                const float offlineCutoff=std::min(
+                    asmr::kOfflinePassband,
+                    0.90f*asmr::tenCellFrequency(
+                        highQuality->physicalDx()));
+                const auto offlineAudio=asmr::lowpass(
+                    fullAudio,offlineCutoff,asmr::kOutputRate);
+                highQuality->uploadAudio(offlineAudio);
+                std::printf("[F11 OFFLINE] physical dx %.2fmm, "
+                    "band-limited MP3 to %.0fHz, F11 %.0fx.\n",
+                    highQuality->physicalDx()*1000,offlineCutoff,
+                    physicsScaleValue());
                 highQuality->setRenderTiming(job.selected.start,
                     (double)captureSeconds,true);
                 highQuality->reset();
@@ -1531,11 +1570,13 @@ int main(int argc,char** argv){
                             (mid.y+0.5f)*live->dx()};
                     const float falloffL=asmr::distanceFalloffGain(
                         asmr::length(asmr::sub(physicalMouth,
-                            asmr::leftEar(channels,head->pinnaV2))),
+                            asmr::leftEar(channels,head->pinnaV2)))*
+                            physicsScaleValue(),
                         falloffStrength());
                     const float falloffR=asmr::distanceFalloffGain(
                         asmr::length(asmr::sub(physicalMouth,
-                            asmr::rightEar(channels,head->pinnaV2))),
+                            asmr::rightEar(channels,head->pinnaV2)))*
+                            physicsScaleValue(),
                         falloffStrength());
                     for(int n=0;n<asmr::kGraphBatch;++n)
                         liveResampler.push(
@@ -1555,7 +1596,11 @@ int main(int argc,char** argv){
                     if(previewFadeFrames<asmr::kOutputRate)++previewFadeFrames;
                     for(int ch=0;ch<2;++ch){
                         float& v=queued[frame*2+ch];
-                        v=std::isfinite(v)?0.55f*fade*v:0.0f;
+                        // Requested square-room MP3 output trim:
+                        // 75% amplitude relative to all other zooms.
+                        const float squareGain=squareMode()?0.75f:1.0f;
+                        v=std::isfinite(v)?
+                            0.55f*squareGain*fade*v:0.0f;
                         if(std::fabs(v)>0.85f)++clippedPreview;
                         v=std::clamp(v,-0.85f,0.85f);
                         previewSignalPeak=std::max(
@@ -1618,13 +1663,18 @@ int main(int argc,char** argv){
                 // Both saved WAV and SDL loop are N*48000 frames.
                 asmr::fitStereoClip(job.samples,job.window);
                 makeSafePlayback(job.samples);
+                if(squareMode()){
+                    // Apply 75% AFTER offline peak normalization so
+                    // the limiter cannot silently undo it.
+                    for(float& sample:job.samples)sample*=0.75f;
+                }
                 // F12 must run AFTER normalizing the unshaped FDTD
                 // output, or the old automatic gain would cancel the
                 // entire effect for far-away recorded movement.
                 lastPlaybackBase=job.samples;
                 job.samples=distanceShapedClip(lastPlaybackBase,
                     job.physicalPath,channels,head->pinnaV2,
-                    falloffStrength());
+                    falloffStrength(),physicsScaleValue());
                 char soundPath[80],trackPath[80];
                 std::snprintf(soundPath,sizeof(soundPath),
                               "asmr_last_%02ds.wav",job.window);
