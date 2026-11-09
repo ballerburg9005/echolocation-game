@@ -15,9 +15,9 @@ build/echolocation_game: echolocation_game.cu acoustics.h collision.h svg_raster
 # Separate CUDA/SDL2-only ASMR experiment; no effect on arcade binary.
 asmr: build/asmr_room
 
-build/asmr_room: asmr_room.cu asmr_lab_math.h asmr_mp3_audio.h acoustics.h source_model.h
+build/asmr_room: asmr_room.cu asmr_lab_math.h asmr_mp3_audio.h asmr_svg_geometry.h acoustics.h source_model.h
 	mkdir -p build
-	$(NVCC) $(NVCCFLAGS) -o $@ asmr_room.cu -lSDL2 -lmpg123 -lpthread
+	$(NVCC) $(NVCCFLAGS) $(shell pkg-config --cflags librsvg-2.0 cairo) -o $@ asmr_room.cu -lSDL2 -lmpg123 $(shell pkg-config --libs librsvg-2.0 cairo) -lpthread
 
 test:
 	@set -e; for src in tests/test_*.cpp; do \
