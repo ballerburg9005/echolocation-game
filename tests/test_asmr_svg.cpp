@@ -45,6 +45,19 @@ int main(){
     // the author's 8cm separation should land in its OPEN groove.
     assert(!channels.solid(-0.04f,asmr::kChannelEarY));
     assert(!channels.solid(0.04f,asmr::kChannelEarY));
+    std::fprintf(stderr,
+        "[SVG VERIFY] simple (%d,%d) alpha: -48mm=%d +48mm=%d "
+        "left=-0.06:%d,-0.05:%d,-0.04:%d right=0.06:%d "
+        "channel [-40mm,+40mm] mid= %d,%d shifted=%d,%d\n",
+        simple.w,simple.h,
+        (int)simple.solid(-.048f,0),(int)simple.solid(.048f,0),
+        (int)simple.solid(-.060f,0),
+        (int)simple.solid(-.050f,0),(int)simple.solid(-.040f,0),
+        (int)simple.solid(.060f,0),
+        (int)channels.solid(-.040f,0),
+        (int)channels.solid(.040f,0),
+        (int)channels.solid(-.040f,asmr::kChannelEarY),
+        (int)channels.solid(.040f,asmr::kChannelEarY));
     assert(!simple.solid(-.048f,0));
     assert(!simple.solid(.048f,0));
     assert(std::fabs(asmr::micSpacing(true)-0.08f)<1e-6f);
