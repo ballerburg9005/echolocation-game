@@ -57,10 +57,13 @@ rendering takes longer than real time.
 
 ### Portrait room and live crackle investigation
 
-The room is now **2.0m wide × 3.5556m long**, an actual 9:16
+The room is **2.0m wide × 3.5556m long**, an actual 9:16
 **rectangular FDTD grid** rather than a stretched picture. The
-listener stays at **(1m, 1m)**, leaving approximately **2.56m** in
-front (+Y) and **1m** behind, with full width to circle either side.
+listener is exactly at **(1.000m, 1.185m)** — one-third up from the
+bottom — leaving **2.370m** in front (+Y) and **1.185m** behind,
+with full width to circle either side. The real mouth-to-ear range
+near the far wall is shorter than 2.370m because the speaker must stay
+inside the wall and its mouth points 5.5cm toward the listener.
 Mouse movement, collisions, 25cm ruler, source-to-mic travel times,
 SVG physical dimensions, and offline paths share these metre units.
 The window is **540 × 960**. Signed-pressure visual readback runs at
@@ -69,10 +72,14 @@ runs at its required physical rate. The completed offline WAV keeps
 **1.5mm FDTD grid and 19kHz passband**, but with more cells it may
 need longer to render; 9:16 replay snapshots are 180 × 320 pixels.
 
-The default live grid is now **5mm**, approximately **400 × 711**
-cells, with a 6kHz input filter. This is about **25% less live cell
-work per simulated second** than the previous 533×533 grid at 3.75mm,
-even though the room area has increased. This estimate is not a
+The default live grid is **5mm**, approximately **400 × 711 = 284,400**
+cells, with a 6kHz input filter. The previous 3.75mm square-room
+preview was **533 × 533 = 284,089** cells. The total grid budget has
+therefore been **preserved to within 0.11%**, not multiplied by the
+9:16 transformation; the coarser dx also reduces time steps per
+simulated second. This yields about **25% fewer live cell updates per
+simulated second** than that old square-room preview even though the
+physical area is larger. This estimate is not a
 promise about GPU wattage or actual frame rate. Press **Q** to select
 4.5mm, 3.75mm, finer or coarser settings if useful. The audio queue
 aims to retain **120ms** of stereo audio to tolerate scheduling jitter.
@@ -136,9 +143,33 @@ reintroduce discontinuities during movement. This is an approximation
 to a moving solid boundary, not a complete
 fluid–structure or rigid-body acoustic calculation.
 
-The mouse still maps 1:1 to the full room, subject to listener,
-speaker and outside-wall collision clearance. A physical
-**25 cm ruler** appears at the bottom of the view.
+The mouse still maps 1:1 to the **target location** in the full
+physical room, subject to listener, speaker and outside-wall collision
+clearance. For the same impedance geometry and mouth injection to
+appear where the CUDA solver actually computes them, the **orange
+speaker SVG now tracks the smoothed acoustic-source position**.
+When the mouse moves faster than the source speed limit, a **small
+hollow yellow ring** shows the desired mouse position. This replaces
+the old misleading ghost where the speaker sprite jumped far ahead
+of the actual acoustic speaker head, sometimes by hundreds of pixels.
+The underlying physical source smoothing and 1:1 mouse target mapping
+are unchanged. During looping offline replay, the head also follows
+its **recorded physical FDTD movement**, not the unsmoothed cursor path.
+
+When **V** is enabled, the displayed listener is the **actual pixelated
+acoustic mask only**. Rendering the authored SVG over that same mask
+made it look like there were two offset heads. Press **V** again to
+see the original high-resolution SVG alone. CPU tests verify the SVG
+solid occupancy and the pixelated mask agree in the shared metre-scale
+coordinates and that the 9:16 texture lookup resolves the listener
+position within two grid cells.
+
+A physical **25 cm ruler** appears at the bottom of the view. The
+window title includes the computed **mouth-to-listener range (metres)**
+and how far the physics source is behind its mouse target. The terminal
+`[METRES]` lines show the listener, mouth, microphone ranges and
+predicted propagation delay. This allows auditing the actual geometry
+without judging range solely by how loud the 2D acoustics seem.
 
 ### Frequency and full-room physical scale
 
@@ -159,19 +190,22 @@ smaller room. The previous 3.75mm / 8.5kHz preview is still available
 as a more demanding option. The high-quality offline grid remains
 **1.5mm / 19kHz**, independent of the live resolution.
 
-The room dimensions are **not 50 cm**. Every five seconds the terminal
-prints `[METRES]` showing source position in metres, actual left/right
-source-to-microphone distance, predicted flight time using
-343 m/s, exact 2m width / 3.56m height, dx and dt. The 2D pressure field
-decays differently from 3D spherical waves — that can make distance
-changes feel weaker, even when the grid scale is correct. We have
-not added artificial 3D distance gain or HRTF processing.
+Every five seconds the terminal prints `[METRES]` with the actual
+listener, mouse target, smoothed acoustic head, mouth, left/right
+source-to-microphone distances and predicted flight times at **343m/s**.
+The grid's physical width/height remain 2.0m × 3.5556m. **A true 2D
+wave spreads as approximately 1/sqrt(distance)**, weaker attenuation
+than the approximately 1/distance of a freely spreading 3D wave.
+The ear outline also lacks full 3D pinna cues, so a 2m geometry may
+sound subjectively closer even when the physical grid and acoustic
+delays are correct. We have NOT added arbitrary distance gain to the
+solver or audio; the numerical room scale is still auditable.
 
 ### Controls
 
 | Control | Action |
 |---|---|
-| Mouse | Position the artist absolutely in the 2 × 3.56 m room |
+| Mouse | Position the movement TARGET in 2 × 3.56 m; orange acoustic head follows smoothly |
 | M | Toggle mouse versus WASD/arrow movement |
 | V | Toggle the **actual CUDA pressure-wave visualization** |
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
