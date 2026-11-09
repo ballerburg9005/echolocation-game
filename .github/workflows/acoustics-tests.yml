@@ -19,14 +19,17 @@ jobs:
       - name: Install curved SVG raster dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y librsvg2-dev libcairo2-dev pkg-config
+          sudo apt-get install -y librsvg2-dev libcairo2-dev libsdl2-dev libmpg123-dev ffmpeg pkg-config
       - name: Compile and run physics and curved SVG numerical tests
         shell: bash
         run: |
           set -euo pipefail
           for source in tests/test_*.cpp; do
             executable="/tmp/$(basename "$source" .cpp)"
-            if [[ "$(basename "$source")" == "test_asmr_svg.cpp" ]]; then
+            if [[ "$(basename "$source")" == "test_asmr_mp3.cpp" ]]; then
+              g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+                "$source" -o "$executable" -lSDL2 -lmpg123
+            elif [[ "$(basename "$source")" == "test_asmr_svg.cpp" ]]; then
               g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
                 $(pkg-config --cflags librsvg-2.0 cairo) \
                 "$source" asmr_svg_geometry.cpp -o "$executable" \
@@ -37,3 +40,18 @@ jobs:
             fi
             "$executable"
           done
+      - name: Decode 75-second MP3 beyond 60s and recover corrupt MPEG side info
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -nostdin -y -hide_banner -loglevel error \
+            -f lavfi -i 'sine=frequency=440:sample_rate=44100:duration=75' \
+            -ac 2 -c:a libmp3lame -b:a 96k /tmp/asmr_clean.mp3
+          python3 - <<'PY'
+          from pathlib import Path
+          data=bytearray(Path('/tmp/asmr_clean.mp3').read_bytes())
+          assert len(data)>12500
+          data[12217:12277]=b'\xff\xad\x4c\xff'+bytes(56)
+          Path('/tmp/asmr_corrupt.mp3').write_bytes(data)
+          PY
+          /tmp/test_asmr_mp3 /tmp/asmr_clean.mp3 /tmp/asmr_corrupt.mp3
