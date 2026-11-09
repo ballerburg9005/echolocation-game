@@ -8,6 +8,7 @@
 // stutter-free 48kHz stereo WAV playback and writing an output file.
 #include "asmr_lab_math.h"
 #include "asmr_svg_geometry.h"
+#include "asmr_dynamic_head.h"
 #include "asmr_mp3_audio.h"
 #include "source_model.h"
 #include <cuda_runtime.h>
@@ -79,10 +80,12 @@ __device__ float roomWaveSample(const float* pcm,int length,double seconds) {
 __global__ void asmrPressureStep(
     float* next,const float* now,const float* previous,
     const float* mask,const float* pcm,const int* pcmLength,
-    const float2* mouthLocations,const uint64_t* blockBase,
+    const float4* mouthLocations,const uint64_t* blockBase,
     float* outStereo,int localStep,int n,float dx,float dt,float decay,
     float halfMicSeparation,float micYOffset,double absoluteStart,
-    double recordingDuration,bool offline)
+    double recordingDuration,bool offline,
+    const unsigned char* speakerPixels,int speakerW,int speakerH,
+    float speakerWidthCells,float speakerHeightCells)
 {
     const int x=blockIdx.x*blockDim.x+threadIdx.x;
     const int y=blockIdx.y*blockDim.y+threadIdx.y;
@@ -102,18 +105,46 @@ __global__ void asmrPressureStep(
         next[idx]=0.0f;return;
     }
     const float center=now[idx];
-    const float l=mask[idx-1]>0.0f?center:now[idx-1];
-    const float r=mask[idx+1]>0.0f?center:now[idx+1];
-    const float d=mask[idx-n]>0.0f?center:now[idx-n];
-    const float u=mask[idx+n]>0.0f?center:now[idx+n];
+    const float4 mouth=mouthLocations[localStep];
+    // The source location and sender centre are passed at EVERY FDTD
+    // timestep, and give the forward direction without a sqrt.
+    const float invMouthCells=dx/asmr::kMouthOffset;
+    const float fx=(mouth.x-mouth.z)*invMouthCells;
+    const float fy=(mouth.y-mouth.w)*invMouthCells;
+    float b0=0,bL=0,bR=0,bD=0,bU=0;
+    const float extent=0.5f*sqrtf(
+        speakerWidthCells*speakerWidthCells+
+        speakerHeightCells*speakerHeightCells)+2.0f;
+    if(fabsf((float)x-mouth.z)<extent &&
+       fabsf((float)y-mouth.w)<extent) {
+        b0=asmr::movingHeadCoverage(speakerPixels,speakerW,speakerH,
+           speakerWidthCells,speakerHeightCells,mouth.z,mouth.w,fx,fy,x,y);
+        bL=asmr::movingHeadCoverage(speakerPixels,speakerW,speakerH,
+           speakerWidthCells,speakerHeightCells,mouth.z,mouth.w,fx,fy,x-1,y);
+        bR=asmr::movingHeadCoverage(speakerPixels,speakerW,speakerH,
+           speakerWidthCells,speakerHeightCells,mouth.z,mouth.w,fx,fy,x+1,y);
+        bD=asmr::movingHeadCoverage(speakerPixels,speakerW,speakerH,
+           speakerWidthCells,speakerHeightCells,mouth.z,mouth.w,fx,fy,x,y-1);
+        bU=asmr::movingHeadCoverage(speakerPixels,speakerW,speakerH,
+           speakerWidthCells,speakerHeightCells,mouth.z,mouth.w,fx,fy,x,y+1);
+    }
+    // No hard moving wall, no wiping pressure histories. This is
+    // smooth, symmetric impedance scattering by actual SVG geometry.
+    const float l=mask[idx-1]>0?center:asmr::movingHeadNeighbor(
+        center,now[idx-1],b0,bL);
+    const float r=mask[idx+1]>0?center:asmr::movingHeadNeighbor(
+        center,now[idx+1],b0,bR);
+    const float d=mask[idx-n]>0?center:asmr::movingHeadNeighbor(
+        center,now[idx-n],b0,bD);
+    const float u=mask[idx+n]>0?center:asmr::movingHeadNeighbor(
+        center,now[idx+n],b0,bU);
     const float damping=echo::mixedWallDamping(
         mask[idx-1],mask[idx+1],mask[idx-n],mask[idx+n],
         asmr::kHeadReflection,echo::kCourant);
     float pressure=echo::impedanceWaveStep(
         center,previous[idx],l,r,d,u,echo::kCourantSquared,damping);
 
-    const float2 mouth=mouthLocations[localStep];
-    // Only the 2x2 source footprint evaluates WAV interpolation.
+    // Only the 2x2 mouth footprint decodes the injected PCM.
     if(fabsf((float)x-mouth.x)<1.0f&&
        fabsf((float)y-mouth.y)<1.0f) {
         const double elapsed=(double)(*blockBase+(uint64_t)localStep)*dt;
@@ -178,11 +209,19 @@ class FdtdRoom {
 public:
     explicit FdtdRoom(float resolution,
                       const asmr::SvgSilhouette& head,
-                      bool channels):
+                      bool channels,
+                      const asmr::SvgSilhouette& speaker):
       dx_(resolution),n_(asmr::cells(resolution)),
       dt_((float)asmr::stepSeconds(resolution)),
       halfMicSeparation_(asmr::micSpacing(channels)*0.5f),
       micYOffset_(channels?asmr::kChannelEarY:0.0f){
+        if(!speaker.present()) {
+            std::fprintf(stderr,"[FDTD] Missing speaker SVG.\n");
+            std::exit(4);
+        }
+        speakerW_=speaker.w;speakerH_=speaker.h;
+        speakerWidthCells_=speaker.widthMetres/dx_;
+        speakerHeightCells_=speaker.heightMetres/dx_;
         const auto mask=asmr::svgRoomMask(n_,dx_,head);
         if(!asmr::validateMicrophones(mask,n_,dx_,channels,head)) {
             std::fprintf(stderr,
@@ -205,7 +244,10 @@ public:
         LAB_CUDA(cudaMalloc(&deviceMask_,size));
         LAB_CUDA(cudaMemcpy(deviceMask_,mask.data(),size,
                             cudaMemcpyHostToDevice));
-        LAB_CUDA(cudaMalloc(&deviceMouth_,sizeof(float2)*asmr::kGraphBatch));
+        LAB_CUDA(cudaMalloc(&deviceMouth_,sizeof(float4)*asmr::kGraphBatch));
+        LAB_CUDA(cudaMalloc(&deviceSpeaker_,speaker.alpha.size()));
+        LAB_CUDA(cudaMemcpy(deviceSpeaker_,speaker.alpha.data(),
+                            speaker.alpha.size(),cudaMemcpyHostToDevice));
         LAB_CUDA(cudaMalloc(&deviceStep_,sizeof(uint64_t)));
         LAB_CUDA(cudaMalloc(&deviceOutput_,sizeof(float)*2*asmr::kGraphBatch));
         LAB_CUDA(cudaMalloc(&deviceAudio_,sizeof(float)*kMaxWavFrames));
@@ -230,7 +272,8 @@ public:
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
                 n_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
-                0.0,1e12,false);
+                0.0,1e12,false,deviceSpeaker_,speakerW_,speakerH_,
+                speakerWidthCells_,speakerHeightCells_);
         }
         LAB_CUDA(cudaStreamEndCapture(stream_,&graph_));
         LAB_CUDA(cudaGraphInstantiate(&execution_,graph_,0));
@@ -253,7 +296,9 @@ public:
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
                 n_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
-                absoluteStart,length,offline);
+                absoluteStart,length,offline,
+                deviceSpeaker_,speakerW_,speakerH_,
+                speakerWidthCells_,speakerHeightCells_);
         LAB_CUDA(cudaStreamEndCapture(stream_,&graph_));
         LAB_CUDA(cudaGraphInstantiate(&execution_,graph_,0));
         LAB_CUDA(cudaStreamSynchronize(stream_));
@@ -273,7 +318,7 @@ public:
                             cudaMemcpyHostToDevice));
     }
     std::array<float,asmr::kGraphBatch*2> process(
-        const std::array<float2,asmr::kGraphBatch>& mouths,
+        const std::array<float4,asmr::kGraphBatch>& mouths,
         uint64_t firstStep){
         LAB_CUDA(cudaMemcpy(deviceMouth_,mouths.data(),
             mouths.size()*sizeof(float2),cudaMemcpyHostToDevice));
@@ -308,6 +353,7 @@ public:
         for(auto& p:fields_)if(p)cudaFree(p);
         if(deviceMask_)cudaFree(deviceMask_);
         if(deviceMouth_)cudaFree(deviceMouth_);
+        if(deviceSpeaker_)cudaFree(deviceSpeaker_);
         if(deviceStep_)cudaFree(deviceStep_);
         if(deviceOutput_)cudaFree(deviceOutput_);
         if(deviceAudio_)cudaFree(deviceAudio_);
@@ -319,10 +365,13 @@ public:
 private:
     float dx_=0,dt_=0;
     float halfMicSeparation_=0,micYOffset_=0;
+    float speakerWidthCells_=0,speakerHeightCells_=0;
+    int speakerW_=0,speakerH_=0;
     int n_=0;
     float* fields_[3]{};
     float* deviceMask_=nullptr,*deviceAudio_=nullptr;
-    float2* deviceMouth_=nullptr;
+    float4* deviceMouth_=nullptr;
+    unsigned char* deviceSpeaker_=nullptr;
     uint64_t* deviceStep_=nullptr;
     float* deviceOutput_=nullptr;
     int* deviceAudioFrames_=nullptr;
@@ -360,12 +409,12 @@ static bool loadSourceAudio(const std::string& filename,
 // batch (around 50 times per frame), audibly adding zipper/hiss artifacts.
 // The artist remains 1:1 under the cursor; only its physical mouth
 // pressure source is smoothly motion-limited through simulation time.
-static std::array<float2,asmr::kGraphBatch> mouthBatch(
+static std::array<float4,asmr::kGraphBatch> mouthBatch(
     const std::vector<asmr::PathPoint>& track,double start,
     double dt,uint64_t baseStep,float dx,
     asmr::Vec2& physicalSource,const asmr::Vec2& liveTarget,
     bool offline) {
-    std::array<float2,asmr::kGraphBatch> result{};
+    std::array<float4,asmr::kGraphBatch> result{};
     for(int k=0;k<asmr::kGraphBatch;++k) {
         const double elapsed=(double)(baseStep+(uint64_t)k)*dt;
         const asmr::Vec2 target=offline?
@@ -373,7 +422,9 @@ static std::array<float2,asmr::kGraphBatch> mouthBatch(
         physicalSource=asmr::advanceSource(
             physicalSource,target,(float)dt,0.012f,2.25f);
         const auto m=asmr::mouth(physicalSource);
-        result[k]=make_float2(m.x/dx-0.5f,m.y/dx-0.5f);
+        result[k]=make_float4(m.x/dx-0.5f,m.y/dx-0.5f,
+                              physicalSource.x/dx-0.5f,
+                              physicalSource.y/dx-0.5f);
     }
     return result;
 }
@@ -686,7 +737,7 @@ int main(){
                                     liveCutoff);
 
     auto live=std::make_unique<FdtdRoom>(
-        qualityDx[qualityIndex],*head,channels);
+        qualityDx[qualityIndex],*head,channels,speakerShape);
     live->uploadAudio(liveAudio);
     std::unique_ptr<FdtdRoom> highQuality;
     echo::StereoLinearResampler liveResampler(live->dt(),
@@ -805,7 +856,7 @@ int main(){
                     SDL_ClearQueuedAudio(device);
                     highQuality.reset();live.reset();
                     live=std::make_unique<FdtdRoom>(
-                        qualityDx[qualityIndex],*head,channels);
+                        qualityDx[qualityIndex],*head,channels,speakerShape);
                     live->uploadAudio(liveAudio);
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
@@ -840,7 +891,7 @@ int main(){
                     SDL_ClearQueuedAudio(device);
                     live.reset();
                     live=std::make_unique<FdtdRoom>(
-                        qualityDx[qualityIndex],*head,channels);
+                        qualityDx[qualityIndex],*head,channels,speakerShape);
                     live->uploadAudio(liveAudio);
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
@@ -905,7 +956,7 @@ int main(){
             } else {
                 if(!highQuality)
                     highQuality=std::make_unique<FdtdRoom>(
-                        asmr::kOfflineDx,*head,channels);
+                        asmr::kOfflineDx,*head,channels,speakerShape);
                 highQuality->uploadAudio(fullAudio);
                 highQuality->setRenderTiming(job.selected.start,
                     (double)captureSeconds,true);
