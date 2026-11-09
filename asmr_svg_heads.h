@@ -271,14 +271,14 @@ inline std::vector<float> listenerMask(int n,float dx,
     // to precise kid-sized microphones; never carve the whole centre.
     const float half=0.5f*(canals?kEardrumSeparation:kOuterMicSeparation);
     for(int sign:{-1,1}){
-        const float a=kListenerX+sign*half;
+        const float a=kListenerX+sign*(half-2.0f*dx);
         const float b=kListenerX+sign*(model.widthMm*.0005f+.008f);
         const int x0=std::max(0,(int)std::floor(std::min(a,b)/dx-.5f));
         const int x1=std::min(n-1,(int)std::ceil(std::max(a,b)/dx-.5f));
         const int y0=std::max(0,(int)std::floor(
-            (kListenerY-.0035f)/dx-.5f));
+            (kListenerY-std::max(.0035f,1.5f*dx))/dx-.5f));
         const int y1=std::min(n-1,(int)std::ceil(
-            (kListenerY+.0035f)/dx-.5f));
+            (kListenerY+std::max(.0035f,1.5f*dx))/dx-.5f));
         for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x)
             if(mask[(size_t)y*n+x]==1.0f)
                 mask[(size_t)y*n+x]=0.0f;
