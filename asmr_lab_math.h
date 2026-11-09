@@ -106,12 +106,20 @@ inline float length(Vec2 a){return std::hypot(a.x,a.y);}
 constexpr std::array<int,11> kDistanceFalloffSteps{
     0,1,2,3,4,6,8,10,12,16,20};
 constexpr float kFalloffReferenceMetres=0.20f;
-inline float distanceFalloffGain(float distanceMetres,int strength){
+inline float distanceFalloffGain(float distanceMetres,int strength,
+                                 float physicalScale=1.0f){
     if(strength<=0)return 1.0f;
-    if(!std::isfinite(distanceMetres))return 0.0f;
-    const float d=std::max(kFalloffReferenceMetres,
-                           std::max(0.0f,distanceMetres));
-    const float ratio=kFalloffReferenceMetres/d;
+    if(!std::isfinite(distanceMetres)||!std::isfinite(physicalScale)||
+       physicalScale<=0.0f)return 0.0f;
+    // All listener/mic/source geometry is scaled by F11. The
+    // attenuation reference MUST scale as well: fixed 20cm made
+    // F12 completely inactive inside the 0.1x/0.5x rooms.
+    // Ratio now depends on physical source-to-ear distance
+    // relative to the actual, uniformly scaled 20cm reference.
+    const float reference=kFalloffReferenceMetres*physicalScale;
+    const float distance=std::max(reference,
+                                  std::max(0.0f,distanceMetres));
+    const float ratio=reference/distance;
     return std::pow(ratio,0.5f*std::min(strength,20));
 }
 
