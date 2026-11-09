@@ -37,29 +37,31 @@ Its original **185.348 × 136.859 mm** viewBox maps to exactly
 The two authored half-paths are stitched only across their central
 straight seam. Their contours are static sound-reflecting SOLID cells.
 
-The experiment uses your **8 cm child eardrum-to-eardrum** assumption:
-microphone positions are **(0.960 m, 1.003 m)** and
-**(1.040 m, 1.003 m)**. This is a user-specified model parameter,
-not a claim that all children's anatomy has that spacing. The wide
-pinna openings lead to approximately **8.4 mm-wide fluid canals**
-carved from the interior ear recess toward the microphone locations
-where the SVG did not originally leave a connected air path. This is
-an explicit *acoustic discretization adaptation*; the drawn silhouette
-itself is not altered. At 1.5 mm offline cells the channel occupies
-around 5–6 cells across; at coarse live resolution its response is
-less reliable. When an ear aperture cannot be sampled from actual
-fluid, the program refuses that grid rather than reading solid=0
-pressure.
+The **default V2** probes have been moved **outward into the real
+open pinna recesses**, at **(0.938 m, 1.003 m)** and **(1.062 m,
+1.003 m)**, **12.4 cm apart**. The prior ±4 cm probes were literally
+inside the V2 SVG solid; the program cut artificial ear passages to
+reach them. V2 no longer cuts those passages: the probes are in
+SVG-authored air, and the GPU sampler requires virtually its entire
+bilinear stencil to remain in air. This is an **outer-recess microphone
+experiment**, not the same as an 8 cm eardrum pair.
+
+To preserve your earlier **8 cm child eardrum-to-eardrum** assumption,
+press **H** for `listener_with_ear_channel.svg`: that independent
+model retains the 8 cm target. It is an experimental dimensional
+assumption, not a universal claim about children's anatomy. At too
+coarse a resolution, the program refuses a microphone position that
+cannot sample air reliably.
 
 Press **H** in live mode to cycle the alternative geometries:
 `listener_v2.svg` (default), `listener_with_ear_channel.svg`, and
 `listener.svg`. The previous simple listener uses the experimental
 8 cm + 0.8×2 cm ear-canal allowance, giving **9.6 cm outer-recess mic
-spacing**. Both channel-type modes use the 8 cm eardrum target.
+spacing**. Only the explicit ear-channel mode uses the 8 cm target.
 
 The moving artist is YOUR **`speaker.svg`** (134.483 × 130.034 mm),
 rotated so its recessed mouth always faces the listener's centre.
-The mouth lies about **5 cm** ahead of the artist centre, physically
+The mouth lies about **5.5 cm** ahead of the artist centre, physically
 inside the open front recess. It emits MP3 pressure in the same solver.
 The speaker silhouette additionally creates **genuine moving
 fractional impedance scattering** sampled from the uploaded SVG
@@ -154,8 +156,9 @@ raw signed pressure with adjustable exposure.
   generic reverb, direct stereo panning or ray tracing. The two
   microphones sample the propagated field on opposite sides of the
   SVG head. CPU regressions separately test two-ear arrival order.
-- The v2 ear canals and their minimum width are *acoustic
-  approximations*, not anatomically measured 3D canals. Pinna-shaped
+- The V2 probes are in its existing pinna recesses, not synthetic
+  V2 ear canals. The alternative ear-channel model remains a 2D
+  acoustic approximation, not a measured anatomical canal. Pinna-shaped
   2D outlines do not reproduce real vertical front/back HRTFs.
 - Moving-speaker scattering uses fractional soft impedance instead
   of an energy-conserving moving boundary; no hard pressure snaps.
