@@ -25,7 +25,7 @@ int main(){
         assert(std::fabs((asmr::kListenerX-view.originX)/view.width-0.5f)<1e-5f);
         assert(std::fabs((asmr::kListenerY-view.originY)/view.height-
                          (square?0.5f:1.0f/3))<1e-5f);
-        assert(std::fabs(view.width-view.height)<1e-5f == square);
+        assert((std::fabs(view.width-view.height)<1e-5f)==square);
         const asmr::Vec2 nearFront{asmr::kListenerX,
             asmr::kListenerY+asmr::kMinimumSeparation+0.002f};
         assert(asmr::validArtistInView(nearFront,view));
