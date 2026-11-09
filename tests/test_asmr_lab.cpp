@@ -506,13 +506,13 @@ int main(){
     // Long-MP3 source cache uses an O(N) two-biquad lowpass,
     // not a full-20-minute 81-tap convolution. Confirm it passes
     // bass, rejects out-of-band tones, and stays numerically finite.
-    const auto fastLow=asmr::lowpassSourceWindow(low,1000.0f,rate);
-    const auto fastHigh=asmr::lowpassSourceWindow(high,1000.0f,rate);
+    const auto fastLow=asmr::lowpassSourceWindow(low,2500.0f,rate);
+    const auto fastHigh=asmr::lowpassSourceWindow(high,2500.0f,rate);
     const auto steadyRms=[](const std::vector<float>& values){
         double power=0.0;
-        for(size_t i=4800;i<values.size();++i)
+        for(size_t i=800;i<values.size();++i)
             power+=(double)values[i]*values[i];
-        return std::sqrt(power/(values.size()-4800));
+        return std::sqrt(power/(values.size()-800));
     };
     assert(steadyRms(fastLow)>0.60);
     assert(steadyRms(fastHigh)<0.025);
