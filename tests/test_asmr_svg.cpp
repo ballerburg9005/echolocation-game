@@ -268,6 +268,37 @@ int main(){
     // We must have at least one state in which the current authored
     // ear channel can actually receive pressure from outside.
     assert(connectedChannelZooms==(int)asmr::kZoomSteps.size());
+    // F11 small physical rooms use a coarser normalized mesh to
+    // preserve the real-time solver-work budget, which must not silently
+    // seal an authored mic or disable H/Z navigation. Check every
+    // listener at each small F11 scale and acoustic zoom.
+    for(const float scale:{0.5f,0.2f,0.1f}){
+        for(size_t stage=0;stage<asmr::kZoomSteps.size();++stage){
+            const auto view=asmr::roomView(
+                asmr::kZoomSteps[stage],
+                stage+1==asmr::kZoomSteps.size());
+            const float dx=asmr::physicalScaleDesignDx(
+                asmr::zoomDx(asmr::kLiveDx,(int)stage),scale);
+            const int nx=(int)std::lround(view.width/dx);
+            const int ny=(int)std::lround(view.height/dx);
+            const float work=asmr::physicalScaleWork(dx,view,scale);
+            assert(std::fabs(work-asmr::kZoomWorkRatios[stage])<0.015f);
+            for(const int h:{0,1,2}){
+                const auto& shape=h==0?pinnaV2:h==1?channels:simple;
+                const auto mask=asmr::svgRoomMask(
+                    nx,ny,dx,shape,view.originX,view.originY);
+                const bool connected=asmr::validateMicrophones(
+                    mask,nx,ny,dx,h!=2,shape,
+                    view.originX,view.originY);
+                if(!connected)
+                    std::fprintf(stderr,
+                        "[F11 SVG] FAIL F11=%.2fx Z=%zu H=%d "
+                        "normalized dx=%.2fmm grid=%dx%d\\n",
+                        scale,stage,h,dx*1000,nx,ny);
+                assert(connected);
+            }
+        }
+    }
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
     constexpr float dx=.0025f;
