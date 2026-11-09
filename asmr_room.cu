@@ -360,8 +360,9 @@ static void circle(SDL_Renderer* r,int cx,int cy,int radius,bool filled){
 }
 static void drawRoom(SDL_Renderer* renderer,
     const std::vector<asmr::PathPoint>& record,
-    asmr::Vec2 artist,float progress,bool processing,bool playing,
-    bool mouseMode,SDL_Texture* waves,bool showPressure){
+    asmr::Vec2 artist,asmr::Vec2 physicalSource,
+    float progress,bool processing,bool playing,bool mouseMode,
+    SDL_Texture* waves,bool showPressure){
     color(renderer,9,14,21);SDL_RenderClear(renderer);
     // Full-size texture with nearest physical pressure sampled and
     // colored on the GPU from the current REAL wave grid.
@@ -395,7 +396,9 @@ static void drawRoom(SDL_Renderer* renderer,
     color(renderer,236,141,107);
     circle(renderer,screenX(artist.x),screenY(artist.y),
         screenX(asmr::kArtistRadius),!(showPressure&&waves));
-    const asmr::Vec2 m=asmr::mouth(artist);
+    // The yellow spot is the *actual interpolated CUDA source*,
+    // not a decorative mouth or artificial stereo panning.
+    const asmr::Vec2 m=asmr::mouth(physicalSource);
     color(renderer,255,231,126);
     circle(renderer,screenX(m.x),screenY(m.y),5,true);
     // Mouth orientation and 20-30cm peripersonal space reference.
@@ -552,6 +555,8 @@ int main(){
     queued.reserve(asmr::kGraphBatch*4*96);
     blockSamples.reserve(asmr::kGraphBatch*4);
     uint64_t previewStep=0;
+    uint64_t clippedPreview=0,shortQueueWarnings=0;
+    uint64_t audioDiagTime=SDL_GetTicks64();
     asmr::Vec2 artist{1.50f,1.0f},sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
     bool showPressure=true;
@@ -744,6 +749,8 @@ int main(){
             if(previewEnabled&&waveLoaded){
                 const int queuedFrames=(int)(
                     SDL_GetQueuedAudioSize(device)/(2*sizeof(float)));
+                if(previewStep>0 && queuedFrames<24)
+                    ++shortQueueWarnings;
                 int need=std::max(0,(int)(0.075*asmr::kOutputRate)-
                                     queuedFrames);
                 int batches=0;
@@ -769,7 +776,8 @@ int main(){
                 // Preserve actual FDTD pressure differences linearly.
                 // No always-on tanh distortion/harmonic generator.
                 for(float& v:queued) {
-                    v=std::isfinite(v)?0.22f*v:0.0f;
+                    v=std::isfinite(v)?0.55f*v:0.0f;
+                    if(std::fabs(v)>0.85f)++clippedPreview;
                     v=std::clamp(v,-0.85f,0.85f);
                 }
                 if(!queued.empty()&&SDL_QueueAudio(
@@ -829,19 +837,39 @@ int main(){
                 previousArtist=artist;
             }
         }
+        if(SDL_GetTicks64()-audioDiagTime>=5000){
+            std::printf("[ASMR FDTD] LIVE dx=%.1fmm cells=%dx%d "
+                        "pressure steps=%llu queue=%.1fms "
+                        "near-empty queues=%llu safety-clipped samples=%llu "
+                        "(V toggles REAL CUDA wave field)\n",
+                live->dx()*1000,
+                asmr::cells(live->dx()),asmr::cells(live->dx()),
+                (unsigned long long)previewStep,
+                1000.0*SDL_GetQueuedAudioSize(device)/
+                    (2.0*sizeof(float)*asmr::kOutputRate),
+                (unsigned long long)shortQueueWarnings,
+                (unsigned long long)clippedPreview);
+            shortQueueWarnings=0;clippedPreview=0;
+            audioDiagTime=SDL_GetTicks64();
+        }
         const float progress=mode==Mode::Render&&job.total>0?
             (float)((double)job.current/job.total):0.0f;
         if(showPressure && waveTexture){
             // This GPU pressure snapshot is from the exact field
             // that produces the ear samples. Render the offline wave
             // grid too while a slow 15kHz capture is processing.
-            FdtdRoom* active=(mode==Mode::Render && highQuality)?
+            FdtdRoom* active=((mode==Mode::Render||
+                               mode==Mode::Playback) && highQuality)?
                 highQuality.get():live.get();
             active->pressureImage(pressurePixels,pressureExposure);
             SDL_UpdateTexture(waveTexture,nullptr,
                 pressurePixels.data(),kPressureImage*sizeof(uint32_t));
         }
-        drawRoom(renderer,record,artist,progress,
+        const asmr::Vec2 visibleArtist=mode==Mode::Render?
+            job.sourceCursor:artist;
+        const asmr::Vec2 visibleSource=mode==Mode::Render?
+            job.sourceCursor:sourceCursor;
+        drawRoom(renderer,record,visibleArtist,visibleSource,progress,
                  mode==Mode::Render,mode==Mode::Playback,
                  mouseMode,waveTexture,showPressure);
         char title[255];
