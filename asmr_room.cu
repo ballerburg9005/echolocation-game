@@ -83,9 +83,36 @@ __device__ float roomWaveSample(const float* pcm,int length,double seconds) {
     return normal*(1.0f-fraction)+beginning*fraction;
 }
 
+// Device-side lookup into a sliding 60-second GPU cache of the
+// COMPLETE decoded MP3. Host reloads the cache at most once per
+// 58 seconds of source time, so songs of arbitrary duration don't
+// allocate their entire waveform on the GPU or truncate at 60s.
+// Cache frame indices are modulo the FULL track length.
+__device__ float streamedMp3Sample(const float* pcm,int cacheFrames,
+    uint64_t cacheStart,uint64_t trackFrames,double seconds){
+    if(cacheFrames<2||trackFrames<2||seconds<0.0)return 0.0f;
+    double pos=fmod(seconds*(double)asmr::kOutputRate,
+                    (double)trackFrames);
+    if(pos<0.0)pos+=(double)trackFrames;
+    double local=pos-(double)cacheStart;
+    if(local<0.0)local+=(double)trackFrames;
+    if(local<0.0||local>=(double)(cacheFrames-1))return 0.0f;
+    const int i=(int)local;
+    const float f=(float)(local-i);
+    float sample=pcm[i]*(1.0f-f)+pcm[i+1]*f;
+    // The *actual end of the track* loops, with a short fade-out
+    // and fade-in. Never loop a 60-second GPU cache boundary.
+    const double fade=fmin(960.0,(double)trackFrames/8.0);
+    if(pos<fade)sample*=(float)(pos/fade);
+    if(pos>(double)trackFrames-fade)
+        sample*=(float)(((double)trackFrames-pos)/fade);
+    return sample;
+}
+
 __global__ void asmrPressureStep(
     float* next,const float* now,const float* previous,
     const float* mask,const float* pcm,const int* pcmLength,
+    const uint64_t* pcmStart,const uint64_t* pcmTotal,
     const float4* mouthLocations,const uint64_t* blockBase,
     const float* ambientPCM,const int* ambientLength,
     const int* ambientOn,const float2* ambientPositions,
@@ -156,8 +183,9 @@ __global__ void asmrPressureStep(
        fabsf((float)y-mouth.y)<1.0f) {
         const double elapsed=(double)(*blockBase+(uint64_t)localStep)*dt;
         if(!offline||elapsed<recordingDuration) {
-            const float amplitude=roomWaveSample(
-                pcm,*pcmLength,absoluteStart+elapsed);
+            const float amplitude=streamedMp3Sample(
+                pcm,*pcmLength,*pcmStart,*pcmTotal,
+                absoluteStart+elapsed);
             float envelope=1.0f;
             if(offline) {
                 const float fadeIn=fminf(1.0f,(float)(elapsed/0.035));
@@ -305,8 +333,11 @@ public:
                             speaker.alpha.size(),cudaMemcpyHostToDevice));
         LAB_CUDA(cudaMalloc(&deviceStep_,sizeof(uint64_t)));
         LAB_CUDA(cudaMalloc(&deviceOutput_,sizeof(float)*2*asmr::kGraphBatch));
-        LAB_CUDA(cudaMalloc(&deviceAudio_,sizeof(float)*kMaxWavFrames));
+        LAB_CUDA(cudaMalloc(&deviceAudio_,
+            sizeof(float)*(kMaxWavFrames+1)));
         LAB_CUDA(cudaMalloc(&deviceAudioFrames_,sizeof(int)));
+        LAB_CUDA(cudaMalloc(&deviceAudioStart_,sizeof(uint64_t)));
+        LAB_CUDA(cudaMalloc(&deviceAudioTotal_,sizeof(uint64_t)));
         LAB_CUDA(cudaMalloc(&deviceAmbientPCM_,
             sizeof(float)*asmr::kOutputRate*asmr::kAmbientNoiseSeconds));
         LAB_CUDA(cudaMalloc(&deviceAmbientFrames_,sizeof(int)));
@@ -328,6 +359,11 @@ public:
         int zero=0;
         LAB_CUDA(cudaMemcpy(deviceAudioFrames_,&zero,sizeof(int),
                             cudaMemcpyHostToDevice));
+        uint64_t zero64=0;
+        LAB_CUDA(cudaMemcpy(deviceAudioStart_,&zero64,
+            sizeof(uint64_t),cudaMemcpyHostToDevice));
+        LAB_CUDA(cudaMemcpy(deviceAudioTotal_,&zero64,
+            sizeof(uint64_t),cudaMemcpyHostToDevice));
         LAB_CUDA(cudaMemcpy(deviceAmbientFrames_,&zero,sizeof(int),
                             cudaMemcpyHostToDevice));
         LAB_CUDA(cudaMemcpy(deviceAmbientOn_,&zero,sizeof(int),
@@ -344,6 +380,7 @@ public:
             asmrPressureStep<<<blocks,threads,0,stream_>>>(
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
+                deviceAudioStart_,deviceAudioTotal_,
                 deviceMouth_,deviceStep_,
                 deviceAmbientPCM_,deviceAmbientFrames_,
                 deviceAmbientOn_,deviceAmbientPositions_,
@@ -362,6 +399,7 @@ public:
     // instantiated when entering offline mode to give it exactly the
     // correct source-time origin and 5/10/20s fade-out envelope.
     void setRenderTiming(double absoluteStart,double length,bool offline){
+        audioTimeOrigin_=absoluteStart;
         if(execution_){LAB_CUDA(cudaGraphExecDestroy(execution_));execution_=nullptr;}
         if(graph_){LAB_CUDA(cudaGraphDestroy(graph_));graph_=nullptr;}
         const dim3 threads(16,16),blocks((nx_+15)/16,(ny_+15)/16);
@@ -372,6 +410,7 @@ public:
             asmrPressureStep<<<blocks,threads,0,stream_>>>(
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
+                deviceAudioStart_,deviceAudioTotal_,
                 deviceMouth_,deviceStep_,
                 deviceAmbientPCM_,deviceAmbientFrames_,
                 deviceAmbientOn_,deviceAmbientPositions_,
@@ -391,13 +430,41 @@ public:
         for(auto& p:fields_)LAB_CUDA(cudaMemset(p,0,bytes));
     }
     void uploadAudio(const std::vector<float>& source){
-        const int amount=(int)std::min(source.size(),
-                                      (size_t)kMaxWavFrames);
-        if(amount>0)LAB_CUDA(cudaMemcpy(
-            deviceAudio_,source.data(),(size_t)amount*sizeof(float),
-            cudaMemcpyHostToDevice));
+        sourcePCM_=source; // full decoded track remains in host memory
+        cachedStart_=UINT64_MAX;
+        ensureAudioWindow(0.0);
+    }
+    void ensureAudioWindow(double seconds){
+        const uint64_t total=(uint64_t)sourcePCM_.size();
+        const uint64_t start=asmr::mp3WindowStart(seconds,total);
+        if(cachedStart_==start)return;
+        const int frames=(int)std::min(
+            total,asmr::kMp3WindowFrames);
+        const int amount=frames>0?frames+1:0;
+        // Add the first sample of the NEXT part as an interpolation
+        // guard. Wrap at true MP3 EOF, never at 60s cache boundaries.
+        if(frames>0){
+            stagingPCM_.resize((size_t)amount);
+            for(int i=0;i<amount;++i)
+                stagingPCM_[(size_t)i]=sourcePCM_[
+                    (size_t)((start+(uint64_t)i)%total)];
+            LAB_CUDA(cudaMemcpy(deviceAudio_,stagingPCM_.data(),
+                stagingPCM_.size()*sizeof(float),
+                cudaMemcpyHostToDevice));
+        }
         LAB_CUDA(cudaMemcpy(deviceAudioFrames_,&amount,sizeof(int),
                             cudaMemcpyHostToDevice));
+        LAB_CUDA(cudaMemcpy(deviceAudioStart_,&start,
+                            sizeof(uint64_t),cudaMemcpyHostToDevice));
+        LAB_CUDA(cudaMemcpy(deviceAudioTotal_,&total,
+                            sizeof(uint64_t),cudaMemcpyHostToDevice));
+        cachedStart_=start;
+        if(total>asmr::kMp3WindowFrames)
+            std::fprintf(stderr,
+                "[MP3 STREAM] GPU cache %.1f-%.1fs / %.1fs full song.\\n",
+                (double)start/asmr::kOutputRate,
+                (double)(start+(uint64_t)frames)/asmr::kOutputRate,
+                (double)total/asmr::kOutputRate);
     }
     void uploadAmbient(const std::vector<float>& pcm,bool enabled){
         const int amount=(int)std::min(pcm.size(),
@@ -420,6 +487,8 @@ public:
         // Each source step is a float4: mouth XY + artist centre XY.
         // Copying float2 here uploaded only HALF of the positions!
         static_assert(sizeof(float4)==4*sizeof(float));
+        ensureAudioWindow(audioTimeOrigin_+
+            (double)firstStep*dt_);
         LAB_CUDA(cudaMemcpy(deviceMouth_,mouths.data(),
             sizeof(mouths),cudaMemcpyHostToDevice));
         LAB_CUDA(cudaMemcpy(deviceStep_,&firstStep,
@@ -465,6 +534,8 @@ public:
         if(deviceOutput_)cudaFree(deviceOutput_);
         if(deviceAudio_)cudaFree(deviceAudio_);
         if(deviceAudioFrames_)cudaFree(deviceAudioFrames_);
+        if(deviceAudioStart_)cudaFree(deviceAudioStart_);
+        if(deviceAudioTotal_)cudaFree(deviceAudioTotal_);
         if(deviceAmbientPCM_)cudaFree(deviceAmbientPCM_);
         if(deviceAmbientFrames_)cudaFree(deviceAmbientFrames_);
         if(deviceAmbientOn_)cudaFree(deviceAmbientOn_);
@@ -487,6 +558,10 @@ private:
     uint64_t* deviceStep_=nullptr;
     float* deviceOutput_=nullptr;
     int* deviceAudioFrames_=nullptr;
+    uint64_t* deviceAudioStart_=nullptr,*deviceAudioTotal_=nullptr;
+    std::vector<float> sourcePCM_,stagingPCM_;
+    uint64_t cachedStart_=UINT64_MAX;
+    double audioTimeOrigin_=0.0;
     float* deviceAmbientPCM_=nullptr;
     int* deviceAmbientFrames_=nullptr,*deviceAmbientOn_=nullptr;
     float2* deviceAmbientPositions_=nullptr;
