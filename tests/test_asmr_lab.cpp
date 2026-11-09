@@ -39,6 +39,55 @@ int main(){
     for(int strength:asmr::kDistanceFalloffSteps)
         assert(asmr::distanceFalloffGain(2.0f,strength)<=
                asmr::distanceFalloffGain(0.5f,strength));
+    // F11 changes PHYSICAL scale, not relative pixel geometry:
+    // SVG dimensions, mics, mouths, walls, collision clearance,
+    // and travel distance all scale together by S. Field Nx,Ny
+    // stay exactly constant at the same Z and Q. Each timestep is
+    // S times as long, hence the physical acoustic frequency cutoff
+    // and steps/sec fall by 1/S. This is not a display-only zoom.
+    static_assert(asmr::kPhysicsScales.size()==4);
+    assert(asmr::kPhysicsScales.front()==1.0f);
+    assert(asmr::kPhysicsScales.back()==10.0f);
+    for(size_t z=0;z<asmr::kZoomSteps.size();++z){
+        const bool sq=z+1==asmr::kZoomSteps.size();
+        const auto view=asmr::roomView(asmr::kZoomSteps[z],sq);
+        const float designDx=asmr::zoomDx(asmr::kLiveDx,(int)z);
+        const int nx=(int)std::lround(view.width/designDx);
+        const int ny=(int)std::lround(view.height/designDx);
+        const double baseDt=asmr::physicalStepSeconds(designDx,1.0f);
+        for(float physical:asmr::kPhysicsScales){
+            assert((int)std::lround(
+                (view.width*physical)/(designDx*physical))==nx);
+            assert((int)std::lround(
+                (view.height*physical)/(designDx*physical))==ny);
+            assert(std::fabs(asmr::physicalStepSeconds(
+                designDx,physical)/baseDt-physical)<1e-5);
+            assert(std::fabs(asmr::tenCellFrequency(
+                designDx*physical)*physical-
+                asmr::tenCellFrequency(designDx))<0.01f);
+            const float travel=asmr::length(asmr::sub(
+                asmr::mouth({asmr::kListenerX+0.50f,asmr::kListenerY}),
+                asmr::leftEar(true,true)));
+            assert(std::fabs(travel*physical/
+                            echo::kSpeedOfSound/
+                     (travel/echo::kSpeedOfSound)-physical)<1e-5f);
+            assert(std::fabs(asmr::physicalMetres(
+                view.width,physical)-view.width*physical)<1e-5f);
+        }
+    }
+    assert(std::fabs(asmr::physicalMetres(
+        asmr::kRoomHeightMetres,10.0f)-35.55556f)<0.0001f);
+    assert(std::fabs(asmr::physicalMetres(
+        asmr::kRoomMetres,10.0f)-20.0f)<1e-6f);
+    assert(std::fabs(asmr::physicalStepSeconds(
+        asmr::kLiveDx,10.0f)/
+        asmr::physicalStepSeconds(asmr::kLiveDx,1.0f)-10.0)<1e-5);
+    // Ports are physically different from reflecting wall material.
+    assert(asmr::kOutsideReflection>0.8f);
+    assert(asmr::kPortReflection<0.04f);
+    assert(asmr::boundaryDamping(asmr::kPortMaterial,0,0,0)>
+           asmr::boundaryDamping(
+               echo::kOuterBoundaryMaterial,0,0,0));
     assert(asmr::cells(asmr::kLiveDx)==400);
     assert(asmr::cellsY(asmr::kLiveDx)==711);
     // Every zoom is a REAL smaller FDTD room and finer dx, yet its
