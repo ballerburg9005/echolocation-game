@@ -49,6 +49,63 @@ inline bool headSolidAt(const SvgSilhouette& svg,Vec2 centre,
     const float localY=-(diff.x*forward.x+diff.y*forward.y);
     return svg.solid(localX,localY);
 }
+// A sub-cell ear passage can be open in the author's 0.4mm SVG raster
+// but vanish when cell-centre sampled onto a coarser FDTD grid. Preserve
+// ONLY the topology of an ACTUAL connected transparent path in the
+// original SVG. This is a one-cell subgrid airway approximation, not
+// a fabricated straight tunnel through the head or a change to SVG art.
+// BFS uses 4-way connections in the high-resolution authored air.
+// Every cleared coarse cell intersects this authenticated air path.
+inline bool preserveSvgAirway(std::vector<float>& mask,int nx,int ny,
+                      float dx,const SvgSilhouette& svg,Vec2 mic,
+                      float originX,float originY) {
+    if(!svg.present() || svg.w<4 || svg.h<4 || nx<8 || ny<8)
+        return false;
+    const float localX=mic.x-kListenerX;
+    const float localY=mic.y-kListenerY;
+    if(svg.solid(localX,localY))return false;
+    const int sx=std::clamp((int)((localX/svg.widthMetres+0.5f)*svg.w),
+                            0,svg.w-1);
+    const int sy=std::clamp((int)((0.5f-localY/svg.heightMetres)*svg.h),
+                            0,svg.h-1);
+    const int start=sy*svg.w+sx;
+    if(svg.alpha[(size_t)start]>=48)return false;
+    std::vector<int> parent(svg.alpha.size(),-2);
+    std::queue<int> pending;
+    parent[(size_t)start]=-1;
+    pending.push(start);
+    int exitPixel=-1;
+    while(!pending.empty()){
+        const int at=pending.front();pending.pop();
+        const int x=at%svg.w,y=at/svg.w;
+        if(x==0||y==0||x==svg.w-1||y==svg.h-1){
+            exitPixel=at;break;
+        }
+        const int adjacent[4]{at-1,at+1,at-svg.w,at+svg.w};
+        for(const int to:adjacent){
+            if(parent[(size_t)to]!=-2 ||
+               svg.alpha[(size_t)to]>=48)continue;
+            parent[(size_t)to]=at;
+            pending.push(to);
+        }
+    }
+    if(exitPixel<0)return false; // never invent a nonexistent canal
+    // Walk from the real exterior back to the real mic. Both points
+    // are inside the image, and all intermediate pixels are transparent.
+    for(int at=exitPixel;at>=0;at=parent[(size_t)at]){
+        const int x=at%svg.w,y=at/svg.w;
+        const float px=kListenerX+
+            ((x+0.5f)/(float)svg.w-0.5f)*svg.widthMetres;
+        const float py=kListenerY+
+            (0.5f-(y+0.5f)/(float)svg.h)*svg.heightMetres;
+        const int ix=(int)std::floor((px-originX)/dx);
+        const int iy=(int)std::floor((py-originY)/dx);
+        if(ix<=0||iy<=0||ix>=nx-1||iy>=ny-1)continue;
+        const size_t index=(size_t)iy*nx+ix;
+        if(mask[index]==1.0f)mask[index]=0.0f;
+    }
+    return true;
+}
 inline std::vector<float> svgRoomMask(int nx,int ny,float dx,
                     const SvgSilhouette& listenerSvg,
                     float originX=0,float originY=0){
@@ -86,6 +143,15 @@ inline std::vector<float> svgRoomMask(int nx,int ny,float dx,
                 solid=true;
             mask[i]=solid?1.0f:0.0f;
         }
+    // For the inner-ear SVG only, preserve each actually transparent
+    // airway at any dx. No new air path is permitted unless its
+    // high-resolution SVG pixels are connected all the way outside.
+    if(listenerSvg.channels && !listenerSvg.pinnaV2){
+        preserveSvgAirway(mask,nx,ny,dx,listenerSvg,leftEar(true),
+                          originX,originY);
+        preserveSvgAirway(mask,nx,ny,dx,listenerSvg,rightEar(true),
+                          originX,originY);
+    }
     // V2 microphones are IN AUTHORED AIR at +-62mm. Do not erase
     // solid head material to create synthetic canals for this mode.
     if(!listenerSvg.channels) {
