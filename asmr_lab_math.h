@@ -244,6 +244,20 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
 // genuinely refining the acoustic grid near the listener.
 // The final view is an actual 0.75m square; there is room to orbit
 // the head since its center has 0.375m to all four walls.
+// F11 expands the ENTIRE physical laboratory: every room wall,
+// authored listener/speaker SVG, mic, mouth, and movement distance.
+// Solver geometry stays in normalized design coordinates, so the
+// number of GPU cells does NOT grow with physical metres. Acoustic
+// dx and CFL dt scale together; physical frequencies resolvable by
+// the mesh decrease by the same factor.
+constexpr std::array<float,4> kPhysicsScales{1.0f,2.0f,5.0f,10.0f};
+inline float physicalMetres(float designMetres,float scale){
+    return designMetres*scale;
+}
+inline double physicalStepSeconds(float designDx,float scale){
+    return (double)(designDx*scale)/
+            ((double)echo::kSpeedOfSound*(double)echo::kSqrtTwo);
+}
 constexpr std::array<float,5> kZoomSteps{1.00f,1.25f,1.55f,2.00f,2.6666667f};
 constexpr std::array<float,5> kZoomWorkRatios{0.85f,0.81f,0.76f,0.684f,0.272f};
 constexpr float kSquareRoomSide=0.75f;
