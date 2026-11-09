@@ -23,7 +23,7 @@ int main(){
                      std::sqrt(near/0.8f))<1e-6f);
     assert(std::fabs(asmr::distanceFalloffGain(0.8f,2)-
                      near/0.8f)<1e-6f);
-    assert(std::fabs(asmr::distanceFalloffGain(0.1f,20)-1.0f)<1e-6f);
+    assert(std::fabs(asmr::distanceFalloffGain(near*0.5f,20)-1.0f)<1e-6f);
     assert(asmr::distanceFalloffGain(
         std::numeric_limits<float>::quiet_NaN(),20)==0.0f);
     assert(std::fabs(std::sqrt(near/0.8f)*
