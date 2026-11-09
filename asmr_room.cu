@@ -742,6 +742,57 @@ static void makeSafePlayback(std::vector<float>& audio){
         }
     }
 }
+// Post-solver attenuation audition. Work on already normalized,
+ // unmodified 48kHz stereo PCM so the offline peak normalizer does
+// NOT undo distance changes. Geometry uses the smoothed physical
+// mouth path actually supplied to FDTD, never the raw mouse target.
+// Every 2ms, evaluate the two microphone distances and interpolate
+// gains between samples; this avoids per-audio-frame powf overhead.
+static std::vector<float> distanceShapedClip(
+    const std::vector<float>& reference,
+    const std::vector<asmr::PathPoint>& physicalPath,
+    bool channel,bool pinnaV2,int strength){
+    std::vector<float> result=reference;
+    if(strength<=0||physicalPath.empty())return result;
+    const size_t frames=result.size()/2;
+    const auto earL=asmr::leftEar(channel,pinnaV2);
+    const auto earR=asmr::rightEar(channel,pinnaV2);
+    size_t pathIndex=0;
+    auto at=[&](size_t frame){
+        const double time=(double)frame/asmr::kOutputRate;
+        while(pathIndex+1<physicalPath.size() &&
+              physicalPath[pathIndex+1].t<=time)++pathIndex;
+        asmr::Vec2 source=physicalPath[pathIndex].centre;
+        if(pathIndex+1<physicalPath.size()){
+            const auto& a=physicalPath[pathIndex];
+            const auto& b=physicalPath[pathIndex+1];
+            const double denom=b.t-a.t;
+            const float alpha=denom>1e-9?
+                (float)std::clamp((time-a.t)/denom,0.0,1.0):0.0f;
+            source=asmr::add(source,asmr::scale(
+                asmr::sub(b.centre,source),alpha));
+        }
+        const auto m=asmr::mouth(source);
+        return std::array<float,2>{
+            asmr::distanceFalloffGain(
+                asmr::length(asmr::sub(m,earL)),strength),
+            asmr::distanceFalloffGain(
+                asmr::length(asmr::sub(m,earR)),strength)};
+    };
+    constexpr size_t segment=96; // 2ms at 48kHz
+    for(size_t first=0;first<frames;first+=segment){
+        const size_t last=std::min(frames,first+segment);
+        const auto a=at(first);
+        const auto b=at(last);
+        const float inv=1.0f/(float)(last-first);
+        for(size_t i=first;i<last;++i){
+            const float t=(float)(i-first)*inv;
+            result[2*i]*=a[0]+(b[0]-a[0])*t;
+            result[2*i+1]*=a[1]+(b[1]-a[1])*t;
+        }
+    }
+    return result;
+}
 struct RenderJob {
     asmr::PathSelection selected;
     int window=0;
@@ -907,6 +958,8 @@ int main(int argc,char** argv){
         asmr::kUltraPassband,5000.0f,
         asmr::kLowPassband,asmr::kLowestPassband};
     int qualityIndex=0;
+    int falloffIndex=0; // F12: 0x = raw FDTD microphone pressure
+    auto falloffStrength=[&](){return asmr::kDistanceFalloffSteps[(size_t)falloffIndex];};
     // Zoom area and dx are budgeted together: higher physical
     // magnification yet progressively FEWER cell updates per second.
     const auto& zoomSteps=asmr::kZoomSteps;
@@ -970,6 +1023,7 @@ int main(int argc,char** argv){
     double recordingClock=0;
     RenderJob job;
     std::vector<float> lastPlayback;
+    std::vector<float> lastPlaybackBase; // normalized but NO F12 shaping
     std::vector<std::vector<uint32_t>> lastPlaybackWaves;
     int displayedPlaybackWave=-1;
     asmr::PathSelection lastPlaybackPath;
@@ -1069,7 +1123,8 @@ int main(int argc,char** argv){
         }
         // A completed WAV used the previous head/room, and must not
         // be replayed with the newly selected visible geometry.
-        lastPlayback.clear();lastPlaybackWaves.clear();
+        lastPlayback.clear();lastPlaybackBase.clear();
+        lastPlaybackWaves.clear();
         lastPlaybackPhysicalPath.clear();
         std::fprintf(stderr,
             "[%s] ACTIVE head=%s Z=%.2fx%s Q=%d dx=%.3fmm "
@@ -1338,9 +1393,29 @@ int main(int argc,char** argv){
                     previewStepsWindow+=asmr::kGraphBatch;
                     previewStep+=asmr::kGraphBatch;
                     blockSamples.clear();
+                    // The wavefield is unchanged. Amplify neither
+                    // stereo channel; only add frequency-independent
+                    // distance-dependent loss to the sampled pressure.
+                    // Mouth travels <~3mm within one 126-step graph,
+                    // so a midpoint gain avoids 200k powf calls/sec.
+                    const auto& mid=points[asmr::kGraphBatch/2];
+                    const asmr::Vec2 physicalMouth{
+                        live->view().originX+
+                            (mid.x+0.5f)*live->dx(),
+                        live->view().originY+
+                            (mid.y+0.5f)*live->dx()};
+                    const float falloffL=asmr::distanceFalloffGain(
+                        asmr::length(asmr::sub(physicalMouth,
+                            asmr::leftEar(channels,head->pinnaV2))),
+                        falloffStrength());
+                    const float falloffR=asmr::distanceFalloffGain(
+                        asmr::length(asmr::sub(physicalMouth,
+                            asmr::rightEar(channels,head->pinnaV2))),
+                        falloffStrength());
                     for(int n=0;n<asmr::kGraphBatch;++n)
-                        liveResampler.push(audio[n*2],audio[n*2+1],
-                                           blockSamples);
+                        liveResampler.push(
+                            audio[n*2]*falloffL,
+                            audio[n*2+1]*falloffR,blockSamples);
                     queued.insert(queued.end(),blockSamples.begin(),
                                   blockSamples.end());
                     need-=(int)blockSamples.size()/2;
@@ -1418,6 +1493,13 @@ int main(int argc,char** argv){
                 // Both saved WAV and SDL loop are N*48000 frames.
                 asmr::fitStereoClip(job.samples,job.window);
                 makeSafePlayback(job.samples);
+                // F12 must run AFTER normalizing the unshaped FDTD
+                // output, or the old automatic gain would cancel the
+                // entire effect for far-away recorded movement.
+                lastPlaybackBase=job.samples;
+                job.samples=distanceShapedClip(lastPlaybackBase,
+                    job.physicalPath,channels,head->pinnaV2,
+                    falloffStrength());
                 char soundPath[80],trackPath[80];
                 std::snprintf(soundPath,sizeof(soundPath),
                               "asmr_last_%02ds.wav",job.window);
