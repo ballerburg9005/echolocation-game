@@ -1125,6 +1125,27 @@ int main(){
                     (2.0*sizeof(float)*asmr::kOutputRate),
                 (unsigned long long)shortQueueWarnings,
                 (unsigned long long)clippedPreview);
+            // Explicit metre-scale audit: this is a 2m room, not a
+            // 50cm world with exaggerated mouse motion. The FDTD CFL
+            // timestep and travel times below derive from that scale.
+            const auto actualMouth=asmr::mouth(sourceCursor);
+            const auto left=asmr::leftEar(channels);
+            const auto right=asmr::rightEar(channels);
+            const float dL=asmr::length(asmr::sub(actualMouth,left));
+            const float dR=asmr::length(asmr::sub(actualMouth,right));
+            const float dCentre=asmr::length(
+                asmr::sub(actualMouth,asmr::listener()));
+            std::printf("[METRES] Room=%.3fx%.3fm, "
+                "listener=(1.000,1.000), artist=(%.3f,%.3f), "
+                "mouth=(%.3f,%.3f), centreRange=%.3fm, "
+                "micSeparation=%.3fm, L=%.3fm/%.2fms, "
+                "R=%.3fm/%.2fms; physics dx=%.4fm dt=%.2fus\n",
+                asmr::kRoomMetres,asmr::kRoomMetres,
+                artist.x,artist.y,actualMouth.x,actualMouth.y,
+                dCentre,asmr::micSpacing(channels),
+                dL,1000.0f*dL/echo::kSpeedOfSound,
+                dR,1000.0f*dR/echo::kSpeedOfSound,
+                live->dx(),live->dt()*1e6f);
             shortQueueWarnings=0;clippedPreview=0;
             audioDiagTime=SDL_GetTicks64();
         }
