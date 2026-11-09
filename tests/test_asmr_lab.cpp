@@ -39,21 +39,22 @@ int main(){
     for(int strength:asmr::kDistanceFalloffSteps)
         assert(asmr::distanceFalloffGain(2.0f,strength)<=
                asmr::distanceFalloffGain(0.5f,strength));
-    // F11 physical worlds include 10x smaller as well as 10x larger.
-    // Shift+F11 from default 1x moves immediately to 0.5x, not
-    // through the large-room presets. Every step is reversible.
-    static_assert(asmr::kPhysicsScales.size()==7);
-    assert(asmr::kDefaultPhysicsScaleIndex==3);
-    assert(asmr::kPhysicsScales.front()==0.1f);
-    assert(asmr::kPhysicsScales.back()==10.0f);
-    assert(asmr::kPhysicsScales[
-        (size_t)asmr::kDefaultPhysicsScaleIndex]==1.0f);
+    // Explicit F11 navigation: start at 1x, grow 2/3/4x, then
+    // shrink to 0.1/0.25/0.5/0.75x, wrapping back to 1x.
+    constexpr std::array<float,8> expectedScales{
+        1.0f,2.0f,3.0f,4.0f,0.1f,0.25f,0.5f,0.75f};
+    static_assert(asmr::kPhysicsScales.size()==8);
+    assert(asmr::kDefaultPhysicsScaleIndex==0);
+    assert(asmr::kPhysicsScales==expectedScales);
     assert(asmr::kPhysicsScales[(size_t)
         asmr::nextPhysicalScaleIndex(
-            asmr::kDefaultPhysicsScaleIndex,true)]==0.5f);
-    for(int i=0;i<7;++i){
-        assert(asmr::nextPhysicalScaleIndex(i)==(i+1)%7);
-        assert(asmr::nextPhysicalScaleIndex(i,true)==(i+6)%7);
+            asmr::kDefaultPhysicsScaleIndex,true)]==0.75f);
+    assert(asmr::kPhysicsScales[(size_t)
+        asmr::nextPhysicalScaleIndex(3)]==0.1f);
+    assert(asmr::kSmallRoomWorkFraction==0.60f);
+    for(int i=0;i<8;++i){
+        assert(asmr::nextPhysicalScaleIndex(i)==(i+1)%8);
+        assert(asmr::nextPhysicalScaleIndex(i,true)==(i+7)%8);
         assert(asmr::nextPhysicalScaleIndex(
             asmr::nextPhysicalScaleIndex(i),true)==i);
     }
@@ -82,6 +83,7 @@ int main(){
             assert(std::isfinite(work));
             assert(nx>=40&&ny>=40&&nx<=baseNx&&ny<=baseNy);
             const float expectedRatio=physical<1?
+                asmr::kSmallRoomWorkFraction*
                 std::pow(1.0f/1.01f,3.0f):1.0f/physical;
             assert(std::fabs(work-baseWork*expectedRatio)
                    <baseWork*0.001f);
@@ -115,9 +117,13 @@ int main(){
     assert(std::fabs(asmr::physicalMetres(
         asmr::kRoomMetres,0.1f)-0.2f)<1e-6f);
     assert(std::fabs(asmr::physicalMetres(
-        asmr::kRoomHeightMetres,10.0f)-35.55556f)<0.0001f);
+        asmr::kRoomHeightMetres,4.0f)-14.22222f)<0.0001f);
     assert(std::fabs(asmr::physicalMetres(
-        asmr::kRoomMetres,10.0f)-20.0f)<1e-6f);
+        asmr::kRoomMetres,4.0f)-8.0f)<1e-6f);
+    assert(std::fabs(asmr::physicalMetres(
+        asmr::kRoomMetres,0.25f)-0.5f)<1e-6f);
+    assert(std::fabs(asmr::physicalMetres(
+        asmr::kRoomMetres,0.75f)-1.5f)<1e-6f);
     // N diagnostic excites the SAME FDTD physics from four fixed,
     // distinct, air-borne positions; it is not noise mixed at the ears.
     // All four positions must stay well outside the listener and walls
