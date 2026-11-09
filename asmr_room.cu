@@ -1572,13 +1572,15 @@ int main(int argc,char** argv){
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR FDTD | %s | Z %.2fx%s dx %.2fmm | head:%s | range %.2fm | lag %.2fm | MP3:%s | path %.1fs | replay %.2f/%.0fs",
+            "ASMR FDTD | %s | Z %.2fx%s Q%d dx %.2fmm work %.0f%% | head:%s | range %.2fm | lag %.2fm | MP3:%s | path %.1fs | replay %.2f/%.0fs",
             mode==Mode::Render?"HIGH-RES RENDER":mode==Mode::Playback?
                 "VISIBLE LOOP":"LIVE RECORDING",
             gView.zoom,
             std::fabs(gView.width-gView.height)<0.01f?" SQUARE":"",
+            qualityIndex,
             mode==Mode::Render&&highQuality?highQuality->dx()*1000:
                 live->dx()*1000,
+            100.0f*asmr::relativeCellWork(live->dx(),live->view()),
             headIndex==0?"V2":headIndex==1?"CHANNEL":"SIMPLE",
             asmr::length(asmr::sub(asmr::mouth(visibleSource),
                                    asmr::listener())),
