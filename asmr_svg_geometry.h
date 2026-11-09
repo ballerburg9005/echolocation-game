@@ -153,7 +153,7 @@ inline std::vector<float> svgRoomMask(int n,float dx,
     for(int y=ymin;y<=ymax;++y)
         for(int x=xmin;x<=xmax;++x) {
             const size_t i=(size_t)y*n+x;
-            if(mask[i]==kOuterBoundaryMaterial)continue;
+            if(mask[i]==echo::kOuterBoundaryMaterial)continue;
             const float worldX=(x+0.5f)*dx,worldY=(y+0.5f)*dx;
             float lx=worldX-kListenerX;
             const float ly=worldY-kListenerY;
