@@ -1,5 +1,5 @@
 // Standalone ASMR room experiment. No changes to the arcade executable.
-// Source is always ~/test.mp3: decoded into mono PCM inside the real FDTD room.
+// Source defaults to ~/test.mp3, or --mp3 FILE; decoded to mono PCM.
 // Listener head is a REAL stationary 2D FDTD obstruction with two ears.
 // Artist is a collision-safe moving visual head; its mouth is a real
 // moving FDTD pressure emitter facing the listener on every path sample.
@@ -715,10 +715,53 @@ struct RenderJob {
 };
 enum class Mode {Preview,Render,Playback};
 
-int main(){
+static void printUsage(const char* executable){
+    std::printf(
+        "Usage: %s [--mp3 FILE] [--help]\n"
+        "\nInput:\n"
+        "  --mp3 FILE     Use FILE as the MP3 source instead of ~/test.mp3\n"
+        "                 (absolute or relative to the working directory).\n"
+        "  --help, -h     Print help without starting SDL or CUDA.\n"
+        "\nControls:\n"
+        "  Mouse         Move the speaker target within the acoustic room\n"
+        "  M             Toggle mouse / keyboard movement\n"
+        "  WASD, arrows  Move speaker in keyboard mode\n"
+        "  H             Cycle listener SVG geometries\n"
+        "  Q             Cycle acoustic grid quality\n"
+        "  Z             Actual FDTD zoom 1x / 2x / 4x / 6x / 8x\n"
+        "                (fixed cell count, more steps/sec at high zoom)\n"
+        "  V             Toggle pressure field visualization\n"
+        "  9, 0          Decrease / increase pressure exposure\n"
+        "  D             Toggle real-solver diagnostic chirp\n"
+        "  T             Toggle live FDTD sound\n"
+        "  L             Reload the selected MP3 source\n"
+        "  R             Reset recorded path and solver\n"
+        "  F5, F6, F7    Offline render/replay last 5, 10, 20 seconds\n"
+        "  P             Replay last completed offline recording\n"
+        "  Space         Stop replay, return to live mode\n"
+        "  Esc           Quit\n"
+        "\nAt high zoom the GPU may not meet real-time audio deadlines.\n",
+        executable);
+}
+
+int main(int argc,char** argv){
     const char* home=std::getenv("HOME");
-    const std::string filename=std::string(home&&*home?home:".")+
-                               "/test.mp3";
+    std::string filename=std::string(home&&*home?home:".")+"/test.mp3";
+    for(int i=1;i<argc;++i){
+        const std::string arg=argv[i];
+        if(arg=="--help"||arg=="-h"){printUsage(argv[0]);return 0;}
+        if(arg=="--mp3"){
+            if(i+1>=argc||argv[i+1][0]=='\0'||
+               std::strncmp(argv[i+1],"--",2)==0){
+                std::fprintf(stderr,"[ARG] --mp3 requires a file path.\n");
+                printUsage(argv[0]);return 2;
+            }
+            filename=argv[++i];
+        }else{
+            std::fprintf(stderr,"[ARG] Unknown argument: %s\n",arg.c_str());
+            printUsage(argv[0]);return 2;
+        }
+    }
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO)<0){
         std::fprintf(stderr,"[SDL] %s\n",SDL_GetError());return 1;
     }
@@ -902,7 +945,7 @@ int main(){
     std::printf("[CONTROLS] F5 = render last 5s, F6 = 10s, F7 = 20s "
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
-       "L reload ~/test.mp3, D FDTD test chirp, T toggle live, "
+       "L reload selected MP3, D FDTD test chirp, T toggle live, "
        "H head, Q base quality, Z zoom 1x/2x/4x/6x/8x, "
        "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
