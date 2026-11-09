@@ -48,9 +48,9 @@ inline bool headSolidAt(const SvgSilhouette& svg,Vec2 centre,
     const float localY=-(diff.x*forward.x+diff.y*forward.y);
     return svg.solid(localX,localY);
 }
-inline std::vector<float> svgRoomMask(int n,float dx,
+inline std::vector<float> svgRoomMask(int nx,int ny,float dx,
                     const SvgSilhouette& listenerSvg){
-    std::vector<float> mask=roomMask(n,dx);
+    std::vector<float> mask=roomMask(nx,ny,dx);
     if(!listenerSvg.present())return mask;
     // Remove the former circular fallback ENTIRELY before stamping the
     // real SVG, including above and below its narrower child-size bbox.
@@ -59,15 +59,15 @@ inline std::vector<float> svgRoomMask(int n,float dx,
         if(material>0.0f && material<3.5f)material=0.0f;
     const int xmin=std::max(1,(int)std::floor(
         (kListenerX-listenerSvg.widthMetres*0.5f)/dx)-1);
-    const int xmax=std::min(n-2,(int)std::ceil(
+    const int xmax=std::min(nx-2,(int)std::ceil(
         (kListenerX+listenerSvg.widthMetres*0.5f)/dx)+1);
     const int ymin=std::max(1,(int)std::floor(
         (kListenerY-listenerSvg.heightMetres*0.5f)/dx)-1);
-    const int ymax=std::min(n-2,(int)std::ceil(
+    const int ymax=std::min(ny-2,(int)std::ceil(
         (kListenerY+listenerSvg.heightMetres*0.5f)/dx)+1);
     for(int y=ymin;y<=ymax;++y)
         for(int x=xmin;x<=xmax;++x) {
-            const size_t i=(size_t)y*n+x;
+            const size_t i=(size_t)y*nx+x;
             if(mask[i]==echo::kOuterBoundaryMaterial)continue;
             const float worldX=(x+0.5f)*dx,worldY=(y+0.5f)*dx;
             float lx=worldX-kListenerX;
@@ -92,26 +92,30 @@ inline std::vector<float> svgRoomMask(int n,float dx,
         // an acoustic microphone port. Otherwise a correct 9.6cm
         // spacing would lie INSIDE a pressure-zero solid cell.
         // The user SVG paths themselves remain byte-for-byte exact.
-        for(int y=0;y<n;++y) {
+        for(int y=0;y<ny;++y) {
             const float localY=(y+0.5f)*dx-kListenerY;
             if(std::fabs(localY)>0.0027f)continue;
             for(int side:{-1,1}) {
-                for(int x=0;x<n;++x) {
+                for(int x=0;x<nx;++x) {
                     const float localX=(x+0.5f)*dx-kListenerX;
                     const float distance=side*localX;
                     if(distance>=0.0450f&&distance<=0.059f &&
-                       mask[(size_t)y*n+x]<3.5f)
-                        mask[(size_t)y*n+x]=0.0f;
+                       mask[(size_t)y*nx+x]<3.5f)
+                        mask[(size_t)y*nx+x]=0.0f;
                 }
             }
         }
     }
     return mask;
 }
+inline std::vector<float> svgRoomMask(int n,float dx,
+                    const SvgSilhouette& listenerSvg){
+    return svgRoomMask(n,n,dx,listenerSvg);
+}
 // V2 microphones sit farther out in the actual 12.4cm-separated
 // pinna recess air, with no carved artificial tunnel. The separate
 // inner-channel model keeps the original 8cm eardrum target.
-inline bool validateMicrophones(const std::vector<float>& mask,int n,
+inline bool validateMicrophones(const std::vector<float>& mask,int nx,int ny,
                         float dx,bool channel,
                         const SvgSilhouette& svg) {
     const Vec2 left=leftEar(channel,svg.pinnaV2);
@@ -126,19 +130,23 @@ inline bool validateMicrophones(const std::vector<float>& mask,int n,
                                     mic.y-kListenerY))return false;
         const float gx=mic.x/dx-0.5f,gy=mic.y/dx-0.5f;
         const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
-        if(ix<2||iy<2||ix+1>=n-2||iy+1>=n-2)return false;
+        if(ix<2||iy<2||ix+1>=nx-2||iy+1>=ny-2)return false;
         // Bilinear microphone sampling is explicitly mask-aware:
         // a thin recess may have some solid neighbouring cells,
         // but its sample point can still be in air. The kernel
         // renormalizes weights of only physically fluid neighbors.
         float airWeights=0;
         for(int y=0;y<2;++y)for(int x=0;x<2;++x){
-            if(mask[(size_t)(iy+y)*n+(ix+x)]!=0.0f)continue;
+            if(mask[(size_t)(iy+y)*nx+(ix+x)]!=0.0f)continue;
             airWeights+=(1-std::fabs(gx-(ix+x)))*
                         (1-std::fabs(gy-(iy+y)));
         }
         return airWeights>(svg.pinnaV2?0.98f:0.20f);
     };
     return check(left)&&check(right);
+}
+inline bool validateMicrophones(const std::vector<float>& mask,int n,
+                        float dx,bool channel,const SvgSilhouette& svg){
+    return validateMicrophones(mask,n,n,dx,channel,svg);
 }
 } // namespace asmr
