@@ -21,7 +21,9 @@ struct Shape {
     bool valid()const{return !loops.empty()&&widthMm>0&&heightMm>0;}
 };
 inline std::string attribute(const std::string& tag,const std::string& name){
-    const std::string key=name+"=";
+    // Match an entire XML attribute name. Searching just "d=" also
+    // matches the suffix of "id=", silently losing every SVG path.
+    const std::string key=" "+name+"=";
     const auto found=tag.find(key);
     if(found==std::string::npos)return {};
     size_t i=found+key.size();
