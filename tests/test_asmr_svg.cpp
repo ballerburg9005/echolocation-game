@@ -64,10 +64,14 @@ int main(){
         for(float y:{-0.0035f,0.0035f})
             assert(!speaker.solid(x,-asmr::kMouthOffset+y));
     assert(speaker.solid(0,0));
-    // The ear opening in channel SVG is 3mm above the drawn centre:
-    // the author's 8cm separation should land in its OPEN groove.
-    assert(!channels.solid(-0.04f,asmr::kChannelEarY));
-    assert(!channels.solid(0.04f,asmr::kChannelEarY));
+    // Newly authored circular cavity: target the INNER half-spacing
+    // probes, 7mm below centre. Leave V2's upper pinna mics unchanged.
+    const auto innerL=asmr::leftEar(true);
+    const auto innerR=asmr::rightEar(true);
+    assert(!channels.solid(innerL.x-asmr::kListenerX,
+                           asmr::kChannelEarY));
+    assert(!channels.solid(innerR.x-asmr::kListenerX,
+                           asmr::kChannelEarY));
     std::fprintf(stderr,
         "[SVG VERIFY] simple (%d,%d) alpha: -48mm=%d +48mm=%d "
         "left=-0.06:%d,-0.05:%d,-0.04:%d right=0.06:%d "
@@ -86,15 +90,15 @@ int main(){
     // adds a 3mm connecting microphone port at precisely that x.
     assert(simple.solid(-.048f,0));
     assert(simple.solid(.048f,0));
-    assert(std::fabs(asmr::micSpacing(true)-0.08f)<1e-6f);
+    assert(std::fabs(asmr::micSpacing(true)-0.042f)<1e-6f);
     assert(std::fabs(asmr::micSpacing(false)-0.096f)<1e-6f);
     assert(std::fabs(asmr::micSpacing(true,true)-0.124f)<1e-6f);
     // V2's old 40mm ear location is SOLID in the unmodified SVG.
     // Its actual open recess starts farther out, clear at 62mm.
-    assert(pinnaV2.solid(-0.040f,asmr::kChannelEarY));
-    assert(pinnaV2.solid(0.040f,asmr::kChannelEarY));
-    assert(!pinnaV2.solid(-0.062f,asmr::kChannelEarY));
-    assert(!pinnaV2.solid(0.062f,asmr::kChannelEarY));
+    assert(pinnaV2.solid(-0.040f,asmr::kPinnaEarY));
+    assert(pinnaV2.solid(0.040f,asmr::kPinnaEarY));
+    assert(!pinnaV2.solid(-0.062f,asmr::kPinnaEarY));
+    assert(!pinnaV2.solid(0.062f,asmr::kPinnaEarY));
 
     for(float dx:{asmr::kLiveDx,0.0035f,0.0030f,0.0025f,asmr::kOfflineDx}) {
         const int nx=asmr::cells(dx),ny=asmr::cellsY(dx);
@@ -180,6 +184,24 @@ int main(){
         assert(std::fabs(((fieldY+0.5f)*dx)-asmr::kListenerY)<2*dx);
         assert(mask[(size_t)fieldY*nx+fieldX]==1.0f);
     }
+    // The zoomed acoustic mask must remain in physical registration
+    // with the unchanged listener SVG, including the real mic points.
+    for(float zoom:{1.0f,2.0f,4.0f,6.0f,8.0f}){
+        const float dx=asmr::kLiveDx/zoom;
+        const auto view=asmr::roomView(zoom);
+        const int nx=asmr::cells(dx*zoom),ny=asmr::cellsY(dx*zoom);
+        const auto mask=asmr::svgRoomMask(nx,ny,dx,pinnaV2,
+                                          view.originX,view.originY);
+        assert(nx==400&&ny==711);
+        const int cx=(int)std::floor((asmr::kListenerX-view.originX)/dx);
+        const int cy=(int)std::floor((asmr::kListenerY-view.originY)/dx);
+        assert(mask[(size_t)cy*nx+cx]==1.0f);
+        assert(view.originX<asmr::kListenerX);
+        assert(view.originY<asmr::kListenerY);
+        // Absorbing door and high window are geometry, not UI paint.
+        assert(mask[(int)(ny*0.65f)*nx]==asmr::kPortMaterial);
+        assert(mask[(ny-1)*nx+(int)(nx*0.27f)]==asmr::kPortMaterial);
+    }
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
     constexpr float dx=.0025f;
@@ -205,5 +227,5 @@ int main(){
         speaker,{1.5f,1.0f},m,speakerForward));
     std::printf("Exact Inkscape SVG masks passed: 129.82mm simple, "
       "170.23mm channels, 185.35mm new pinna V2, 134.48mm sender; "
-      "8cm channel / 9.6cm simple / 12.4cm V2 real-air mic spacing, open channel and source recess\n");
+      "4.2cm channel / 9.6cm simple / 12.4cm V2 real-air mic spacing, open channel and source recess\n");
 }
