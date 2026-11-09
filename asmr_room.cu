@@ -215,11 +215,13 @@ public:
                       const asmr::SvgSilhouette& head,
                       bool channels,
                       const asmr::SvgSilhouette& speaker,
-                      float zoom=1.0f):
+                      float zoom=1.0f,bool square=false):
       dx_(resolution),dt_((float)asmr::stepSeconds(resolution)),
-      nx_(asmr::cells(resolution*zoom)),
-      ny_(asmr::cellsY(resolution*zoom)),
-      view_(asmr::roomView(zoom)),
+      nx_((int)std::lround(
+          asmr::roomView(zoom,square).width/resolution)),
+      ny_((int)std::lround(
+          asmr::roomView(zoom,square).height/resolution)),
+      view_(asmr::roomView(zoom,square)),
       halfMicSeparation_(asmr::micSpacing(channels,head.pinnaV2)*0.5f),
       micYOffset_(asmr::micOffsetY(channels,head.pinnaV2)){
         if(!speaker.present()) {
@@ -861,12 +863,21 @@ int main(int argc,char** argv){
         asmr::kUltraPassband,5000.0f,
         asmr::kLowPassband,asmr::kLowestPassband};
     int qualityIndex=0;
-    const std::array<float,5> zoomSteps{1.0f,2.0f,4.0f,6.0f,8.0f};
+    // Very gentle 8%, 16%, 30% true grid refinements. Final stage
+    // changes 400x711 to ~533x533, not a ridiculous 8x CFL burden.
+    const std::array<float,5> zoomSteps{1.0f,1.08f,1.16f,1.30f,1.40f};
     int zoomIndex=0;
     auto zoomValue=[&](){return zoomSteps[zoomIndex];};
-    auto liveDx=[&](){return qualityDx[qualityIndex]/zoomValue();};
+    auto squareMode=[&](){return zoomIndex==4;};
+    auto activeView=[&](){
+        return asmr::roomView(zoomValue(),squareMode());};
+    auto liveDx=[&](){
+        return squareMode()?
+            asmr::squareDxFromBase(qualityDx[qualityIndex]):
+            qualityDx[qualityIndex]/zoomValue();
+    };
     auto liveBand=[&](){return std::min(19000.0f,
-                         qualityBand[qualityIndex]*zoomValue());};
+        qualityBand[qualityIndex]*qualityDx[qualityIndex]/liveDx());};
     float liveCutoff=liveBand();
     std::vector<float> fullAudio,liveAudio;
     bool waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
@@ -884,7 +895,8 @@ int main(int argc,char** argv){
     bool diagnosticTone=false;
 
     auto live=std::make_unique<FdtdRoom>(
-        liveDx(),*head,channels,speakerShape,zoomValue());
+        liveDx(),*head,channels,speakerShape,
+        zoomValue(),squareMode());
     gView=live->view();
     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
     std::unique_ptr<FdtdRoom> highQuality;
@@ -1044,7 +1056,8 @@ int main(int argc,char** argv){
                     SDL_ClearQueuedAudio(device);
                     highQuality.reset();live.reset();
                     live=std::make_unique<FdtdRoom>(
-                        liveDx(),*head,channels,speakerShape,zoomValue());
+                        liveDx(),*head,channels,speakerShape,
+        zoomValue(),squareMode());
                     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
@@ -1066,9 +1079,9 @@ int main(int argc,char** argv){
                     qualityIndex=(qualityIndex+1)%
                         (int)qualityDx.size();
                     const float dx=liveDx();
-                    const auto view=asmr::roomView(zoomValue());
-                    const int side=asmr::cells(dx*zoomValue());
-                    const int length=asmr::cellsY(dx*zoomValue());
+                    const auto view=activeView();
+                    const int side=(int)std::lround(view.width/dx);
+                    const int length=(int)std::lround(view.height/dx);
                     const auto mask=asmr::svgRoomMask(side,length,dx,*head,
                         view.originX,view.originY);
                     if(asmr::validateMicrophones(
@@ -1083,7 +1096,8 @@ int main(int argc,char** argv){
                     SDL_ClearQueuedAudio(device);
                     live.reset();
                     live=std::make_unique<FdtdRoom>(
-                        liveDx(),*head,channels,speakerShape,zoomValue());
+                        liveDx(),*head,channels,speakerShape,
+        zoomValue(),squareMode());
                     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
@@ -1108,9 +1122,9 @@ int main(int argc,char** argv){
                     const int proposed=(zoomIndex+1)%(int)zoomSteps.size();
                     zoomIndex=proposed;
                     const float zoom=zoomValue(),dx=liveDx();
-                    const auto view=asmr::roomView(zoom);
-                    const int nx=asmr::cells(dx*zoom);
-                    const int ny=asmr::cellsY(dx*zoom);
+                    const auto view=activeView();
+                    const int nx=(int)std::lround(view.width/dx);
+                    const int ny=(int)std::lround(view.height/dx);
                     const auto mask=asmr::svgRoomMask(nx,ny,dx,*head,
                                       view.originX,view.originY);
                     if(asmr::validateMicrophones(mask,nx,ny,dx,
@@ -1129,7 +1143,8 @@ int main(int argc,char** argv){
                     if(waveLoaded)liveAudio=asmr::lowpass(
                         fullAudio,liveCutoff,asmr::kOutputRate);
                     live=std::make_unique<FdtdRoom>(
-                        liveDx(),*head,channels,speakerShape,zoomValue());
+                        liveDx(),*head,channels,speakerShape,
+        zoomValue(),squareMode());
                     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
                     gView=live->view();
                     artist=asmr::restrictCentreInView(artist,gView);
@@ -1198,8 +1213,10 @@ int main(int argc,char** argv){
             } else {
                 if(!highQuality)
                     highQuality=std::make_unique<FdtdRoom>(
-                        asmr::kOfflineDx/zoomValue(),*head,channels,
-                        speakerShape,zoomValue());
+                        squareMode()?
+                            asmr::squareDxFromBase(asmr::kOfflineDx):
+                            asmr::kOfflineDx/zoomValue(),*head,channels,
+                        speakerShape,zoomValue(),squareMode());
                 highQuality->uploadAudio(fullAudio);
                 highQuality->setRenderTiming(job.selected.start,
                     (double)captureSeconds,true);
@@ -1505,12 +1522,14 @@ int main(int argc,char** argv){
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR FDTD | %s | Z=%.0fx dx %.2fmm | range %.2fm | lag %.2fm | MP3:%s | path %.1fs | replay %.2f/%.0fs",
+            "ASMR FDTD | %s | Z %.2fx%s dx %.2fmm | head:%s | range %.2fm | lag %.2fm | MP3:%s | path %.1fs | replay %.2f/%.0fs",
             mode==Mode::Render?"HIGH-RES RENDER":mode==Mode::Playback?
                 "VISIBLE LOOP":"LIVE RECORDING",
             gView.zoom,
+            std::fabs(gView.width-gView.height)<0.01f?" SQUARE":"",
             mode==Mode::Render&&highQuality?highQuality->dx()*1000:
                 live->dx()*1000,
+            headIndex==0?"V2":headIndex==1?"CHANNEL":"SIMPLE",
             asmr::length(asmr::sub(asmr::mouth(visibleSource),
                                    asmr::listener())),
             asmr::length(asmr::sub(artist,sourceCursor)),
