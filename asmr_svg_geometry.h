@@ -19,6 +19,7 @@ struct SvgSilhouette {
     float widthMetres=0, heightMetres=0;
     int w=0,h=0;
     std::vector<unsigned char> alpha;
+    bool channels=false;
     bool present()const{return w>0&&h>0&&!alpha.empty();}
     // World local x right, local y UP; raster SVG y is DOWN.
     bool solid(float x,float y)const {
@@ -113,8 +114,11 @@ inline std::string svgLocation(const char* filename) {
     return std::string("asmr_shapes/")+filename;
 }
 inline SvgSilhouette listenerSilhouette(HeadStyle style){
-    return renderSvg(svgLocation(style==HeadStyle::Channels?
+    SvgSilhouette shape=renderSvg(svgLocation(
+        style==HeadStyle::Channels?
         "listener_with_ear_channel.svg":"listener.svg"));
+    shape.channels=style==HeadStyle::Channels;
+    return shape;
 }
 inline SvgSilhouette speakerSilhouette(){
     return renderSvg(svgLocation("speaker.svg"));
@@ -151,8 +155,18 @@ inline std::vector<float> svgRoomMask(int n,float dx,
             const size_t i=(size_t)y*n+x;
             if(mask[i]==kOuterBoundaryMaterial)continue;
             const float worldX=(x+0.5f)*dx,worldY=(y+0.5f)*dx;
-            mask[i]=listenerSvg.solid(worldX-kListenerX,
-                                     worldY-kListenerY)?1.0f:0.0f;
+            float lx=worldX-kListenerX;
+            const float ly=worldY-kListenerY;
+            bool solid=listenerSvg.solid(lx,ly);
+            // The author's ear-channel file has TWO independently
+            // authored mirrored paths. Seal only sub-millimetre gaps
+            // at the central straight join where both neighboring
+            // halves are SOLID; never bridge a real ear passage.
+            if(listenerSvg.channels&&std::fabs(lx)<0.0010f &&
+               listenerSvg.solid(-0.0015f,ly) &&
+               listenerSvg.solid(0.0015f,ly))
+                solid=true;
+            mask[i]=solid?1.0f:0.0f;
         }
     return mask;
 }
@@ -161,8 +175,28 @@ inline std::vector<float> svgRoomMask(int n,float dx,
 // For the simple head, recess microphones are 8cm + 0.8*2cm = 9.6cm
 // apart. In channel mode, sample at x=±4cm deep in the OPEN canals.
 inline bool validateMicrophones(const std::vector<float>& mask,int n,
-                        float dx,bool channel) {
+                        float dx,bool channel,
+                        const SvgSilhouette& svg) {
     const Vec2 left=leftEar(channel),right=rightEar(channel);
-    return probeInAir(mask,n,left,dx)&&probeInAir(mask,n,right,dx);
+    const auto check=[&](Vec2 mic) {
+        if(svg.present() &&
+           svg.solid(mic.x-kListenerX,mic.y-kListenerY))
+            return false; // user-specified eardrum must be in AIR
+        const float gx=mic.x/dx-0.5f,gy=mic.y/dx-0.5f;
+        const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
+        if(ix<2||iy<2||ix+1>=n-2||iy+1>=n-2)return false;
+        // Bilinear microphone sampling is explicitly mask-aware:
+        // a thin recess may have some solid neighbouring cells,
+        // but its sample point can still be in air. The kernel
+        // renormalizes weights of only physically fluid neighbors.
+        float airWeights=0;
+        for(int y=0;y<2;++y)for(int x=0;x<2;++x){
+            if(mask[(size_t)(iy+y)*n+(ix+x)]!=0.0f)continue;
+            airWeights+=(1-std::fabs(gx-(ix+x)))*
+                        (1-std::fabs(gy-(iy+y)));
+        }
+        return airWeights>0.20f;
+    };
+    return check(left)&&check(right);
 }
 } // namespace asmr
