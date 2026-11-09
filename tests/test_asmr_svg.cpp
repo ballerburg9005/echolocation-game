@@ -339,7 +339,7 @@ int main(){
     if(shrinkConfigurationsFailing)
         std::fprintf(stderr,
             "[F11 SVG] %d of 60 configurations fail "
-            "at 60%-work scaled dx; tune geometry to pass.\\n",
+            "at 60-percent-work scaled dx; tune geometry to pass.\\n",
             shrinkConfigurationsFailing);
     assert(shrinkConfigurationsFailing==0);
     // Real CUDA moving-scatterer stencil samples exactly the same
