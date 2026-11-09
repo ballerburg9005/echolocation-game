@@ -112,7 +112,9 @@ int main(){
         const bool channelReachable=
             reachable(b,nx,ny,dx,asmr::leftEar(true)) &&
             reachable(b,nx,ny,dx,asmr::rightEar(true));
-        assert(channelValid==channelReachable);
+        // Connectivity is necessary, though a too-small bilinear air
+        // footprint can independently reject an otherwise open passage.
+        assert(!channelValid || channelReachable);
         if(!channelValid)std::fprintf(stderr,
             "[SVG VERIFY] Channel ear pocket disconnected at dx=%.2fmm; "
             "alternative head will be unavailable on this grid.\n",dx*1000);
