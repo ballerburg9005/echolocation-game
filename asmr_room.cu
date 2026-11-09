@@ -439,11 +439,11 @@ static std::array<float4,asmr::kGraphBatch> mouthBatch(
 }
 
 static int screenX(float x){
-    return (int)std::lround(x/asmr::kRoomMetres*kWindow);
+    return (int)std::lround(x/asmr::kRoomMetres*kWindowW);
 }
 static int screenY(float y){
-    return (int)std::lround((asmr::kRoomMetres-y)/
-                             asmr::kRoomMetres*kWindow);
+    return (int)std::lround((asmr::kRoomHeightMetres-y)/
+                             asmr::kRoomHeightMetres*kWindowH);
 }
 static void color(SDL_Renderer* r,Uint8 red,Uint8 green,Uint8 blue){
     SDL_SetRenderDrawColor(r,red,green,blue,255);
@@ -511,7 +511,7 @@ static void drawRoom(SDL_Renderer* renderer,
     color(renderer,39,78,113);
     for(int thickness=0;thickness<7;++thickness){
         const SDL_Rect r{thickness,thickness,
-            kWindow-2*thickness,kWindow-2*thickness};
+            kWindowW-2*thickness,kWindowH-2*thickness};
         SDL_RenderDrawRect(renderer,&r);
     }
     // The movement trail is the path that will be rendered afterwards.
@@ -561,21 +561,21 @@ static void drawRoom(SDL_Renderer* renderer,
            screenY(asmr::kListenerY),screenX(0.30f),false);
     // 25cm physical ruler: 100 pixels in a 2m wide 800px room.
     color(renderer,186,184,160);
-    SDL_RenderDrawLine(renderer,24,kWindow-20,
-                       24+screenX(0.25f),kWindow-20);
-    SDL_RenderDrawLine(renderer,24,kWindow-25,24,kWindow-15);
-    SDL_RenderDrawLine(renderer,24+screenX(0.25f),kWindow-25,
-                       24+screenX(0.25f),kWindow-15);
+    SDL_RenderDrawLine(renderer,24,kWindowH-20,
+                       24+screenX(0.25f),kWindowH-20);
+    SDL_RenderDrawLine(renderer,24,kWindowH-25,24,kWindowH-15);
+    SDL_RenderDrawLine(renderer,24+screenX(0.25f),kWindowH-25,
+                       24+screenX(0.25f),kWindowH-15);
     if(processing){
         color(renderer,88,91,106);
-        SDL_Rect bg{80,kWindow-43,kWindow-160,14};
+        SDL_Rect bg{80,kWindowH-43,kWindowW-160,14};
         SDL_RenderFillRect(renderer,&bg);
         color(renderer,70,222,174);
         SDL_Rect bar=bg;
         bar.w=(int)std::lround(bg.w*std::clamp(progress,0.0f,1.0f));
         SDL_RenderFillRect(renderer,&bar);
     }else if(playing){
-        SDL_Rect bar{80,kWindow-43,kWindow-160,14};
+        SDL_Rect bar{80,kWindowH-43,kWindowW-160,14};
         color(renderer,88,91,106);
         SDL_RenderFillRect(renderer,&bar);
         color(renderer,70,222,174);
@@ -585,7 +585,7 @@ static void drawRoom(SDL_Renderer* renderer,
         // A dot at the active phase is visible even with a tiny
         // fraction, and snaps back to the start on every loop.
         color(renderer,255,243,140);
-        circle(renderer,80+bar.w,kWindow-36,6,true);
+        circle(renderer,80+bar.w,kWindowH-36,6,true);
     }
     if(mouseMode){
         color(renderer,251,241,169);
@@ -680,7 +680,7 @@ int main(){
     }
     SDL_Window* window=SDL_CreateWindow(
         "ASMR FDTD Lab",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
-        kWindow,kWindow,0);
+        kWindowW,kWindowH,0);
     if(!window){std::fprintf(stderr,"[SDL] %s\n",SDL_GetError());
                 SDL_Quit();return 1;}
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"0"); // nearest FDTD cells
@@ -690,13 +690,13 @@ int main(){
     if(!renderer){SDL_DestroyWindow(window);SDL_Quit();return 1;}
     SDL_Texture* waveTexture=SDL_CreateTexture(renderer,
         SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,
-        kPressureW,kPressureW);
+        kPressureW,kPressureH);
     if(!waveTexture)
         std::fprintf(stderr,"[VISUAL] Cannot display CUDA pressure map: %s\n",
                      SDL_GetError());
     SDL_Texture* replayWaveTexture=SDL_CreateTexture(renderer,
         SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,
-        kReplayW,kReplayW);
+        kReplayW,kReplayH);
     if(!replayWaveTexture)
         std::fprintf(stderr,"[VISUAL] Replay pressure texture: %s\n",
                      SDL_GetError());
@@ -759,13 +759,15 @@ int main(){
         renderer,listenerChannels,38,132,218);
     SDL_Texture* pinnaV2Sprite=headTexture(
         renderer,listenerV2,38,132,218);
-    const std::array<float,6> qualityDx{
-        asmr::kLiveDx,asmr::kMediumDx,asmr::kUltraDx,
-        asmr::kSafeDx,asmr::kLowDx,asmr::kLowestDx};
-    const std::array<float,6> qualityBand{
-        asmr::kLivePassband,asmr::kMediumPassband,asmr::kUltraPassband,
-        asmr::kSafePassband,asmr::kLowPassband,
-        asmr::kLowestPassband};
+    const std::array<float,8> qualityDx{
+        asmr::kLiveDx,asmr::kBalancedDx,asmr::kPreviousDx,
+        asmr::kMediumDx,asmr::kUltraDx,
+        0.006f,asmr::kLowDx,asmr::kLowestDx};
+    const std::array<float,8> qualityBand{
+        asmr::kLivePassband,asmr::kBalancedPassband,
+        asmr::kPreviousPassband,asmr::kMediumPassband,
+        asmr::kUltraPassband,5000.0f,
+        asmr::kLowPassband,asmr::kLowestPassband};
     int qualityIndex=0;
     float liveCutoff=qualityBand[qualityIndex];
     std::vector<float> fullAudio,liveAudio;
@@ -804,6 +806,7 @@ int main(){
     asmr::Vec2 artist{1.50f,1.0f},sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
     bool showPressure=true;
+    uint64_t lastWaveRefresh=0; // 30Hz signed-pressure display; never audio
     float pressureExposure=1.0f;
     Mode mode=Mode::Preview;
     SDL_WarpMouseInWindow(window,screenX(artist.x),screenY(artist.y));
@@ -841,7 +844,7 @@ int main(){
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload ~/test.mp3, D FDTD test chirp, T toggle live, "
-       "H cycle V2 pinna/channel/simple, Q 3.75/3/2.5/5/8/10mm, "
+       "H cycle V2 pinna/channel/simple, Q 5/4.5/3.75/3/2.5/6/8/10mm, "
        "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
@@ -909,10 +912,11 @@ int main(){
                     listenerV2:proposed==1?listenerChannels:listenerSimple;
                 const bool proposedChannels=proposed!=2;
                 const auto mask=asmr::svgRoomMask(
-                    asmr::cells(live->dx()),live->dx(),shape);
+                    asmr::cells(live->dx()),asmr::cellsY(live->dx()),
+                    live->dx(),shape);
                 if(!asmr::validateMicrophones(mask,
-                    asmr::cells(live->dx()),live->dx(),
-                    proposedChannels,shape)) {
+                    asmr::cells(live->dx()),asmr::cellsY(live->dx()),
+                    live->dx(),proposedChannels,shape)) {
                     std::fprintf(stderr,"[SVG HEAD] Mode %d at %.2fmm "
                         "blocks the eardrum microphone. Press Q "
                         "for finer resolution.\n",proposed,
@@ -946,10 +950,10 @@ int main(){
                     qualityIndex=(qualityIndex+1)%
                         (int)qualityDx.size();
                     const float dx=qualityDx[qualityIndex];
-                    const int side=asmr::cells(dx);
-                    const auto mask=asmr::svgRoomMask(side,dx,*head);
+                    const int side=asmr::cells(dx),length=asmr::cellsY(dx);
+                    const auto mask=asmr::svgRoomMask(side,length,dx,*head);
                     if(asmr::validateMicrophones(
-                        mask,side,dx,channels,*head))
+                        mask,side,length,dx,channels,*head))
                         break;
                 }
                 if(old!=qualityIndex) {
@@ -964,13 +968,13 @@ int main(){
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
                         live->dt(),asmr::kOutputRate);
-                    std::printf("[QUALITY] Full 2x2m FDTD grid "
+                    std::printf("[QUALITY] Full 2.0x3.56m portrait FDTD grid "
                         "dx=%.2fmm, %dx%d acoustic cells, "
                         "spatial 10-cell band %.0fHz, "
                         "input MP3 LP %.0fHz\n",
                         live->dx()*1000,
                         asmr::cells(live->dx()),
-                        asmr::cells(live->dx()),
+                        asmr::cellsY(live->dx()),
                         asmr::tenCellFrequency(live->dx()),
                         liveCutoff);
                 }
@@ -1062,9 +1066,9 @@ int main(){
                 SDL_GetMouseState(&x,&y);
                 const asmr::Vec2 wanted{
                     asmr::kRoomMetres*
-                        ((float)x+0.5f)/kWindow,
-                    asmr::kRoomMetres*
-                        (1.0f-((float)y+0.5f)/kWindow)};
+                        ((float)x+0.5f)/kWindowW,
+                    asmr::kRoomHeightMetres*
+                        (1.0f-((float)y+0.5f)/kWindowH)};
                 artist=asmr::moveArtist(artist,wanted);
             }else{
                 const Uint8* keys=SDL_GetKeyboardState(nullptr);
@@ -1089,14 +1093,14 @@ int main(){
                     SDL_GetQueuedAudioSize(device)/(2*sizeof(float)));
                 if(previewStep>0 && queuedFrames<24)
                     ++shortQueueWarnings;
-                int need=std::max(0,(int)(0.075*asmr::kOutputRate)-
+                int need=std::max(0,(int)(0.120*asmr::kOutputRate)-
                                     queuedFrames);
                 int batches=0;
                 queued.clear();
                 // The physical source position persists ACROSS the
                 // CUDA batches. Previously the same mouse sweep was
                 // replayed from start to finish for every mini-batch.
-                while(need>0 && batches<96){
+                while(need>0 && batches<144){
                     const auto points=mouthBatch(
                         {},0,live->dt(),previewStep,live->dx(),
                         sourceCursor,artist,false);
