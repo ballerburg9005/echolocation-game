@@ -1356,9 +1356,8 @@ int main(int argc,char** argv){
             if(key==SDLK_F11){
                 if(mode==Mode::Preview){
                     const bool reverse=(event.key.keysym.mod&KMOD_SHIFT)!=0;
-                    const int count=(int)asmr::kPhysicsScales.size();
-                    const int next=(physicsScaleIndex+count+
-                        (reverse?-1:1))%count;
+                    const int next=asmr::nextPhysicalScaleIndex(
+                        physicsScaleIndex,reverse);
                     selectConfiguration(headIndex,qualityIndex,zoomIndex,
                                         "F11",next);
                     char notice[200];
@@ -1610,7 +1609,8 @@ int main(int argc,char** argv){
                         float& v=queued[frame*2+ch];
                         // Requested square-room MP3 output trim:
                         // 75% amplitude relative to all other zooms.
-                        const float squareGain=squareMode()?0.75f:1.0f;
+                        const float squareGain=squareMode()?
+                            asmr::kSquareMp3Gain:1.0f;
                         v=std::isfinite(v)?
                             0.55f*squareGain*fade*v:0.0f;
                         if(std::fabs(v)>0.85f)++clippedPreview;
@@ -1678,7 +1678,8 @@ int main(int argc,char** argv){
                 if(squareMode()){
                     // Apply 75% AFTER offline peak normalization so
                     // the limiter cannot silently undo it.
-                    for(float& sample:job.samples)sample*=0.75f;
+                    for(float& sample:job.samples)
+                        sample*=asmr::kSquareMp3Gain;
                 }
                 // F12 must run AFTER normalizing the unshaped FDTD
                 // output, or the old automatic gain would cancel the
