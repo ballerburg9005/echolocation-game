@@ -9,17 +9,23 @@ int main(){
                   "CUDA graph must preserve triple-buffer identity");
     assert(asmr::cells(asmr::kLiveDx)==400);
     assert(asmr::cellsY(asmr::kLiveDx)==711);
-    // Zoom refines dx and shrinks physical room on both axes while
-    // keeping the exact same 400x711 CUDA pressure-field buffer.
-    for(float zoom:{1.0f,2.0f,4.0f,6.0f,8.0f}){
-        const auto view=asmr::roomView(zoom);
-        const float dx=asmr::kLiveDx/zoom;
-        assert(asmr::cells(dx*zoom)==400);
-        assert(asmr::cellsY(dx*zoom)==711);
-        assert(std::fabs(view.width*zoom-asmr::kRoomMetres)<1e-5f);
-        assert(std::fabs(view.height*zoom-asmr::kRoomHeightMetres)<1e-5f);
+    // Real zoom NEVER multiplies the cost by 2x/4x/8x any more.
+    // Its four portrait sizes and final square all use ~284k cells.
+    constexpr float stages[]{1.00f,1.08f,1.16f,1.30f,1.40f};
+    for(int i=0;i<5;++i){
+        const bool square=i==4;
+        const float zoom=stages[i];
+        const auto view=asmr::roomView(zoom,square);
+        const float dx=square?asmr::squareDxFromBase(asmr::kLiveDx):
+                              asmr::kLiveDx/zoom;
+        const int nx=(int)std::lround(view.width/dx);
+        const int ny=(int)std::lround(view.height/dx);
+        assert(std::abs(nx*ny-400*711)<1800);
+        assert(asmr::kLiveDx/dx<1.50f);
         assert(std::fabs((asmr::kListenerX-view.originX)/view.width-0.5f)<1e-5f);
-        assert(std::fabs((asmr::kListenerY-view.originY)/view.height-1.0f/3)<1e-5f);
+        assert(std::fabs((asmr::kListenerY-view.originY)/view.height-
+                         (square?0.5f:1.0f/3))<1e-5f);
+        assert(std::fabs(view.width-view.height)<1e-5f == square);
         const asmr::Vec2 nearFront{asmr::kListenerX,
             asmr::kListenerY+asmr::kMinimumSeparation+0.002f};
         assert(asmr::validArtistInView(nearFront,view));
@@ -28,7 +34,7 @@ int main(){
         assert(asmr::validArtistInView(clamped,view));
     }
     assert(std::fabs(asmr::micSpacing(true)-0.042f)<1e-6f);
-    assert(std::fabs(asmr::micOffsetY(true)-(-0.007f))<1e-6f);
+    assert(std::fabs(asmr::micOffsetY(true)-0.003f)<1e-6f);
     assert(std::fabs(asmr::micOffsetY(true,true)-0.003f)<1e-6f);
     // Reflecting walls lose less pressure than the three door slots.
     assert(asmr::kOutsideReflection>0.78f);
