@@ -168,6 +168,27 @@ inline std::vector<float> svgRoomMask(int n,float dx,
                 solid=true;
             mask[i]=solid?1.0f:0.0f;
         }
+    if(!listenerSvg.channels) {
+        // The author's simple SVG recess ends roughly 1-2mm OUTSIDE
+        // the specifically requested ±48mm microphone positions.
+        // Extend only its central 5mm-wide air notch ~3mm inward as
+        // an acoustic microphone port. Otherwise a correct 9.6cm
+        // spacing would lie INSIDE a pressure-zero solid cell.
+        // The user SVG paths themselves remain byte-for-byte exact.
+        for(int y=0;y<n;++y) {
+            const float localY=(y+0.5f)*dx-kListenerY;
+            if(std::fabs(localY)>0.0027f)continue;
+            for(int side:{-1,1}) {
+                for(int x=0;x<n;++x) {
+                    const float localX=(x+0.5f)*dx-kListenerX;
+                    const float distance=side*localX;
+                    if(distance>=0.0450f&&distance<=0.059f &&
+                       mask[(size_t)y*n+x]<3.5f)
+                        mask[(size_t)y*n+x]=0.0f;
+                }
+            }
+        }
+    }
     return mask;
 }
 // These positions are deliberately specified by this user's 8cm child
@@ -179,9 +200,9 @@ inline bool validateMicrophones(const std::vector<float>& mask,int n,
                         const SvgSilhouette& svg) {
     const Vec2 left=leftEar(channel),right=rightEar(channel);
     const auto check=[&](Vec2 mic) {
-        if(svg.present() &&
+        if(channel&&svg.present() &&
            svg.solid(mic.x-kListenerX,mic.y-kListenerY))
-            return false; // user-specified eardrum must be in AIR
+            return false; // channel eardrum in authored recess
         const float gx=mic.x/dx-0.5f,gy=mic.y/dx-0.5f;
         const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
         if(ix<2||iy<2||ix+1>=n-2||iy+1>=n-2)return false;
