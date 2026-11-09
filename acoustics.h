@@ -43,12 +43,7 @@ ECHO_HD inline float wallDamping(float reflection, float courant,
 // or painted wall. Keep the 2-cell collision boundary unchanged.
 // Interior walls continue to use the player's adjustable R coefficient.
 constexpr float kOuterBoundaryMaterial=4.0f;
-// Acoustic termination: strong reflection except three window/door
-// openings represented by a locally impedance-matched absorber.
-// A true open exterior would require simulating beyond the room.
-constexpr float kAbsorbingPortMaterial=5.0f;
-constexpr float kOuterBoundaryReflection=0.82f;
-constexpr float kAbsorbingPortReflection=0.035f;
+constexpr float kOuterBoundaryReflection=0.32f;
 ECHO_HD inline float mixedWallDamping(float leftMaterial,
     float rightMaterial,float downMaterial,float upMaterial,
     float interiorReflection,float courant) {
@@ -60,17 +55,14 @@ ECHO_HD inline float mixedWallDamping(float leftMaterial,
     // Nearly every cell is fluid; avoid two extra impedance calculations
     // in ~12 billion cell updates/sec when no wall is adjacent.
     if(solid==0)return 0.0f;
-    const int port=(int)(leftMaterial>=4.5f)+
-                   (int)(rightMaterial>=4.5f)+
-                   (int)(downMaterial>=4.5f)+
-                   (int)(upMaterial>=4.5f);
-    const int exterior=(int)(leftMaterial>=3.5f&&leftMaterial<4.5f)+
-                       (int)(rightMaterial>=3.5f&&rightMaterial<4.5f)+
-                       (int)(downMaterial>=3.5f&&downMaterial<4.5f)+
-                       (int)(upMaterial>=3.5f&&upMaterial<4.5f);
-    return wallDamping(interiorReflection,courant,solid-port-exterior)+
-           wallDamping(kOuterBoundaryReflection,courant,exterior)+
-           wallDamping(kAbsorbingPortReflection,courant,port);
+    const int soft=(int)(solidL&&leftMaterial>=3.5f)+
+                   (int)(solidR&&rightMaterial>=3.5f)+
+                   (int)(solidD&&downMaterial>=3.5f)+
+                   (int)(solidU&&upMaterial>=3.5f);
+    if(soft==0)return wallDamping(interiorReflection,courant,solid);
+    if(soft==solid)return wallDamping(kOuterBoundaryReflection,courant,solid);
+    return wallDamping(interiorReflection,courant,solid-soft)+
+           wallDamping(kOuterBoundaryReflection,courant,soft);
 }
 inline void stampOuterBoundary(float* mask,int side,int thickness=2) {
     if(!mask||side<=0||thickness<=0)return;
