@@ -369,6 +369,28 @@ inline float physicalScaleWork(float designDx,RoomView view,
     // Relative cell-update work per REAL second, not per graph.
     return relativeCellWork(designDx,view,baselineDx)/scale;
 }
+// Bound the TOTAL real-time 2D FDTD cost regardless of the
+// combination of Z crop, F11 metres, and Q baseline resolution.
+// Area alone is not the budget: acoustic steps/second also scale
+// as 1/(physical scale * normalized dx). One cubic-root rule
+// handles all room sizes, including the full 9:16 view.
+// Ceiling relative to the original 2x3.56m @ 5mm full-room solver.
+// A 0.5x square already ran at ~15% of that baseline on the user's
+// hardware; limit larger rooms to at most 19% (approx. +25% work).
+constexpr float kLiveCellWorkCeiling=0.19f;
+inline float budgetedLiveDx(float qualityDx,int zoomStage,
+                            float physicalScale){
+    const float nominal=physicalScaleDesignDx(
+        zoomDx(qualityDx,zoomStage),physicalScale);
+    const RoomView v=roomView(kZoomSteps[(size_t)
+        std::clamp(zoomStage,0,(int)kZoomSteps.size()-1)],
+        zoomStage==(int)kZoomSteps.size()-1);
+    const float work=physicalScaleWork(nominal,v,physicalScale);
+    const float adjustment=std::cbrt(
+        std::max(1.0f,work/kLiveCellWorkCeiling));
+    return nominal*adjustment;
+}
+
 inline bool validArtistInView(Vec2 p,RoomView view){
     return validArtist(p) &&
         p.x>=view.originX+kRoomClearance-1e-5f &&
