@@ -6,15 +6,15 @@
 #include <queue>
 #include <vector>
 
-static bool reachable(const std::vector<float>& mask,int n,float dx,
+static bool reachable(const std::vector<float>& mask,int nx,int ny,float dx,
                        asmr::Vec2 point){
     // The ear channel must be physically open to the external room,
     // not a sealed empty pit that would trap a virtual microphone.
     const int x=(int)(point.x/dx),y=(int)(point.y/dx);
-    if(x<2||y<2||x>=n-2||y>=n-2)return false;
-    const int start=y*n+x;
+    if(x<2||y<2||x>=nx-2||y>=ny-2)return false;
+    const int start=y*nx+x;
     if(mask[start]>0)return false;
-    const int outside=(n/4)*n+n/4;
+    const int outside=(ny/4)*nx+nx/4;
     if(mask[outside]>0)return false;
     std::vector<unsigned char> seen(mask.size(),0);
     std::queue<int> todo;
@@ -22,9 +22,9 @@ static bool reachable(const std::vector<float>& mask,int n,float dx,
     while(!todo.empty()){
         const int v=todo.front();todo.pop();
         if(v==outside)return true;
-        for(int offset:{-1,1,-n,n}){
+        for(int offset:{-1,1,-nx,nx}){
             const int to=v+offset;
-            if(to<0||to>=n*n||seen[to]||mask[to]>0)continue;
+            if(to<0||to>=nx*ny||seen[to]||mask[to]>0)continue;
             seen[to]=1;todo.push(to);
         }
     }
@@ -91,32 +91,32 @@ int main(){
     assert(!pinnaV2.solid(0.062f,asmr::kChannelEarY));
 
     for(float dx:{asmr::kLiveDx,0.0035f,0.0030f,0.0025f,0.0015f}) {
-        const int n=asmr::cells(dx);
-        const auto a=asmr::svgRoomMask(n,dx,simple);
-        const auto b=asmr::svgRoomMask(n,dx,channels);
-        const auto c=asmr::svgRoomMask(n,dx,pinnaV2);
-        assert(a.size()==(size_t)n*n&&b.size()==a.size());
+        const int nx=asmr::cells(dx),ny=asmr::cellsY(dx);
+        const auto a=asmr::svgRoomMask(nx,ny,dx,simple);
+        const auto b=asmr::svgRoomMask(nx,ny,dx,channels);
+        const auto c=asmr::svgRoomMask(nx,ny,dx,pinnaV2);
+        assert(a.size()==(size_t)nx*ny&&b.size()==a.size());
         assert(c.size()==a.size());
-        assert(asmr::validateMicrophones(a,n,dx,false,simple));
-        assert(asmr::validateMicrophones(b,n,dx,true,channels));
-        assert(asmr::validateMicrophones(c,n,dx,true,pinnaV2));
-        assert(reachable(b,n,dx,asmr::leftEar(true)));
-        assert(reachable(b,n,dx,asmr::rightEar(true)));
-        assert(reachable(c,n,dx,asmr::leftEar(true,true)));
-        assert(reachable(c,n,dx,asmr::rightEar(true,true)));
+        assert(asmr::validateMicrophones(a,nx,ny,dx,false,simple));
+        assert(asmr::validateMicrophones(b,nx,ny,dx,true,channels));
+        assert(asmr::validateMicrophones(c,nx,ny,dx,true,pinnaV2));
+        assert(reachable(b,nx,ny,dx,asmr::leftEar(true)));
+        assert(reachable(b,nx,ny,dx,asmr::rightEar(true)));
+        assert(reachable(c,nx,ny,dx,asmr::leftEar(true,true)));
+        assert(reachable(c,nx,ny,dx,asmr::rightEar(true,true)));
         // No silent cheat: no cut-through to the old 40mm v2 points.
         const int xSolid=(int)std::floor((asmr::kListenerX+0.040f)/dx);
         const int ySolid=(int)std::floor((asmr::kListenerY+asmr::kChannelEarY)/dx);
-        assert(c[(size_t)ySolid*n+xSolid]==1.0f);
-        assert(reachable(a,n,dx,asmr::leftEar(false)));
-        assert(reachable(a,n,dx,asmr::rightEar(false)));
-        assert(b[n/2*n+n/2]==1.0f); // TWO halves join as solid
-        assert(c[n/2*n+n/2]==1.0f); // v2 mirrored halves join
-        assert(a[n/4*n+n/4]==0.0f); // no phantom 17cm circle
+        assert(c[(size_t)ySolid*nx+xSolid]==1.0f);
+        assert(reachable(a,nx,ny,dx,asmr::leftEar(false)));
+        assert(reachable(a,nx,ny,dx,asmr::rightEar(false)));
+        assert(b[(int)(asmr::kListenerY/dx)*nx+(int)(asmr::kListenerX/dx)]==1.0f); // TWO halves join as solid
+        assert(c[(int)(asmr::kListenerY/dx)*nx+(int)(asmr::kListenerX/dx)]==1.0f); // v2 mirrored halves join
+        assert(a[(ny/4)*nx+nx/4]==0.0f); // no phantom 17cm circle
         assert(b[0]==echo::kOuterBoundaryMaterial);
         const int sourceX=(int)std::lround(
             (asmr::kListenerX+0.5f-asmr::kMouthOffset)/dx);
-        assert(b[n/2*n+sourceX]==0.0f);
+        assert(b[(int)(asmr::kListenerY/dx)*nx+sourceX]==0.0f);
     }
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
