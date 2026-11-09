@@ -37,6 +37,25 @@ static constexpr float kInputStrength=3.0f;
 static constexpr int kPressureImage=800; // full screen, no smoothing upscaled 400px tiles
 
 
+// At the edge of the sculpted ear recess, a bilinear microphone's
+// surrounding lattice can include some SOLID pressure cells. Weight
+// only AIR neighbors: otherwise the stereo gain changes with dx,
+ // creating spurious ear asymmetry even at fixed physical spacing.
+__device__ float sampleEarAir(const float* pressure,const float* mask,
+                              int n,float gx,float gy) {
+    const int x=(int)floorf(gx),y=(int)floorf(gy);
+    if(x<1||y<1||x+1>=n-1||y+1>=n-1)return 0.0f;
+    float accum=0.0f,total=0.0f;
+    for(int oy=0;oy<2;++oy)for(int ox=0;ox<2;++ox){
+        const int index=(y+oy)*n+x+ox;
+        if(mask[index]>0.0f)continue;
+        const float weight=(1.0f-fabsf(gx-(float)(x+ox)))*
+                           (1.0f-fabsf(gy-(float)(y+oy)));
+        accum+=weight*pressure[index];
+        total+=weight;
+    }
+    return total>0.001f?accum/total:0.0f;
+}
 __device__ float roomWaveSample(const float* pcm,int length,double seconds) {
     if(length<2||seconds<0.0)return 0.0f;
     const double absolute=seconds*(double)asmr::kOutputRate;
@@ -62,7 +81,7 @@ __global__ void asmrPressureStep(
     const float* mask,const float* pcm,const int* pcmLength,
     const float2* mouthLocations,const uint64_t* blockBase,
     float* outStereo,int localStep,int n,float dx,float dt,float decay,
-    float halfMicSeparation,double absoluteStart,
+    float halfMicSeparation,float micYOffset,double absoluteStart,
     double recordingDuration,bool offline)
 {
     const int x=blockIdx.x*blockDim.x+threadIdx.x;
@@ -75,9 +94,9 @@ __global__ void asmrPressureStep(
     if(x==0&&y==0){
         const float lx=(asmr::kListenerX-halfMicSeparation)/dx-0.5f;
         const float rx=(asmr::kListenerX+halfMicSeparation)/dx-0.5f;
-        const float ey=asmr::kListenerY/dx-0.5f;
-        outStereo[localStep*2]=echo::bilinearSample(now,n,lx,ey);
-        outStereo[localStep*2+1]=echo::bilinearSample(now,n,rx,ey);
+        const float ey=(asmr::kListenerY+micYOffset)/dx-0.5f;
+        outStereo[localStep*2]=sampleEarAir(now,mask,n,lx,ey);
+        outStereo[localStep*2+1]=sampleEarAir(now,mask,n,rx,ey);
     }
     if(x==0||y==0||x==n-1||y==n-1||mask[idx]>0.0f) {
         next[idx]=0.0f;return;
@@ -162,9 +181,10 @@ public:
                       bool channels):
       dx_(resolution),n_(asmr::cells(resolution)),
       dt_((float)asmr::stepSeconds(resolution)),
-      halfMicSeparation_(asmr::micSpacing(channels)*0.5f){
+      halfMicSeparation_(asmr::micSpacing(channels)*0.5f),
+      micYOffset_(channels?asmr::kChannelEarY:0.0f){
         const auto mask=asmr::svgRoomMask(n_,dx_,head);
-        if(!asmr::validateMicrophones(mask,n_,dx_,channels)) {
+        if(!asmr::validateMicrophones(mask,n_,dx_,channels,head)) {
             std::fprintf(stderr,
                 "[ASMR ERROR] Mic at x = %.4f / %.4f m is inside a "
                 "SOLID svg cell or blocked bilinear footprint, "
@@ -209,7 +229,8 @@ public:
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
-                n_,dx_,dt_,decay,halfMicSeparation_,0.0,1e12,false);
+                n_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
+                0.0,1e12,false);
         }
         LAB_CUDA(cudaStreamEndCapture(stream_,&graph_));
         LAB_CUDA(cudaGraphInstantiate(&execution_,graph_,0));
@@ -231,7 +252,7 @@ public:
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
-                n_,dx_,dt_,decay,halfMicSeparation_,
+                n_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
                 absoluteStart,length,offline);
         LAB_CUDA(cudaStreamEndCapture(stream_,&graph_));
         LAB_CUDA(cudaGraphInstantiate(&execution_,graph_,0));
@@ -297,7 +318,7 @@ public:
     FdtdRoom& operator=(const FdtdRoom&)=delete;
 private:
     float dx_=0,dt_=0;
-    float halfMicSeparation_=0;
+    float halfMicSeparation_=0,micYOffset_=0;
     int n_=0;
     float* fields_[3]{};
     float* deviceMask_=nullptr,*deviceAudio_=nullptr;
