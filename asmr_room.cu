@@ -31,12 +31,13 @@
     std::fprintf(stderr,"ASMR CUDA %s:%d: %s\n",__FILE__,__LINE__, \
                  cudaGetErrorString(err));std::exit(2);}}while(0)
 
-static constexpr int kWindow=800;
+static constexpr int kWindowW=540;
+static constexpr int kWindowH=960; // 9:16 portrait
 static constexpr int kMaxWavSeconds=60;
 static constexpr int kMaxWavFrames=asmr::kOutputRate*kMaxWavSeconds;
 static constexpr float kInputStrength=3.0f;
-static constexpr int kPressureImage=800; // full screen, real GPU field
-static constexpr int kReplayPressureImage=256; // playback visual snapshots
+static constexpr int kPressureW=360, kPressureH=640; // GPU field visual only
+static constexpr int kReplayW=180, kReplayH=320; // replay visual only
 static constexpr int kReplayPressureFps=24; // no effect on FDTD/audio
 
 
@@ -45,12 +46,12 @@ static constexpr int kReplayPressureFps=24; // no effect on FDTD/audio
 // only AIR neighbors: otherwise the stereo gain changes with dx,
  // creating spurious ear asymmetry even at fixed physical spacing.
 __device__ float sampleEarAir(const float* pressure,const float* mask,
-                              int n,float gx,float gy) {
+                              int nx,int ny,float gx,float gy) {
     const int x=(int)floorf(gx),y=(int)floorf(gy);
-    if(x<1||y<1||x+1>=n-1||y+1>=n-1)return 0.0f;
+    if(x<1||y<1||x+1>=nx-1||y+1>=ny-1)return 0.0f;
     float accum=0.0f,total=0.0f;
     for(int oy=0;oy<2;++oy)for(int ox=0;ox<2;++ox){
-        const int index=(y+oy)*n+x+ox;
+        const int index=(y+oy)*nx+x+ox;
         if(mask[index]>0.0f)continue;
         const float weight=(1.0f-fabsf(gx-(float)(x+ox)))*
                            (1.0f-fabsf(gy-(float)(y+oy)));
@@ -83,7 +84,7 @@ __global__ void asmrPressureStep(
     float* next,const float* now,const float* previous,
     const float* mask,const float* pcm,const int* pcmLength,
     const float4* mouthLocations,const uint64_t* blockBase,
-    float* outStereo,int localStep,int n,float dx,float dt,float decay,
+    float* outStereo,int localStep,int nx,int ny,float dx,float dt,float decay,
     float halfMicSeparation,float micYOffset,double absoluteStart,
     double recordingDuration,bool offline,
     const unsigned char* speakerPixels,int speakerW,int speakerH,
@@ -91,8 +92,8 @@ __global__ void asmrPressureStep(
 {
     const int x=blockIdx.x*blockDim.x+threadIdx.x;
     const int y=blockIdx.y*blockDim.y+threadIdx.y;
-    if(x>=n||y>=n)return;
-    const int idx=y*n+x;
+    if(x>=nx||y>=ny)return;
+    const int idx=y*nx+x;
     // Read the preceding, completed pressure field at BOTH ear points.
     // Unlike separate output kernels, this doesn't double graph launches.
     // The p field is read-only for the entirety of this CUDA kernel.
@@ -100,10 +101,10 @@ __global__ void asmrPressureStep(
         const float lx=(asmr::kListenerX-halfMicSeparation)/dx-0.5f;
         const float rx=(asmr::kListenerX+halfMicSeparation)/dx-0.5f;
         const float ey=(asmr::kListenerY+micYOffset)/dx-0.5f;
-        outStereo[localStep*2]=sampleEarAir(now,mask,n,lx,ey);
-        outStereo[localStep*2+1]=sampleEarAir(now,mask,n,rx,ey);
+        outStereo[localStep*2]=sampleEarAir(now,mask,nx,ny,lx,ey);
+        outStereo[localStep*2+1]=sampleEarAir(now,mask,nx,ny,rx,ey);
     }
-    if(x==0||y==0||x==n-1||y==n-1||mask[idx]>0.0f) {
+    if(x==0||y==0||x==nx-1||y==ny-1||mask[idx]>0.0f) {
         next[idx]=0.0f;return;
     }
     const float center=now[idx];
@@ -136,12 +137,12 @@ __global__ void asmrPressureStep(
         center,now[idx-1],b0,bL);
     const float r=mask[idx+1]>0?center:asmr::movingHeadNeighbor(
         center,now[idx+1],b0,bR);
-    const float d=mask[idx-n]>0?center:asmr::movingHeadNeighbor(
-        center,now[idx-n],b0,bD);
-    const float u=mask[idx+n]>0?center:asmr::movingHeadNeighbor(
-        center,now[idx+n],b0,bU);
+    const float d=mask[idx-nx]>0?center:asmr::movingHeadNeighbor(
+        center,now[idx-nx],b0,bD);
+    const float u=mask[idx+nx]>0?center:asmr::movingHeadNeighbor(
+        center,now[idx+nx],b0,bU);
     const float damping=echo::mixedWallDamping(
-        mask[idx-1],mask[idx+1],mask[idx-n],mask[idx+n],
+        mask[idx-1],mask[idx+1],mask[idx-nx],mask[idx+nx],
         asmr::kHeadReflection,echo::kCourant);
     float pressure=echo::impedanceWaveStep(
         center,previous[idx],l,r,d,u,echo::kCourantSquared,damping);
@@ -173,13 +174,13 @@ __global__ void asmrPressureStep(
 // both listener microphones. It is not ray-traced, generated sine rings,
 // an HRTF display, or an image synthesizer.
 __global__ void pressureImageKernel(const float* p,const float* mask,
-    uint32_t* out,int n,int imageSize,float exposure) {
+    uint32_t* out,int nx,int ny,int imageW,int imageH,float exposure) {
     const int x=blockIdx.x*blockDim.x+threadIdx.x;
     const int y=blockIdx.y*blockDim.y+threadIdx.y;
-    if(x>=imageSize||y>=imageSize)return;
-    const int sx=min(n-1,(int)(((float)x+0.5f)*n/imageSize));
-    const int sy=min(n-1,(int)(((float)(imageSize-y)-0.5f)*n/imageSize));
-    const int index=sy*n+sx;
+    if(x>=imageW||y>=imageH)return;
+    const int sx=min(nx-1,(int)(((float)x+0.5f)*nx/imageW));
+    const int sy=min(ny-1,(int)(((float)(imageH-y)-0.5f)*ny/imageH));
+    const int index=sy*nx+sx;
     const float material=mask[index];
     const float pressure=p[index];
     int r=9,g=14,b=21;
@@ -203,7 +204,7 @@ __global__ void pressureImageKernel(const float* p,const float* mask,
     }
     // SDL_PIXELFORMAT_RGBA32 means little-endian ABGR8888 on x86,
     // so this word lands in host memory as 4 bytes R,G,B,A.
-    out[y*imageSize+x]=0xff000000u |
+    out[y*imageW+x]=0xff000000u |
         ((uint32_t)b<<16)|((uint32_t)g<<8)|(uint32_t)r;
 }
 
@@ -213,7 +214,8 @@ public:
                       const asmr::SvgSilhouette& head,
                       bool channels,
                       const asmr::SvgSilhouette& speaker):
-      dx_(resolution),n_(asmr::cells(resolution)),
+      dx_(resolution),nx_(asmr::cells(resolution)),
+      ny_(asmr::cellsY(resolution)),
       dt_((float)asmr::stepSeconds(resolution)),
       halfMicSeparation_(asmr::micSpacing(channels,head.pinnaV2)*0.5f),
       micYOffset_(channels?asmr::kChannelEarY:0.0f){
@@ -224,8 +226,8 @@ public:
         speakerW_=speaker.w;speakerH_=speaker.h;
         speakerWidthCells_=speaker.widthMetres/dx_;
         speakerHeightCells_=speaker.heightMetres/dx_;
-        const auto mask=asmr::svgRoomMask(n_,dx_,head);
-        if(!asmr::validateMicrophones(mask,n_,dx_,channels,head)) {
+        const auto mask=asmr::svgRoomMask(nx_,ny_,dx_,head);
+        if(!asmr::validateMicrophones(mask,nx_,ny_,dx_,channels,head)) {
             std::fprintf(stderr,
                 "[ASMR ERROR] Mic at x = %.4f / %.4f m is inside a "
                 "SOLID svg cell or blocked bilinear footprint, "
@@ -235,11 +237,11 @@ public:
             std::exit(3);
         }
         std::printf("[SVG FDTD] Actual head mask: %.1fx%.1fmm, "
-                    "%d cells across room, mics %.1fmm apart, "
+                    "%dx%d cells across room, mics %.1fmm apart, "
                     "dx=%.2fmm, dt=%.2fus, room=%.1fx%.1fm.\n",
                     head.widthMetres*1000,head.heightMetres*1000,
-                    n_,halfMicSeparation_*2000,dx_*1000,
-                    dt_*1e6,asmr::kRoomMetres,asmr::kRoomMetres);
+                    nx_,ny_,halfMicSeparation_*2000,dx_*1000,
+                    dt_*1e6,asmr::kRoomMetres,asmr::kRoomHeightMetres);
         const size_t size=mask.size()*sizeof(float);
         for(auto& p:fields_) {LAB_CUDA(cudaMalloc(&p,size));
                               LAB_CUDA(cudaMemset(p,0,size));}
@@ -255,14 +257,14 @@ public:
         LAB_CUDA(cudaMalloc(&deviceAudio_,sizeof(float)*kMaxWavFrames));
         LAB_CUDA(cudaMalloc(&deviceAudioFrames_,sizeof(int)));
         LAB_CUDA(cudaMalloc(&deviceImage_,
-                           (size_t)kPressureImage*kPressureImage*
+                           (size_t)kPressureW*kPressureH*
                            sizeof(uint32_t)));
         int zero=0;
         LAB_CUDA(cudaMemcpy(deviceAudioFrames_,&zero,sizeof(int),
                             cudaMemcpyHostToDevice));
         LAB_CUDA(cudaStreamCreate(&stream_));
         const dim3 threads(16,16);
-        const dim3 blocks((n_+15)/16,(n_+15)/16);
+        const dim3 blocks((nx_+15)/16,(ny_+15)/16);
         const float decay=std::exp(-dt_*0.6f);
         LAB_CUDA(cudaStreamBeginCapture(stream_,
                     cudaStreamCaptureModeGlobal));
@@ -273,7 +275,7 @@ public:
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
-                n_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
+                nx_,ny_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
                 0.0,1e12,false,deviceSpeaker_,speakerW_,speakerH_,
                 speakerWidthCells_,speakerHeightCells_);
         }
@@ -288,7 +290,7 @@ public:
     void setRenderTiming(double absoluteStart,double length,bool offline){
         if(execution_){LAB_CUDA(cudaGraphExecDestroy(execution_));execution_=nullptr;}
         if(graph_){LAB_CUDA(cudaGraphDestroy(graph_));graph_=nullptr;}
-        const dim3 threads(16,16),blocks((n_+15)/16,(n_+15)/16);
+        const dim3 threads(16,16),blocks((nx_+15)/16,(ny_+15)/16);
         const float decay=std::exp(-dt_*0.6f);
         LAB_CUDA(cudaStreamBeginCapture(stream_,
                     cudaStreamCaptureModeGlobal));
@@ -297,7 +299,7 @@ public:
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
-                n_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
+                nx_,ny_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
                 absoluteStart,length,offline,
                 deviceSpeaker_,speakerW_,speakerH_,
                 speakerWidthCells_,speakerHeightCells_);
@@ -307,7 +309,7 @@ public:
     }
 
     void reset(){
-        const size_t bytes=(size_t)n_*n_*sizeof(float);
+        const size_t bytes=(size_t)nx_*ny_*sizeof(float);
         for(auto& p:fields_)LAB_CUDA(cudaMemset(p,0,bytes));
     }
     void uploadAudio(const std::vector<float>& source){
@@ -337,15 +339,15 @@ public:
         return result;
     }
     void pressureImage(std::vector<uint32_t>& pixels,float exposure,
-                       int imageSize=kPressureImage){
-        imageSize=std::clamp(imageSize,1,kPressureImage);
-        pixels.resize((size_t)imageSize*imageSize);
+                       int imageW=kPressureW,int imageH=kPressureH){
+        imageW=std::clamp(imageW,1,kPressureW);
+        imageH=std::clamp(imageH,1,kPressureH);
+        pixels.resize((size_t)imageW*imageH);
         const dim3 thr(16,16);
-        const dim3 blk((imageSize+15)/16,
-                       (imageSize+15)/16);
+        const dim3 blk((imageW+15)/16,(imageH+15)/16);
         pressureImageKernel<<<blk,thr,0,stream_>>>(
-            fields_[1],deviceMask_,deviceImage_,n_,
-            imageSize,exposure);
+            fields_[1],deviceMask_,deviceImage_,nx_,ny_,
+            imageW,imageH,exposure);
         LAB_CUDA(cudaGetLastError());
         LAB_CUDA(cudaStreamSynchronize(stream_));
         LAB_CUDA(cudaMemcpy(pixels.data(),deviceImage_,
@@ -374,7 +376,7 @@ private:
     float halfMicSeparation_=0,micYOffset_=0;
     float speakerWidthCells_=0,speakerHeightCells_=0;
     int speakerW_=0,speakerH_=0;
-    int n_=0;
+    int nx_=0,ny_=0;
     float* fields_[3]{};
     float* deviceMask_=nullptr,*deviceAudio_=nullptr;
     float4* deviceMouth_=nullptr;
@@ -688,13 +690,13 @@ int main(){
     if(!renderer){SDL_DestroyWindow(window);SDL_Quit();return 1;}
     SDL_Texture* waveTexture=SDL_CreateTexture(renderer,
         SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,
-        kPressureImage,kPressureImage);
+        kPressureW,kPressureW);
     if(!waveTexture)
         std::fprintf(stderr,"[VISUAL] Cannot display CUDA pressure map: %s\n",
                      SDL_GetError());
     SDL_Texture* replayWaveTexture=SDL_CreateTexture(renderer,
         SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,
-        kReplayPressureImage,kReplayPressureImage);
+        kReplayW,kReplayW);
     if(!replayWaveTexture)
         std::fprintf(stderr,"[VISUAL] Replay pressure texture: %s\n",
                      SDL_GetError());
@@ -1156,7 +1158,7 @@ int main(){
                                 kReplayPressureFps){
                 std::vector<uint32_t> frame;
                 highQuality->pressureImage(frame,pressureExposure,
-                                            kReplayPressureImage);
+                                            kReplayW);
                 job.waveFrames.push_back(std::move(frame));
                 ++job.nextWaveFrame;
             }
@@ -1180,8 +1182,8 @@ int main(){
                 lastPlayback.swap(job.samples);
                 while(job.waveFrames.size()<targetWaveFrames)
                     job.waveFrames.push_back(job.waveFrames.empty()?
-                        std::vector<uint32_t>((size_t)kReplayPressureImage*
-                            kReplayPressureImage,0xff150e09u):
+                        std::vector<uint32_t>((size_t)kReplayW*
+                            kReplayW,0xff150e09u):
                         job.waveFrames.back());
                 lastPlaybackWaves.swap(job.waveFrames);
                 startReplay();
@@ -1274,7 +1276,7 @@ int main(){
             if(index!=displayedPlaybackWave) {
                 SDL_UpdateTexture(replayWaveTexture,nullptr,
                     lastPlaybackWaves[index].data(),
-                    kReplayPressureImage*sizeof(uint32_t));
+                    kReplayW*sizeof(uint32_t));
                 displayedPlaybackWave=index;
             }
             displayedWaves=replayWaveTexture;
@@ -1283,7 +1285,7 @@ int main(){
                 highQuality.get():live.get();
             active->pressureImage(pressurePixels,pressureExposure);
             SDL_UpdateTexture(waveTexture,nullptr,
-                pressurePixels.data(),kPressureImage*sizeof(uint32_t));
+                pressurePixels.data(),kPressureW*sizeof(uint32_t));
         }
         const asmr::Vec2 visibleArtist=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
