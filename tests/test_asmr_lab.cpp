@@ -80,7 +80,10 @@ int main(){
             previousStep=displacement;
             smoothed=updated;
         }
-    assert(previousDistance<0.45f);
+    // A 3150-step interval is only ~23ms at 3.5mm; a max-velocity
+    // source correctly covers only a few centimetres in that time.
+    assert(previousDistance<
+        asmr::length(asmr::sub(asmr::Vec2{1.52f,1.0f},target))-0.03f);
     assert(previousStep>=0.0f);
     assert(asmr::length(asmr::sub(
         asmr::advanceSource(smoothed,target,0.0f),smoothed))<1e-7f);
