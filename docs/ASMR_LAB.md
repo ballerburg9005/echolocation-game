@@ -349,10 +349,11 @@ The solver therefore intentionally reduces the grid resolution
 at smaller F11 settings.
 
 The smaller-room cell spacing is
-`design_dx = base_zoom_dx × 1.01 × (1/(S × 0.60))^(1/3)`,
-so modeled **cell updates per real second are about 60% of
-the preceding smaller-room configuration's workload**—a
-**40% reduction** at the same Z and Q. This estimate uses
+`design_dx = base_zoom_dx × 1.0201 × (1/(S × 0.60))^(1/3)`,
+so modeled **cell updates per real second are no more than
+60% of the previous smaller-room configuration's workload**
+(about 58%, including the modest extra mic-connectivity spacing
+guard)—**at least a 40% reduction** at the same Z and Q. This estimate uses
 `area/(S × dx^3)`; it does not measure GPU launch overhead,
 CPU audio scheduling or end-to-end real-time capacity.
 The actual acoustic timestep is computed using physical
