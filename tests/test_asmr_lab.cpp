@@ -48,6 +48,17 @@ int main(){
     static_assert(asmr::kPhysicsScales.size()==4);
     assert(asmr::kPhysicsScales.front()==1.0f);
     assert(asmr::kPhysicsScales.back()==10.0f);
+    // F11 selection is a stable, independent 4-way cycle in both
+    // directions. No hidden index or change to H/Z/Q/F12 is required.
+    for(int i=0;i<4;++i){
+        assert(asmr::nextPhysicalScaleIndex(i)==(i+1)%4);
+        assert(asmr::nextPhysicalScaleIndex(i,true)==(i+3)%4);
+        assert(asmr::nextPhysicalScaleIndex(
+            asmr::nextPhysicalScaleIndex(i),true)==i);
+    }
+    // Exact close-up output amplitude, applied after offline gain.
+    assert(asmr::kSquareMp3Gain==0.75f);
+    assert(0.55f*asmr::kSquareMp3Gain<0.55f);
     for(size_t z=0;z<asmr::kZoomSteps.size();++z){
         const bool sq=z+1==asmr::kZoomSteps.size();
         const auto view=asmr::roomView(asmr::kZoomSteps[z],sq);
