@@ -1084,23 +1084,31 @@ int main(int argc,char** argv){
                 bool valid=validCandidate(live->view(),live->dx());
                 bool changedZoom=false;
                 if(!valid && requested==1){
-                    // The authored channel has sub-5mm passages. At
-                    // 1x they can be sealed by rasterization. Offer the
-                    // new *moderate* square-grid resolution instead
-                    // of substituting a completely different head.
-                    const auto squareView=
-                        asmr::roomView(zoomSteps.back(),true);
-                    const float squareDx=asmr::squareDxFromBase(
-                        qualityDx[qualityIndex]);
-                    if(validCandidate(squareView,squareDx)){
-                        zoomIndex=(int)zoomSteps.size()-1;
-                        changedZoom=true;
-                        valid=true;
-                        std::fprintf(stderr,
-                            "[H] CHANNEL has disconnected mics at "
-                            "current grid; using 1.8m SQUARE (%.2fmm) "
-                            "to show the actual channel SVG.\n",
-                            squareDx*1000);
+                    // The authored channel groove is a narrow path
+                    // whose raster connectivity is not monotonic in
+                    // dx. Test each gentle stage instead of falsely
+                    // assuming the finest/square grid is valid.
+                    const int originalZoom=zoomIndex;
+                    for(int z=0;z<(int)zoomSteps.size();++z){
+                        if(z==originalZoom)continue;
+                        const bool sq=z==(int)zoomSteps.size()-1;
+                        const float zoom=zoomSteps[z];
+                        const auto view=asmr::roomView(zoom,sq);
+                        const float dx=sq?
+                            asmr::squareDxFromBase(qualityDx[qualityIndex]):
+                            qualityDx[qualityIndex]/zoom;
+                        if(validCandidate(view,dx)){
+                            zoomIndex=z;
+                            valid=true;
+                            changedZoom=true;
+                            std::fprintf(stderr,
+                                "[H] CHANNEL can sample connected air at "
+                                "Z=%.2fx%s, dx %.3fmm; switching to "
+                                "the REAL channel SVG at this gentle "
+                                "acoustic grid.\n",
+                                zoom,sq?" SQUARE":"",dx*1000);
+                            break;
+                        }
                     }
                 }
                 if(!valid){
