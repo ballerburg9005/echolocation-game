@@ -7,17 +7,23 @@
 int main(){
     static_assert(asmr::kGraphBatch%3==0,
                   "CUDA graph must preserve triple-buffer identity");
-    assert(asmr::cells(asmr::kLiveDx)==400);
-    assert(asmr::cells(asmr::kMediumDx)==250);
-    assert(asmr::cells(asmr::kSafeDx)==200);
-    assert(asmr::cells(asmr::kOfflineDx)==1000);
-    assert(asmr::tenCellFrequency(asmr::kLiveDx)>6800.0f);
-    assert(asmr::tenCellFrequency(asmr::kOfflineDx)>17000.0f);
+    assert(asmr::cells(asmr::kLiveDx)==571);
+    assert(asmr::cells(asmr::kMediumDx)==667);
+    assert(asmr::cells(asmr::kUltraDx)==800);
+    assert(asmr::cells(asmr::kSafeDx)==400);
+    assert(asmr::cells(asmr::kLowDx)==250);
+    assert(asmr::cells(asmr::kLowestDx)==200);
+    assert(asmr::cells(asmr::kOfflineDx)==1333);
+    assert(asmr::tenCellFrequency(asmr::kLiveDx)>9700.0f);
+    assert(asmr::tenCellFrequency(asmr::kOfflineDx)>22800.0f);
+    assert(asmr::kOfflinePassband<24000.0f);
     assert(asmr::kOfflinePassband>=8000.0f);
     assert(asmr::kOfflinePassband<asmr::tenCellFrequency(asmr::kOfflineDx));
 
     for(float dx:{asmr::kLiveDx,asmr::kMediumDx,
-                  asmr::kSafeDx,asmr::kOfflineDx}){
+                  asmr::kUltraDx,asmr::kSafeDx,
+                  asmr::kLowDx,asmr::kLowestDx,
+                  asmr::kOfflineDx}){
         const int n=asmr::cells(dx);
         const auto mask=asmr::roomMask(n,dx);
         assert(mask.size()==(size_t)n*n);
@@ -125,7 +131,18 @@ int main(){
         return std::sqrt(sum/(data.size()-600));
     };
     assert(rms(liveLow)>0.5);
-    assert(rms(liveHigh)<0.03);
+    assert(rms(liveHigh)<0.18); // 10kHz near the 8.5kHz stopband transition
+    // A still-higher 18kHz component must be represented offline
+    // but rejected by all preview settings.
+    std::vector<float> veryHigh(N);
+    for(int i=0;i<N;++i)
+        veryHigh[i]=std::sin(2*echo::kPi*18000.0f*i/rate);
+    const auto preview18=asmr::lowpass(veryHigh,
+        asmr::kLivePassband,rate);
+    const auto offline18=asmr::lowpass(veryHigh,
+        asmr::kOfflinePassband,rate);
+    assert(rms(preview18)<0.08);
+    assert(rms(offline18)>0.35);
     assert(rms(offlineHigh)>0.45);
-    std::puts("ASMR lab: true 5/8/10mm live and 2mm offline FDTD geometry, contiguous source timeline, 5/10/20s paths, 5.5/15kHz filters passed");
+    std::puts("ASMR lab: 3.5/3/2.5/5/8/10mm live and 1.5mm offline REAL 2m FDTD, contiguous source trajectory, 8.5k/19k filters passed");
 }
