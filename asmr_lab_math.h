@@ -256,6 +256,7 @@ constexpr std::array<float,8> kPhysicsScales{
     1.00f,2.00f,3.00f,4.00f,0.10f,0.25f,0.50f,0.75f};
 constexpr int kDefaultPhysicsScaleIndex=0;
 constexpr float kSmallRoomWorkFraction=0.60f;
+constexpr float kSmallRoomRasterGuard=1.0201f;
 constexpr float kSquareMp3Gain=0.75f;
 inline int nextPhysicalScaleIndex(int index,bool reverse=false){
     const int count=(int)kPhysicsScales.size();
@@ -272,7 +273,8 @@ inline float physicalScaleDxFactor(float scale){
     // microphone sample fully in air at 0.1x / Z=1.25, without
     // changing any head artwork or increasing the work budget.
     return scale<1.0f?
-        1.0201f*std::cbrt(1.0f/(scale*kSmallRoomWorkFraction)):
+        kSmallRoomRasterGuard*
+            std::cbrt(1.0f/(scale*kSmallRoomWorkFraction)):
         1.0f;
 }
 inline float physicalScaleDesignDx(float zoomDx,float scale){
