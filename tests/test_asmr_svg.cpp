@@ -213,7 +213,7 @@ int main(){
         // The pressure-image sampler maps top-left screen pixels to
         // high-Y grid cells. Inverting it places the listener's
         // acoustic mask within <2 cells of the authored SVG centre.
-        const int imageW=360,imageH=square?360:640;
+        const int imageW=360,imageH=640; // GPU map always 360x640, then aspect-fit
         const int texX=(int)(((asmr::kListenerX-view.originX)/
                     view.width)*imageW);
         const int texY=(int)(((view.originY+view.height-
@@ -223,6 +223,14 @@ int main(){
             ((float)(imageH-texY)-0.5f)*ny/imageH));
         assert(std::abs(fieldX-cx)<3&&std::abs(fieldY-cy)<3);
         assert(mask[(size_t)fieldY*nx+fieldX]==1.0f);
+        const auto channelMask=asmr::svgRoomMask(nx,ny,dx,channels,
+                                       view.originX,view.originY);
+        const bool channelIsOpen=asmr::validateMicrophones(
+            channelMask,nx,ny,dx,true,channels,view.originX,view.originY);
+        std::fprintf(stderr,"[SVG ZOOM] stage %d %.2fx %s dx=%.3fmm "
+            "grid=%dx%d channel microphone connected=%s\\n",
+            stage,zoom,square?"SQUARE":"PORTRAIT",dx*1000,
+            nx,ny,channelIsOpen?"YES":"NO");
     }
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
