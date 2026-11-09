@@ -344,10 +344,10 @@ the room size, physical grid spacing, audible cutoff and time delays.
 | 5× | 10.00 × 17.78m | ~26.4mm |
 | 10× | 20.00 × 35.56m | ~52.8mm |
 
-For F11≥1×, the normalized GPU grid remains the same size at a
+For F11 at or above 1×, the normalized GPU grid remains the same size at a
 given Z/Q, so longer physical distances mean proportionally
 longer travel times, lower spatial audio bandwidth, and fewer
-FDTD updates per real second. For F11<escape><</escape>1×, an unchanged
+FDTD updates per real second. For F11 below 1×, an unchanged
 grid would increase timesteps per second dramatically. We
 therefore **coarsen its normalized mesh by approximately
 `1.01 × (1/F11)^(1/3)`**, reducing the cell count so the modeled
@@ -524,7 +524,7 @@ raw signed pressure with adjustable exposure.
 
 - **F11 is a genuine uniform physical metre/CFL scaling experiment**:
   0.1×–10× changes true acoustic dimensions, transit time and
-  frequency resolution. To avoid GPU overload at F11<escape><</escape>1×
+  frequency resolution. To avoid GPU overload at F11 below 1×
   we compensate with fewer numerical cells, which is a resolution
   tradeoff. F11 at 10× is limited to about one-tenth the former bandwidth.
 - **N's background noise is FDTD-excited**, not inserted after the ears,
