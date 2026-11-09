@@ -708,7 +708,21 @@ int main(){
     double recordingClock=0;
     RenderJob job;
     std::vector<float> lastPlayback;
+    asmr::PathSelection lastPlaybackPath;
+    uint64_t playbackEnqueuedCycles=0;
+    double playbackPhase=0.0;
     int lastWindow=5;
+    auto startReplay=[&]() {
+        if(lastPlayback.empty())return;
+        SDL_ClearQueuedAudio(device);
+        if(SDL_QueueAudio(device,lastPlayback.data(),
+             (Uint32)(lastPlayback.size()*sizeof(float)))!=0)
+            std::fprintf(stderr,"[PLAYBACK] Queue failed: %s\n",
+                         SDL_GetError());
+        playbackEnqueuedCycles=1;
+        playbackPhase=0.0;
+        mode=Mode::Playback;
+    };
     uint64_t lastFrame=SDL_GetPerformanceCounter();
     const double perfFrequency=(double)SDL_GetPerformanceFrequency();
 
@@ -718,7 +732,8 @@ int main(){
        "WASD/arrows move with mouse disabled.\n");
     std::printf("[CONTROLS] F5 = render last 5s, F6 = 10s, F7 = 20s "
        "in HIGH quality, then play the complete finished WAV.\n");
-    std::printf("[CONTROLS] P replay, L reload ~/test.mp3, T toggle live, "
+    std::printf("[CONTROLS] P loop replay, SPACE return to live, "
+       "L reload ~/test.mp3, T toggle live, "
        "H cycle V2 pinna/channel/simple, Q 3.5/3/2.5/5/8/10mm, "
        "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
@@ -853,12 +868,18 @@ int main(){
                 std::printf("[PATH] Recording reset.\n");
             }
             if(key==SDLK_p&&!lastPlayback.empty()){
-                mode=Mode::Playback;
+                startReplay();
+                std::printf("[PLAYBACK] Looping last processed %ds "
+                    "with visible path. SPACE returns to live.\n",
+                    lastWindow);
+            }
+            if(key==SDLK_SPACE && mode==Mode::Playback){
                 SDL_ClearQueuedAudio(device);
-                SDL_QueueAudio(device,lastPlayback.data(),
-                    (Uint32)(lastPlayback.size()*sizeof(float)));
-                std::printf("[PLAYBACK] Replaying last processed %ds.\n",
-                            lastWindow);
+                mode=Mode::Preview;
+                live->reset();previewStep=0;
+                sourceCursor=artist;
+                liveResampler=echo::StereoLinearResampler(
+                    live->dt(),asmr::kOutputRate);
             }
         }
         if(reload){
@@ -887,17 +908,20 @@ int main(){
                         asmr::kOfflineDx,*head,channels);
                 highQuality->uploadAudio(fullAudio);
                 highQuality->setRenderTiming(job.selected.start,
-                    job.selected.duration,true);
+                    (double)captureSeconds,true);
                 highQuality->reset();
                 job.window=captureSeconds;
                 job.current=0;
                 job.sourceCursor=asmr::interpolate(
                     job.selected.points,job.selected.start);
+                // The render is EXACTLY the requested length in
+                // 48kHz stereo frames. Two extra acoustic steps ensure
+                // the resampler never runs short of its final frame.
                 job.total=(uint64_t)std::ceil(
-                    (job.selected.duration+0.22)/highQuality->dt());
+                    (double)job.window/highQuality->dt())+2;
                 job.samples.clear();
-                job.samples.reserve((size_t)(
-                    (job.selected.duration+0.3)*asmr::kOutputRate)*2);
+                job.samples.reserve(
+                    asmr::clipFrames(job.window)*2+16);
                 job.resampler=std::make_unique<echo::StereoLinearResampler>(
                     highQuality->dt(),asmr::kOutputRate);
                 SDL_ClearQueuedAudio(device);
@@ -997,6 +1021,10 @@ int main(){
                 job.current+=count;
             }
             if(job.current>=job.total){
+                // DO NOT derive the playback length from the number
+                // of FDTD steps, block boundaries or float dt.
+                // Both saved WAV and SDL loop are N*48000 frames.
+                asmr::fitStereoClip(job.samples,job.window);
                 makeSafePlayback(job.samples);
                 char soundPath[80],trackPath[80];
                 std::snprintf(soundPath,sizeof(soundPath),
@@ -1008,25 +1036,31 @@ int main(){
                         "[RENDER] Could not save %s\n",soundPath);
                 writeTrajectory(trackPath,job.selected);
                 lastWindow=job.window;
+                lastPlaybackPath=job.selected;
                 lastPlayback.swap(job.samples);
-                SDL_ClearQueuedAudio(device);
-                SDL_QueueAudio(device,lastPlayback.data(),
-                    (Uint32)(lastPlayback.size()*sizeof(float)));
-                mode=Mode::Playback;
+                startReplay();
                 std::printf("[RENDER] Complete. Saved %s and %s; "
-                    "now playing %.2fs entirely preprocessed audio.\n",
-                    soundPath,trackPath,
+                    "now looping EXACTLY %.2fs of pre-rendered stereo. "
+                    "SPACE stops.\n",soundPath,trackPath,
                     (double)lastPlayback.size()/
                     (2*asmr::kOutputRate));
             }
-        }else if(mode==Mode::Playback){
-            if(SDL_GetQueuedAudioSize(device)==0){
-                mode=Mode::Preview;
-                live->reset();previewStep=0;
-                sourceCursor=artist;
-                liveResampler=echo::StereoLinearResampler(
-                    live->dt(),asmr::kOutputRate);
+        }else if(mode==Mode::Playback && !lastPlayback.empty()){
+            const uint64_t frameCount=lastPlayback.size()/2;
+            const uint64_t pendingBefore=SDL_GetQueuedAudioSize(device)/
+                (2*sizeof(float));
+            // Queue the next complete PCM loop before the current
+            // copy runs out: no GPU render or gap at the wrap point.
+            if(pendingBefore < (uint64_t)asmr::kOutputRate/4) {
+                if(SDL_QueueAudio(device,lastPlayback.data(),
+                    (Uint32)(lastPlayback.size()*sizeof(float)))==0)
+                    ++playbackEnqueuedCycles;
             }
+            const uint64_t pending=SDL_GetQueuedAudioSize(device)/
+                (2*sizeof(float));
+            playbackPhase=asmr::playbackSeconds(
+                playbackEnqueuedCycles*frameCount,
+                pending,frameCount);
         }
         if(SDL_GetTicks64()-audioDiagTime>=5000){
             std::printf("[ASMR FDTD] LIVE dx=%.1fmm cells=%dx%d "
