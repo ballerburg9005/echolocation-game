@@ -1300,14 +1300,22 @@ int main(int argc,char** argv){
                     SDL_GetQueuedAudioSize(device)/(2*sizeof(float)));
                 if(previewStep>0 && queuedFrames<24)
                     ++shortQueueWarnings;
-                int need=std::max(0,(int)(0.120*asmr::kOutputRate)-
-                                    queuedFrames);
+                // 160ms jitter cushion. Recompute graph-batch budget
+                // from physical dt: at finely resolved zoom a fixed
+                // 144 batches could NEVER refill 120ms and caused
+                // consistent crackles independent of raw GPU speed.
+                constexpr double kAudioTargetSeconds=0.160;
+                int need=std::max(0,(int)(kAudioTargetSeconds*
+                                    asmr::kOutputRate)-queuedFrames);
+                const int maxBatches=(int)std::ceil(
+                    kAudioTargetSeconds/
+                    (live->dt()*asmr::kGraphBatch))+8;
                 int batches=0;
                 queued.clear();
                 // The physical source position persists ACROSS the
                 // CUDA batches. Previously the same mouse sweep was
                 // replayed from start to finish for every mini-batch.
-                while(need>0 && batches<144){
+                while(need>0 && batches<maxBatches){
                     const auto points=mouthBatch(
                         {},0,live->dt(),previewStep,live->dx(),
                         sourceCursor,artist,false,
@@ -1330,17 +1338,32 @@ int main(int argc,char** argv){
                 }
                 // Preserve actual FDTD pressure differences linearly.
                 // No always-on tanh distortion/harmonic generator.
-                for(float& v:queued) {
-                    v=std::isfinite(v)?0.55f*v:0.0f;
-                    if(std::fabs(v)>0.85f)++clippedPreview;
-                    v=std::clamp(v,-0.85f,0.85f);
-                    previewSignalPeak=std::max(previewSignalPeak,std::fabs(v));
+                for(size_t frame=0;frame<queued.size()/2;++frame){
+                    const float fade=std::min(1.0f,
+                        (float)previewFadeFrames/
+                        (0.050f*asmr::kOutputRate));
+                    if(previewFadeFrames<asmr::kOutputRate)++previewFadeFrames;
+                    for(int ch=0;ch<2;++ch){
+                        float& v=queued[frame*2+ch];
+                        v=std::isfinite(v)?0.55f*fade*v:0.0f;
+                        if(std::fabs(v)>0.85f)++clippedPreview;
+                        v=std::clamp(v,-0.85f,0.85f);
+                        previewSignalPeak=std::max(
+                            previewSignalPeak,std::fabs(v));
+                    }
                 }
-                if(!queued.empty()&&SDL_QueueAudio(
-                    device,queued.data(),
-                    (Uint32)(queued.size()*sizeof(float)))!=0)
-                    std::fprintf(stderr,"[SDL AUDIO] %s\n",
-                                 SDL_GetError());
+                if(!queued.empty()){
+                    if(SDL_QueueAudio(device,queued.data(),
+                        (Uint32)(queued.size()*sizeof(float)))!=0)
+                        std::fprintf(stderr,"[SDL AUDIO] %s\n",
+                                     SDL_GetError());
+                    else if(primeAudioAfterSwitch){
+                        // Unpause only AFTER a full new solver-time
+                        // audio queue is ready, never mid-rebuild.
+                        SDL_PauseAudioDevice(device,0);
+                        primeAudioAfterSwitch=false;
+                    }
+                }
             }
         }else if(mode==Mode::Render){
             // A bounded number of expensive GPU graph batches per UI
