@@ -126,6 +126,7 @@ int main(){
     assert(asmr::kAmbientNoiseSeconds>=5);
     assert(asmr::kAmbientInjection>0.0f);
     assert(asmr::kAmbientInjection<0.25f);
+    assert(asmr::kAmbientReplayGain==0.25f);
     for(size_t z=0;z<asmr::kZoomSteps.size();++z){
         const auto view=asmr::roomView(
             asmr::kZoomSteps[z],
