@@ -327,6 +327,10 @@ inline Vec2 ambientSource(RoomView view,int index){
 constexpr int kAmbientSourceCount=4;
 constexpr int kAmbientNoiseSeconds=8;
 constexpr float kAmbientInjection=0.14f; // relative to MP3 excitation
+// Offline normalizer would otherwise raise a faint environmental noise
+// probe all the way to full-scale headphone output. Keep its finished
+// WAV comfortably below 0dBFS, AFTER the usual normalization step.
+constexpr float kAmbientReplayGain=0.25f;
 // Full-size baseline is the PREVIOUS 400x711 @5mm, not the more
 // expensive Q quality variants. Keep Q's relative dx factor, while
 // reducing its geometry workload by the same proportion at each Z.
