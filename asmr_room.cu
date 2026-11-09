@@ -463,7 +463,7 @@ public:
         cachedStart_=start;
         if(total>asmr::kMp3WindowFrames)
             std::fprintf(stderr,
-                "[MP3 STREAM] GPU cache %.1f-%.1fs / %.1fs full song.\\n",
+                "[MP3 STREAM] GPU cache %.1f-%.1fs / %.1fs full song.\n",
                 (double)start/asmr::kOutputRate,
                 (double)(start+(uint64_t)frames)/asmr::kOutputRate,
                 (double)total/asmr::kOutputRate);
