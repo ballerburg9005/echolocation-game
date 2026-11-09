@@ -751,8 +751,9 @@ static void printUsage(const char* executable){
         "  WASD, arrows  Move speaker in keyboard mode\n"
         "  H             Cycle listener SVG geometries\n"
         "  Q             Cycle acoustic grid quality\n"
-        "  Z             Actual FDTD zoom 1x / 2x / 4x / 6x / 8x\n"
-        "                (fixed cell count, more steps/sec at high zoom)\n"
+        "  Z             Gentle FDTD zoom 1.00/1.08/1.16/1.30/SQUARE\n"
+        "                final 1.8m square fits full 360-degree movement\n"
+        "                (fixed cell budget, up to ~1.48x timesteps)\n"
         "  V             Toggle pressure field visualization\n"
         "  9, 0          Decrease / increase pressure exposure\n"
         "  D             Toggle real-solver diagnostic chirp\n"
@@ -980,7 +981,7 @@ int main(int argc,char** argv){
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload selected MP3, D FDTD test chirp, T toggle live, "
-       "H head, Q base quality, Z zoom 1x/2x/4x/6x/8x, "
+       "H V2/channel/simple, Q quality, Z 1/1.08/1.16/1.30/square, "
        "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
@@ -1159,12 +1160,12 @@ int main(int argc,char** argv){
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
                         live->dt(),asmr::kOutputRate);
-                    std::printf("[QUALITY] %.0fx physically cropped portrait room "
+                    std::printf("[QUALITY] %.2fx%s physical FDTD room "
                         "dx=%.2fmm, %dx%d acoustic cells, "
                         "spatial 10-cell band %.0fHz, "
                         "input MP3 LP %.0fHz\n",
-                        zoomValue(),live->dx()*1000,
-                        live->nx(),live->ny(),
+                        zoomValue(),squareMode()?" SQUARE":"",
+                        live->dx()*1000,live->nx(),live->ny(),
                         asmr::tenCellFrequency(live->dx()),
                         liveCutoff);
                 }
@@ -1188,9 +1189,30 @@ int main(int argc,char** argv){
                         channels,*head,view.originX,view.originY)){
                         found=true;break;
                     }
+                    // Always allow returning to the huge original 1x
+                    // room: if the CHANNEL cavity is too fine for 5mm
+                    // cells, explicitly switch to the valid V2 head.
+                    // No misleading stale pressure field/SVG pairing.
+                    if(zoomIndex==0 && headIndex==1){
+                        const auto v2=asmr::svgRoomMask(
+                            nx,ny,dx,listenerV2,
+                            view.originX,view.originY);
+                        if(asmr::validateMicrophones(v2,nx,ny,dx,true,
+                            listenerV2,view.originX,view.originY)){
+                            headIndex=0;headCycleIndex=0;
+                            head=&listenerV2;channels=true;
+                            std::fprintf(stderr,
+                                "[Z] Returning to original full 1x room. "
+                                "CHANNEL mics cannot connect at %.2fmm, "
+                                "so changing ACTIVE head to V2.\n",
+                                dx*1000);
+                            found=true;break;
+                        }
+                    }
                     std::fprintf(stderr,
-                        "[ZOOM] %.0fx rejected: mic blocked or air "
-                        "cavity disconnected on this grid.\n",zoom);
+                        "[ZOOM] %.2fx%s rejected: mic blocked or "
+                        "disconnected on this grid.\n",
+                        zoom,squareMode()?" SQUARE":"");
                 }
                 if(found && zoomIndex!=previousZoom){
                     highQuality.reset();
@@ -1213,12 +1235,13 @@ int main(int argc,char** argv){
                     record.push_back({0.0,artist});
                     SDL_WarpMouseInWindow(window,
                         screenX(artist.x),screenY(artist.y));
-                    std::printf("[ZOOM] %.0fx REAL FDTD dx=%.3fmm "
+                    std::printf("[ZOOM] %.2fx%s REAL FDTD dx=%.3fmm "
                         "room=%.3fx%.3fm grid=%dx%d, input LP %.0fHz. "
-                        "GPU steps/sec increase with zoom.\n",
-                        zoomValue(),live->dx()*1000,
+                        "GPU time-step rate relative to 1x: %.2fx.\n",
+                        zoomValue(),squareMode()?" SQUARE":"",
+                        live->dx()*1000,
                         gView.width,gView.height,live->nx(),live->ny(),
-                        liveCutoff);
+                        liveCutoff,qualityDx[qualityIndex]/live->dx());
                 }else if(!found){zoomIndex=previousZoom;}
             }
             if(key==SDLK_r){
