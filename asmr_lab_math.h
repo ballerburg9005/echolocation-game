@@ -10,21 +10,35 @@ namespace asmr {
 constexpr float kRoomMetres=2.0f;
 constexpr float kListenerX=1.0f;
 constexpr float kListenerY=1.0f;
-constexpr float kHeadRadius=0.085f;
-constexpr float kArtistRadius=0.085f;
-constexpr float kEarOffset=0.105f;  // 21cm binaural distance, outside head
-constexpr float kMouthOffset=0.075f;
-constexpr float kHeadClearance=0.025f;
+// These are explicitly user-specified experimental CHILD HEAD distances,
+// not a claim that every child has the same eardrum spacing.
+constexpr float kEardrumSeparation=0.080f;
+constexpr float kEarCanalLength=0.020f;
+constexpr float kOuterMicSeparation=
+    kEardrumSeparation+0.8f*kEarCanalLength; // 9.6cm simple notch mics
+constexpr float kHeadRadius=0.085f; // conservative collider for 17cm ear SVG
+constexpr float kArtistRadius=0.070f; // ~13cm diameter SVG sender
+constexpr float kEarOffset=kOuterMicSeparation*0.5f;
+constexpr float kMouthOffset=0.050f; // 5cm: inside speaker's lower recess
+constexpr float kHeadClearance=0.018f;
 constexpr float kMinimumSeparation=kHeadRadius+kArtistRadius+kHeadClearance;
-constexpr float kRoomClearance=kArtistRadius+0.025f;
-constexpr float kLiveDx=0.005f;    // 400² cells / 6.86 kHz at 10 cells per wave
-constexpr float kMediumDx=0.008f;  // 250² cells, graceful fallback on weaker GPUs
-constexpr float kSafeDx=0.010f;    // original 200² low-power preview
-constexpr float kOfflineDx=0.002f;// 1000², 17.15kHz @ 10 cells per wave
-constexpr float kLivePassband=5500.0f;
-constexpr float kMediumPassband=4000.0f;
-constexpr float kSafePassband=2800.0f;
-constexpr float kOfflinePassband=15000.0f;
+constexpr float kRoomClearance=kArtistRadius+0.018f;
+// Q cycles up to 12kHz actual 2D FDTD preview. Grid sizes are the
+// FULL 2m room, never a 50cm scaled model.
+constexpr float kLiveDx=0.0035f;   // 571², 9.8kHz at 10 cells / lambda
+constexpr float kMediumDx=0.0030f; // 667², 11.4kHz
+constexpr float kUltraDx=0.0025f;  // 800², 13.7kHz
+constexpr float kSafeDx=0.0050f;   // 400², 6.86kHz
+constexpr float kLowDx=0.0080f;    // 250² fallback
+constexpr float kLowestDx=0.0100f; // 200² fallback
+constexpr float kOfflineDx=0.0015f;// 1333², 22.9kHz at 10 cells / wave
+constexpr float kLivePassband=8500.0f;
+constexpr float kMediumPassband=9800.0f;
+constexpr float kUltraPassband=12000.0f;
+constexpr float kSafePassband=5500.0f;
+constexpr float kLowPassband=4000.0f;
+constexpr float kLowestPassband=2800.0f;
+constexpr float kOfflinePassband=19000.0f;
 constexpr int kOutputRate=48000;
 constexpr int kGraphBatch=126; // multiple of 3 for GPU field ring to repeat in a CUDA Graph
 constexpr float kOutsideReflection=0.32f;
@@ -157,6 +171,20 @@ inline std::vector<float> roomMask(int n,float dx){
         if(std::hypot(px-kListenerX,py-kListenerY)<=kHeadRadius)
             mask[id]=1.0f;
     }
+    // Circle-only fallback: mics must be in a connected air notch
+    // inside the bounds, never sampled from a zero-pressure solid.
+    for(int sign:{-1,1}){
+        const float a=kListenerX+sign*kEarOffset;
+        const float b=kListenerX+sign*(kHeadRadius+.007f);
+        const int x0=std::max(0,(int)std::floor(std::min(a,b)/dx-.5f));
+        const int x1=std::min(n-1,(int)std::ceil(std::max(a,b)/dx-.5f));
+        const int y0=std::max(0,(int)std::floor(
+            (kListenerY-.004f)/dx-.5f));
+        const int y1=std::min(n-1,(int)std::ceil(
+            (kListenerY+.004f)/dx-.5f));
+        for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x)
+            if(mask[(size_t)y*n+x]==1.0f)mask[(size_t)y*n+x]=0.0f;
+    }
     return mask;
 }
 inline bool probeInAir(const std::vector<float>& mask,int n,
@@ -167,8 +195,15 @@ inline bool probeInAir(const std::vector<float>& mask,int n,
     return mask[iy*n+ix]==0 && mask[iy*n+ix+1]==0 &&
            mask[(iy+1)*n+ix]==0 && mask[(iy+1)*n+ix+1]==0;
 }
-inline Vec2 leftEar(){return {kListenerX-kEarOffset,kListenerY};}
-inline Vec2 rightEar(){return {kListenerX+kEarOffset,kListenerY};}
+inline float micSpacing(bool earChannels=false){
+    return earChannels?kEardrumSeparation:kOuterMicSeparation;
+}
+inline Vec2 leftEar(bool earChannels=false){
+    return {kListenerX-0.5f*micSpacing(earChannels),kListenerY};
+}
+inline Vec2 rightEar(bool earChannels=false){
+    return {kListenerX+0.5f*micSpacing(earChannels),kListenerY};
+}
 inline std::vector<float> lowpass(const std::vector<float>& input,
                                   float cutoff,int sampleRate,
                                   int halfWidth=40){
