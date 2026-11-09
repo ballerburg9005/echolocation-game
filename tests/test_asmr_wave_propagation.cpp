@@ -16,11 +16,11 @@ struct EarEnergy {
 };
 static EarEnergy propagate(asmr::Vec2 artist){
     constexpr float dx=0.01f;
-    const int n=asmr::cells(dx);
-    const auto mask=asmr::roomMask(n,dx);
-    std::vector<float> previous((size_t)n*n,0),now(previous),next(previous);
+    const int nx=asmr::cells(dx),ny=asmr::cellsY(dx);
+    const auto mask=asmr::roomMask(nx,ny,dx);
+    std::vector<float> previous((size_t)nx*ny,0),now(previous),next(previous);
     const auto mouth=asmr::mouth(artist);
-    assert(asmr::probeInAir(mask,n,mouth,dx));
+    assert(asmr::probeInAir(mask,nx,ny,mouth,dx));
     const float gx=mouth.x/dx-0.5f,gy=mouth.y/dx-0.5f;
     const float lx=asmr::leftEar().x/dx-0.5f;
     const float rx=asmr::rightEar().x/dx-0.5f;
@@ -29,16 +29,16 @@ static EarEnergy propagate(asmr::Vec2 artist){
         echo::kClickDurationSeconds/(float)asmr::stepSeconds(dx));
     EarEnergy energy;
     for(int t=0;t<240;++t) {
-        for(int y=1;y<n-1;++y)for(int x=1;x<n-1;++x){
-            const int idx=y*n+x;
+        for(int y=1;y<ny-1;++y)for(int x=1;x<nx-1;++x){
+            const int idx=y*nx+x;
             if(mask[idx]>0){next[idx]=0;continue;}
             const float centre=now[idx];
             const float left=mask[idx-1]>0?centre:now[idx-1];
             const float right=mask[idx+1]>0?centre:now[idx+1];
-            const float below=mask[idx-n]>0?centre:now[idx-n];
-            const float above=mask[idx+n]>0?centre:now[idx+n];
+            const float below=mask[idx-nx]>0?centre:now[idx-nx];
+            const float above=mask[idx+nx]>0?centre:now[idx+nx];
             const float damping=echo::mixedWallDamping(
-                mask[idx-1],mask[idx+1],mask[idx-n],mask[idx+n],
+                mask[idx-1],mask[idx+1],mask[idx-nx],mask[idx+nx],
                 asmr::kHeadReflection,echo::kCourant);
             float pressure=echo::impedanceWaveStep(
                 centre,previous[idx],left,right,below,above,
@@ -50,8 +50,8 @@ static EarEnergy propagate(asmr::Vec2 artist){
             next[idx]=pressure*std::exp(-0.6f*(float)asmr::stepSeconds(dx));
         }
         previous.swap(now);now.swap(next);
-        const float l=echo::bilinearSample(now.data(),n,lx,ey);
-        const float r=echo::bilinearSample(now.data(),n,rx,ey);
+        const float l=echo::bilinearSample(now.data(),nx,lx,ey);
+        const float r=echo::bilinearSample(now.data(),nx,rx,ey);
         assert(std::isfinite(l)&&std::isfinite(r));
         energy.left+=l*l;
         energy.right+=r*r;
