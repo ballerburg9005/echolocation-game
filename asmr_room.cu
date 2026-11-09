@@ -175,11 +175,13 @@ __global__ void asmrPressureStep(
     // genuinely excite the acoustic FIELD. Both pinnae and canal
     // receive the propagated/scattered field, not fake colored noise
     // mixed at the ear output. Only ~16 cells per stencil do PCM work.
+    // Uniform block-wide gate: normal MP3 mode pays only one
+    // cheap flag read per cell, not four source-position tests.
+    if(*ambientOn && *ambientLength>=2)
     for(int source=0;source<asmr::kAmbientSourceCount;++source){
         const float2 p=ambientPositions[source];
         if(fabsf((float)x-p.x)>=1.0f||
-           fabsf((float)y-p.y)>=1.0f||
-           *ambientOn==0)continue;
+           fabsf((float)y-p.y)>=1.0f)continue;
         const double elapsed=(double)(*blockBase+
                                       (uint64_t)localStep)*dt;
         float envelope=1.0f;
