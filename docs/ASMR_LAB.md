@@ -55,7 +55,7 @@ hardware cannot keep pace; a nearly empty queue plus frequent
 `near-empty queues` supports underruns. Neither causes the device
 sample rate to change automatically. A low-pass at 6kHz in the economical live preset, 2D room
 resonances and partially transmissive artist geometry may instead
-color the live timbre. The **offline 2mm/16kHz WAV is fully
+color the live timbre. The **offline higher-resolution WAV is fully
 precomputed** and therefore does not play at a lower pitch when
 rendering takes longer than real time.
 
@@ -70,33 +70,34 @@ near the far wall is shorter than 2.370m because the speaker must stay
 inside the wall and its mouth points 5.5cm toward the listener.
 Mouse movement, collisions, 25cm ruler, source-to-mic travel times,
 SVG physical dimensions, and offline paths share these metre units.
-The window is **540 × 960**. Signed-pressure visual readback runs at
-up to **30 fps** with a **360 × 640** preview, whereas the solver still
-runs at its required physical rate. The completed offline WAV keeps
-**2mm FDTD grid and 16kHz input passband**, so its
-**1000 × 1778 = 1,778,000 cells** also match the former square
-**1333 × 1333 = 1,776,889** offline budget (within 0.1%).
-The 2mm grid has a 17.15kHz ten-cells/wavelength numerical reference;
-keeping 19kHz at that dx would compromise frequency accuracy. Thus
-retaining a fixed cell count requires a modest trade-off in high-end
-bandwidth. The finished 48kHz WAV remains fully precomputed and
-crackle-free without live CUDA deadlines, while the 9:16 replay
-pressure snapshots remain 180 × 320 pixels.
+The window is **540 × 960**. Signed-pressure visual readback runs
+at up to **30 fps** with a **360 × 640** preview, while the solver
+still advances at the physically correct acoustic time step. The
+finished 48kHz stereo WAV is precomputed independently of live
+scheduling, with 180 × 320 pixel replay snapshots at 24fps.
 
-The default live grid is **5mm**, approximately **400 × 711 = 284,400**
-cells, with a 6kHz input filter. The previous 3.75mm square-room
-preview was **533 × 533 = 284,089** cells. The total grid budget has
-therefore been **preserved to within 0.11%**, not multiplied by the
-9:16 transformation; the coarser dx also reduces time steps per
-simulated second. This yields about **25% fewer live cell updates per
-simulated second** than that old square-room preview even though the
-physical area is larger. This estimate is not a
-promise about GPU wattage or actual frame rate. Press **Q** to select
-4.5mm, 3.75mm, finer or coarser settings if useful. The audio queue
-aims to retain **120ms** of stereo audio to tolerate scheduling jitter.
-Audio continues at 48kHz regardless of FDTD cell size. The lower
-live low-pass can sound softer; always compare it to a full-quality
-**F5 offline replay** before blaming the acoustic boundary shape.
+The live full-size view now uses **approximately 5.28mm cells and
+379×674 acoustic cells**, compared with the old 5.00mm
+400×711 preview. That is approximately **15% less cell-work per
+simulated second** before additional zooming. The full-size
+high-quality offline preset similarly starts around **2.11mm**,
+with a roughly **947×1685** grid; when zooming, both the offline
+and live physical domains shrink with the view and use their own
+appropriate dx. Source input always plays at 48kHz stereo; only
+the acoustic solver's spatial/temporal resolution changes.
+
+Press **Q** to select coarser or finer base resolution while retaining
+the exact active H and Z. The default live input low-pass is now
+approximately **5.7kHz** (below the ten-cells-per-wavelength
+reference of ~6.5kHz). The live SDL queue targets **160ms**,
+and the number of graph batches used to refill it scales with
+the active acoustic timestep. This fixes the earlier case in which
+a 144-batch cap could leave the output starved at close zooms even
+when the GPU was capable of more work. On H/Q/Z changes the output
+is paused during the CUDA reconfiguration, refilled with newly
+computed audio, then resumed with a 50ms attack fade. These
+changes address a credible source of switching-related crackle,
+but they do not guarantee your GPU will meet live deadlines.
 
 The crackle is **not yet proven** to be GPU starvation. Compare
 `solver/compute` (solver capacity), `near-empty queues` (starvation),
@@ -354,7 +355,7 @@ pressure field** are also saved at a reduced 180×320 *display-only*
 resolution. During looping replay, SDL's consumed audio-frame count
 advances these snapshots in sync with the animated speaker. This
 eliminates the old frozen final-pressure image in playback without
-changing the 2mm FDTD simulation, 48kHz stereo buffer, or MP3 input.
+changing the 48kHz stereo output, MP3 input, or actual FDTD physics.
 The snapshots are a visual record; no sound is synthesized from them. The
 visible artist SVG follows the recorded path again, the bottom
 playhead counts each exact loop, and the title shows elapsed/
@@ -384,10 +385,12 @@ raw signed pressure with adjustable exposure.
   actual wave propagation outside a geometrically cut aperture.
   This is an approximate, frequency-independent boundary condition.
 - The GPU load must be benchmarked in actual runtime, not inferred
-  from its board's wattage. The 2mm 9:16 offline grid preserves
-  the old square grid's ~1.78 million cells rather than growing to
-  ~3.16 million cells. Precomputation may still take much longer
-  than playback, but the finished audio plays at normal speed.
+  from its board's wattage. This version deliberately shrinks the
+  FDTD grid domain as zoom increases: the estimated
+  85%/81%/76%/72%/68% relative cell-update budgets do not include
+  CUDA graph launch overhead, visualization transfer time, or driver
+  scheduling. Offline processing can still be slower than real time,
+  but the completed audio plays at its requested 48kHz sample rate.
 - Use low headphone gain during initial tests. Numerical code
   compilation and offline CPU geometry checks cannot verify physical
   loudness or your subjective ASMR response.
