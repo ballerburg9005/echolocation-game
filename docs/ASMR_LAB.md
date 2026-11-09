@@ -118,25 +118,33 @@ physically square room**, centered on the head, shown in a square
 viewport within the portrait window. It leaves enough clearance to
 orbit the speaker around the listener by 360 degrees.
 
-**This version reduces, rather than increases, live FDTD work when
-zooming.** Unlike the previous equal-cell-count zoom, it reduces
-the physical domain AND adjusts dx so the approximate grid
-cell-updates per acoustic second are as follows:
+**Z, F11, and Q now use one combined real-time work ceiling.**
+The old zoom-only grid ratios allowed the wide-room solver to
+perform several times more cell updates than the working square
+room, particularly at F11=0.5×. The requested base grid spacing
+is now further enlarged when needed to keep the estimated live
+FDTD cell updates per real second at or below **19% of the
+original 2×3.56m, 5mm solver**.
 
-| Z stage | Physical room | Live dx (default Q) | Relative cell-work |
+| Z stage | Physical room at F11=1× | Default Q live dx, after cap | Estimated live cell work |
 |---|---|---|---|
-| 1.00× | 2.00 × 3.56 m | ~5.28 mm | **85%** |
-| 1.25× | 1.60 × 2.84 m | ~4.62 mm | **81%** |
-| 1.55× | 1.29 × 2.29 m | ~4.09 mm | **76%** |
-| 2.00× | 1.00 × 1.78 m | ~3.58 mm | **68.4%** |
-| Square | 0.75 × 0.75 m | ~3.31 mm | **27.2%** |
+| 1.00× | 2.00 × 3.56 m | ~8.70 mm | ≤19% |
+| 1.25× | 1.60 × 2.84 m | ~7.50 mm | ≤19% |
+| 1.55× | 1.29 × 2.29 m | ~6.50 mm | ≤19% |
+| 2.00× | 1.00 × 1.78 m | ~5.48 mm | ≤19% |
+| Square | 0.75 × 0.75 m | ~3.73 mm | ≤19% |
 
-All percentages compare against the former full-size 400×711,
-5.00mm live solver. The second-last stage reduces its previous
-72% work target by **5%** (to 68.4%). The square stage now
-reduces its previous 68% work target by **60%** (to 27.2%
-of the original solver work). These targets derive from
-*area/dx³*, not measured GPU power or elapsed kernel times.
+The general formula is
+`dx = base_dx × cbrt(max(1, work_before / 0.19))`,
+where `work_before = room_area × const/(physical_F11_scale × base_dx³)`.
+This accounts for both the number of acoustic cells and the
+number of CFL timesteps per real second. A selected Q preset
+may hit the common ceiling at a wide zoom: in that case it
+cannot increase grid density until other factors reduce the work.
+**This is a spatial-resolution tradeoff**, particularly at 1×
+full-room zoom. The workload estimate excludes fixed CUDA
+graph launches, host/GPU transfers and SDL audio scheduling,
+so measured hardware stutter must still be checked.
 The square view is still a true close-up of a 0.75m room,
 but its acoustic dx is 3.31mm rather than 2.44mm and its
 grid is approximately 226×226 cells. Consequently some
@@ -348,12 +356,12 @@ would need more CUDA updates per real-time audio second.
 The solver therefore intentionally reduces the grid resolution
 at smaller F11 settings.
 
-The smaller-room cell spacing is
+The smaller-room base spacing still uses
 `design_dx = base_zoom_dx × 1.0201 × (1/(S × 0.60))^(1/3)`,
-so modeled **cell updates per real second are no more than
-60% of the previous smaller-room configuration's workload**
-(about 58%, including the modest extra mic-connectivity spacing
-guard)—**at least a 40% reduction** at the same Z and Q. This estimate uses
+which alone gives at least a 40% modeled work reduction versus
+older small-room grids. The **unified 19%-baseline live ceiling**
+then coarsens it further where the combined Z/F11/Q workload
+would otherwise exceed the limit. This estimate uses
 `area/(S × dx^3)`; it does not measure GPU launch overhead,
 CPU audio scheduling or end-to-end real-time capacity.
 The actual acoustic timestep is computed using physical
@@ -418,7 +426,9 @@ microphones*, not the propagation kernel, head mask, or raw
 wavefield visualization. For each channel, it multiplies the
 sampled FDTD pressure by
 
-`gain = min(1, (0.20m / max(0.20m, source-to-mic distance))^(N/2))`.
+`r0 = 0.10m × F11_scale`
+
+`gain = min(1, (r0 / max(r0, source-to-mic physical distance))^(N/2))`.
 
 Here **0×** is the unchanged 2D FDTD audio. **1×** adds one factor
 of `1/sqrt(distance)` so a 2D point-source pressure is approximately
@@ -426,17 +436,21 @@ converted to a 3D-like `1/distance` law (hence inverse-square
 **intensity**). **2×** adds twice that extra exponent, and **20×**
 is an intentionally extreme audition setting, **not a realistic
 physical acoustic law**. No correction boosts sources inside the
-20cm reference radius. Each ear receives a separate gain from
+F11-scaled 10cm reference radius. Each ear receives a separate gain from
 the **physically smoothed CUDA mouth trajectory**, so original FDTD
 arrival delays and field scattering remain unchanged; the
 extra L/R gain may emphasize interaural level differences at
 very high settings. This approximation does **not** turn the
 2D pressure field or reflections into a true 3D wave simulation.
 
-At F11 scales above 1×, the F12 gains use the **new real
-source-to-microphone distance** rather than unscaled design units.
-This can create much stronger attenuation at large F11 scales,
-especially at 3×–20× F12; start comparisons at F12=0×.
+**F12 reference scaling bug fixed:** The reference radius
+now scales uniformly with F11 just like the mouth and microphones.
+Previously the fixed 20cm radius covered most close sources in
+a 0.5× world, making even 20× gain sound nearly unchanged.
+The new 10cm × F11 radius lies inside the safe mouth-to-ear
+range. At 20×, ordinary 0.5× speaker positions should become
+much quieter. This is an amplitude post-processing experiment;
+the pressure-wave visualization is unchanged.
 
 The same correction applies during live audio and to
 **F5/F6/F7 offline WAV renders**. Offline PCM is normalized
@@ -449,6 +463,22 @@ recalculation is needed, the playhead is preserved, and
 The original normalized unattenuated playback PCM stays in
 memory so repeated F12 adjustments never accumulate rounding
 loss or attenuation.
+
+### Full-length MP3 input and CUDA streaming
+
+The **entire MP3** is now decoded, rather than silently stopping
+after the first 60 seconds. Live and offline FDTD read from the
+whole track, preserving the source timeline across H, Z, Q,
+and F11 changes. A **60-second overlapping GPU cache** advances
+every 58 seconds of song time; the cache boundary is not a
+musical loop boundary. Playback loops only after the **actual
+end of the full MP3**, with a short quiet crossfade-style
+fade at the end/start to avoid an abrupt sample jump.
+The high-resolution F5/F6/F7 captures remain exactly
+5/10/20 seconds as explicitly requested; those limits do
+not truncate the MP3 source. Reloading with L restarts the
+file from the beginning. The decoded track remains in host
+RAM, not completely allocated in device memory.
 
 ### Controls
 
@@ -519,9 +549,10 @@ raw signed pressure with adjustable exposure.
 
 - **F11 is a genuine uniform physical metre/CFL scaling experiment**:
   0.1×–4× changes real room dimensions, transit time and
-  spatial bandwidth. At the smaller sizes, a 40% modeled
-  cell-update reduction requires fewer numerical cells, which
-  reduces resolution and does not guarantee 40% lower GPU wall time.
+  spatial bandwidth. A **combined 19%-baseline live budget**
+  covers F11 × Z × Q rather than only the small-room adjustment.
+  Finer grid detail is traded away where necessary and the
+  analytical ceiling cannot guarantee a specific GPU runtime. 
 - **N's background noise is FDTD-excited**, not inserted after the ears,
   but four point sources are not a calibrated 3D diffuse field.
   A real cup can amplify and suppress different frequencies, and
