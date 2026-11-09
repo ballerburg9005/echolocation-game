@@ -1136,7 +1136,10 @@ int main(int argc,char** argv){
         auto next=std::make_unique<FdtdRoom>(
             dx,*newHead,h!=2,speakerShape,zoomSteps[(size_t)z],
             z==(int)zoomSteps.size()-1,physicalScale);
-        next->uploadAudio(diagnosticTone?diagnosticAudio:newAudio);
+        const auto preparedDiagnostic=diagnosticTone?
+            asmr::lowpass(diagnosticAudio,nextCutoff,asmr::kOutputRate):
+            std::vector<float>{};
+        next->uploadAudio(diagnosticTone?preparedDiagnostic:newAudio);
         highQuality.reset();
         live=std::move(next);
         const bool changedRoom=z!=zoomIndex ||
@@ -1327,7 +1330,12 @@ int main(int argc,char** argv){
                 500.0f,pressureExposure*1.4f);
             if(key==SDLK_d && mode==Mode::Preview) {
                 diagnosticTone=!diagnosticTone;
-                live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
+                const auto filteredDiagnostic=diagnosticTone?
+                    asmr::lowpass(diagnosticAudio,liveCutoff,
+                                  asmr::kOutputRate):
+                    std::vector<float>{};
+                live->uploadAudio(diagnosticTone?
+                    filteredDiagnostic:liveAudio);
                 live->reset();previewStep=0;sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
@@ -1425,7 +1433,11 @@ int main(int argc,char** argv){
         if(reload){
             waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
                                        liveCutoff);
-            live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
+            const auto filteredDiagnostic=diagnosticTone?
+                asmr::lowpass(diagnosticAudio,liveCutoff,
+                              asmr::kOutputRate):
+                std::vector<float>{};
+            live->uploadAudio(diagnosticTone?filteredDiagnostic:liveAudio);
             if(highQuality)highQuality->uploadAudio(fullAudio);
             if(mode==Mode::Preview){
                 live->reset();previewStep=0;
@@ -1728,13 +1740,13 @@ int main(int argc,char** argv){
                 std::max(0.001,windowWallSeconds);
             const double computeCapacity=generatedSeconds/
                 std::max(0.000001,previewComputeSecondsWindow);
-            std::printf("[ASMR FDTD] LIVE dx=%.2fmm cells=%dx%d "
+            std::printf("[ASMR FDTD] LIVE physical dx=%.2fmm F11 %.0fx cells=%dx%d "
                         "pressure steps=%llu queue=%.1fms "
                         "near-empty queues=%llu safety-clipped samples=%llu "
                         "generated/wall=%.2fx solver/compute=%.2fx "
                         "earPeak=%.5g MP3=%s preview=%s probe=%s "
                         "(V toggles REAL CUDA wave field)\n",
-                live->dx()*1000,
+                live->physicalDx()*1000,physicsScaleValue(),
                 live->nx(),live->ny(),
                 (unsigned long long)previewStep,
                 1000.0*SDL_GetQueuedAudioSize(device)/
@@ -1751,25 +1763,35 @@ int main(int argc,char** argv){
             const auto actualMouth=asmr::mouth(sourceCursor);
             const auto left=asmr::leftEar(channels,head->pinnaV2);
             const auto right=asmr::rightEar(channels,head->pinnaV2);
-            const float dL=asmr::length(asmr::sub(actualMouth,left));
-            const float dR=asmr::length(asmr::sub(actualMouth,right));
-            const float dCentre=asmr::length(
+            const float dL=physicsScaleValue()*
+                asmr::length(asmr::sub(actualMouth,left));
+            const float dR=physicsScaleValue()*
+                asmr::length(asmr::sub(actualMouth,right));
+            const float dCentre=physicsScaleValue()*asmr::length(
                 asmr::sub(actualMouth,asmr::listener()));
-            std::printf("[METRES] Room=%.3fx%.3fm, "
+            std::printf("[METRES F11 %.0fx] Room=%.3fx%.3fm, "
                 "listener=(%.3f,%.3f), mouse=(%.3f,%.3f), "
                 "acousticHead=(%.3f,%.3f) mouth=(%.3f,%.3f), "
                 "mouseLag=%.3fm centreRange=%.3fm, "
                 "micSeparation=%.3fm, L=%.3fm/%.2fms, "
-                "R=%.3fm/%.2fms; physics dx=%.4fm dt=%.2fus\n",
-                live->view().width,live->view().height,
-                asmr::kListenerX,asmr::kListenerY,
-                artist.x,artist.y,sourceCursor.x,sourceCursor.y,
-                actualMouth.x,actualMouth.y,
-                asmr::length(asmr::sub(artist,sourceCursor)),dCentre,
-                asmr::micSpacing(channels,head->pinnaV2),
+                "R=%.3fm/%.2fms; physical dx=%.4fm dt=%.2fus\n",
+                physicsScaleValue(),
+                live->view().width*physicsScaleValue(),
+                live->view().height*physicsScaleValue(),
+                asmr::kListenerX*physicsScaleValue(),
+                asmr::kListenerY*physicsScaleValue(),
+                artist.x*physicsScaleValue(),artist.y*physicsScaleValue(),
+                sourceCursor.x*physicsScaleValue(),
+                sourceCursor.y*physicsScaleValue(),
+                actualMouth.x*physicsScaleValue(),
+                actualMouth.y*physicsScaleValue(),
+                asmr::length(asmr::sub(artist,sourceCursor))*
+                    physicsScaleValue(),dCentre,
+                asmr::micSpacing(channels,head->pinnaV2)*
+                    physicsScaleValue(),
                 dL,1000.0f*dL/echo::kSpeedOfSound,
                 dR,1000.0f*dR/echo::kSpeedOfSound,
-                live->dx(),live->dt()*1e6f);
+                live->physicalDx(),live->dt()*1e6f);
             shortQueueWarnings=0;clippedPreview=0;
             previewSignalPeak=0.0f;
             previewStepsWindow=0;
@@ -1829,23 +1851,30 @@ int main(int argc,char** argv){
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR FDTD | %s | Z %.2fx%s Q%d dx %.2fmm work %.0f%% | head:%s | F12 %dx | range %.2fm | lag %.2fm | MP3:%s | path %.1fs | replay %.2f/%.0fs",
-            mode==Mode::Render?"HIGH-RES RENDER":mode==Mode::Playback?
-                "VISIBLE LOOP":"LIVE RECORDING",
+            "ASMR %s | F11 %.0fx (%.1fx%.1fm) | "
+            "Z %.2fx%s Q%d real dx %.1fmm LP %.0fHz | "
+            "head:%s | F12 %dx | range %.1fm | work~%.0f%% | MP3:%s",
+            mode==Mode::Render?"OFFLINE":mode==Mode::Playback?
+                "WAV LOOP":"LIVE",
+            physicsScaleValue(),
+            gView.width*physicsScaleValue(),
+            gView.height*physicsScaleValue(),
             gView.zoom,
             std::fabs(gView.width-gView.height)<0.01f?" SQUARE":"",
             qualityIndex,
-            mode==Mode::Render&&highQuality?highQuality->dx()*1000:
-                live->dx()*1000,
-            100.0f*asmr::relativeCellWork(live->dx(),live->view()),
+            mode==Mode::Render&&highQuality?
+                highQuality->physicalDx()*1000:live->physicalDx()*1000,
+            mode==Mode::Render&&highQuality?
+                std::min(asmr::kOfflinePassband,
+                    0.90f*asmr::tenCellFrequency(
+                        highQuality->physicalDx())):liveCutoff,
             headIndex==0?"V2":headIndex==1?"CHANNEL":"SIMPLE",
             falloffStrength(),
-            asmr::length(asmr::sub(asmr::mouth(visibleSource),
-                                   asmr::listener())),
-            asmr::length(asmr::sub(artist,sourceCursor)),
-            diagnosticTone?"FDTD TEST":waveLoaded?"READY":"MISSING",
-            record.empty()?0:record.back().t-record.front().t,
-            playbackPhase,(double)lastWindow);
+            physicsScaleValue()*asmr::length(asmr::sub(
+                asmr::mouth(visibleSource),asmr::listener())),
+            100.0f*asmr::relativeCellWork(
+                live->dx(),live->view())/physicsScaleValue(),
+            diagnosticTone?"TEST":waveLoaded?"READY":"MISSING");
         SDL_SetWindowTitle(window,
             SDL_GetTicks64()<selectorNoticeUntil?
                 selectorNotice.c_str():title);
