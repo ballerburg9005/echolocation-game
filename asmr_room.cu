@@ -497,6 +497,7 @@ static void circle(SDL_Renderer* r,int cx,int cy,int radius,bool filled){
 static void drawRoom(SDL_Renderer* renderer,
     const std::vector<asmr::PathPoint>& record,
     asmr::Vec2 artist,asmr::Vec2 physicalSource,
+    asmr::Vec2 target, // exact mouse/keyboard target, not acoustic shape
     float progress,bool processing,bool playing,
     float playbackFraction,bool mouseMode,
     SDL_Texture* waves,bool showPressure,
@@ -524,13 +525,18 @@ static void drawRoom(SDL_Renderer* renderer,
                 screenX(record[i].centre.x),
                 screenY(record[i].centre.y));
     color(renderer,39,117,189);
-    if(listenerTexture)
-        drawHeadSvg(renderer,listenerTexture,listenerShape,
-                    asmr::listener(),0.0);
-    else
-        circle(renderer,screenX(asmr::kListenerX),
-            screenY(asmr::kListenerY),screenX(asmr::kHeadRadius),
-            !(showPressure&&waves));
+    // The pressure image ALREADY contains the real grid-rasterized
+    // stationary listener. Do not draw a second SVG over it: that
+    // makes two similar/aliased silhouettes look like a shifted head.
+    // When V is off, display the unmodified authored SVG instead.
+    if(!showPressure || !waves){
+        if(listenerTexture)
+            drawHeadSvg(renderer,listenerTexture,listenerShape,
+                        asmr::listener(),0.0);
+        else
+            circle(renderer,screenX(asmr::kListenerX),
+                screenY(asmr::kListenerY),screenX(asmr::kHeadRadius),true);
+    }
     color(renderer,105,203,252);
     circle(renderer,screenX(asmr::leftEar(channels,listenerShape.pinnaV2).x),
            screenY(asmr::leftEar(channels,listenerShape.pinnaV2).y),3,true);
@@ -555,6 +561,15 @@ static void drawRoom(SDL_Renderer* renderer,
     const asmr::Vec2 m=asmr::mouth(physicalSource);
     color(renderer,255,231,126);
     circle(renderer,screenX(m.x),screenY(m.y),2,true);
+    // Mouse position stays 1:1 as a small hollow target marker,
+    // distinct from the acoustically rate-limited SVG speaker.
+    // This exposes source smoothing instead of making it look like
+    // a 200px ghost of the speaker or a pressure rendering error.
+    if(!processing&&!playing &&
+       asmr::length(asmr::sub(target,artist))>0.012f){
+        color(renderer,255,244,172);
+        circle(renderer,screenX(target.x),screenY(target.y),5,false);
+    }
     // Mouth orientation and 20-30cm peripersonal space reference.
     color(renderer,58,110,132);
     circle(renderer,screenX(asmr::kListenerX),
@@ -803,7 +818,8 @@ int main(){
     uint64_t previewStepsWindow=0;
     double previewComputeSecondsWindow=0.0;
     uint64_t audioDiagTime=SDL_GetTicks64();
-    asmr::Vec2 artist{1.50f,1.0f},sourceCursor=artist;
+    asmr::Vec2 artist{asmr::kListenerX+0.50f,asmr::kListenerY},
+                sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
     bool showPressure=true;
     uint64_t lastWaveRefresh=0; // 30Hz signed-pressure display; never audio
@@ -1251,13 +1267,17 @@ int main(){
             const float dCentre=asmr::length(
                 asmr::sub(actualMouth,asmr::listener()));
             std::printf("[METRES] Room=%.3fx%.3fm, "
-                "listener=(1.000,1.000), artist=(%.3f,%.3f), "
-                "mouth=(%.3f,%.3f), centreRange=%.3fm, "
+                "listener=(%.3f,%.3f), mouse=(%.3f,%.3f), "
+                "acousticHead=(%.3f,%.3f) mouth=(%.3f,%.3f), "
+                "mouseLag=%.3fm centreRange=%.3fm, "
                 "micSeparation=%.3fm, L=%.3fm/%.2fms, "
                 "R=%.3fm/%.2fms; physics dx=%.4fm dt=%.2fus\n",
                 asmr::kRoomMetres,asmr::kRoomHeightMetres,
-                artist.x,artist.y,actualMouth.x,actualMouth.y,
-                dCentre,asmr::micSpacing(channels,head->pinnaV2),
+                asmr::kListenerX,asmr::kListenerY,
+                artist.x,artist.y,sourceCursor.x,sourceCursor.y,
+                actualMouth.x,actualMouth.y,
+                asmr::length(asmr::sub(artist,sourceCursor)),dCentre,
+                asmr::micSpacing(channels,head->pinnaV2),
                 dL,1000.0f*dL/echo::kSpeedOfSound,
                 dR,1000.0f*dR/echo::kSpeedOfSound,
                 live->dx(),live->dt()*1e6f);
@@ -1294,17 +1314,21 @@ int main(){
                 pressurePixels.data(),kPressureW*sizeof(uint32_t));
             lastWaveRefresh=SDL_GetTicks64();
         }
+        // Never render the physical moving speaker at the cursor
+        // target while the CUDA impedance silhouette still occupies
+        // the smoothed source position. They must coincide.
         const asmr::Vec2 visibleArtist=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
             asmr::interpolate(lastPlaybackPath.points,
-                              lastPlaybackPath.start+playbackPhase):artist;
+                              lastPlaybackPath.start+playbackPhase):
+            sourceCursor;
         const asmr::Vec2 visibleSource=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
             visibleArtist:sourceCursor;
         const auto& visibleTrail=mode==Mode::Playback?
             lastPlaybackPath.points:record;
         drawRoom(renderer,visibleTrail,visibleArtist,visibleSource,
-                 progress,mode==Mode::Render,mode==Mode::Playback,
+                 artist,progress,mode==Mode::Render,mode==Mode::Playback,
                  lastWindow>0?(float)(playbackPhase/lastWindow):0.0f,
                  mouseMode,displayedWaves,showPressure,
                  *head,speakerShape,
@@ -1313,9 +1337,12 @@ int main(){
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR FDTD | %s | MP3:%s | path %.1fs | REPLAY %.2f/%.0fs | %.0fHz / %.0fHz | P loop SPACE stop",
+            "ASMR FDTD | %s | range %.2fm | mouse lag %.2fm | MP3:%s | path %.1fs | REPLAY %.2f/%.0fs | %.0fHz / %.0fHz",
             mode==Mode::Render?"HIGH-RES RENDER":mode==Mode::Playback?
                 "VISIBLE LOOP":"LIVE RECORDING",
+            asmr::length(asmr::sub(asmr::mouth(visibleSource),
+                                   asmr::listener())),
+            asmr::length(asmr::sub(artist,sourceCursor)),
             diagnosticTone?"FDTD TEST":waveLoaded?"READY":"MISSING",
             record.empty()?0:record.back().t-record.front().t,
             playbackPhase,(double)lastWindow,
