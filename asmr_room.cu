@@ -86,7 +86,7 @@ __global__ void asmrPressureStep(
     const float* mask,const float* pcm,const int* pcmLength,
     const float4* mouthLocations,const uint64_t* blockBase,
     float* outStereo,int localStep,int nx,int ny,float dx,float dt,float decay,
-    float halfMicSeparation,float micYOffset,double absoluteStart,
+    float originX,float originY,float halfMicSeparation,float micYOffset,double absoluteStart,
     double recordingDuration,bool offline,
     const unsigned char* speakerPixels,int speakerW,int speakerH,
     float speakerWidthCells,float speakerHeightCells)
@@ -99,9 +99,9 @@ __global__ void asmrPressureStep(
     // Unlike separate output kernels, this doesn't double graph launches.
     // The p field is read-only for the entirety of this CUDA kernel.
     if(x==0&&y==0){
-        const float lx=(asmr::kListenerX-halfMicSeparation)/dx-0.5f;
-        const float rx=(asmr::kListenerX+halfMicSeparation)/dx-0.5f;
-        const float ey=(asmr::kListenerY+micYOffset)/dx-0.5f;
+        const float lx=(asmr::kListenerX-originX-halfMicSeparation)/dx-0.5f;
+        const float rx=(asmr::kListenerX-originX+halfMicSeparation)/dx-0.5f;
+        const float ey=(asmr::kListenerY-originY+micYOffset)/dx-0.5f;
         outStereo[localStep*2]=sampleEarAir(now,mask,nx,ny,lx,ey);
         outStereo[localStep*2+1]=sampleEarAir(now,mask,nx,ny,rx,ey);
     }
@@ -142,9 +142,8 @@ __global__ void asmrPressureStep(
         center,now[idx-nx],b0,bD);
     const float u=mask[idx+nx]>0?center:asmr::movingHeadNeighbor(
         center,now[idx+nx],b0,bU);
-    const float damping=echo::mixedWallDamping(
-        mask[idx-1],mask[idx+1],mask[idx-nx],mask[idx+nx],
-        asmr::kHeadReflection,echo::kCourant);
+    const float damping=asmr::boundaryDamping(
+        mask[idx-1],mask[idx+1],mask[idx-nx],mask[idx+nx]);
     float pressure=echo::impedanceWaveStep(
         center,previous[idx],l,r,d,u,echo::kCourantSquared,damping);
 
@@ -185,7 +184,8 @@ __global__ void pressureImageKernel(const float* p,const float* mask,
     const float material=mask[index];
     const float pressure=p[index];
     int r=9,g=14,b=21;
-    if(material>=3.5f){r=34;g=72;b=96;}
+    if(material>=4.5f){r=40;g=174;b=145;} // acoustic window/door
+    else if(material>=3.5f){r=98;g=111;b=135;} // strong wall
     else if(material>0.0f){r=32;g=85;b=135;}
     else if(isfinite(pressure)) {
         // A high-contrast signed pressure view; do NOT log-compress
@@ -214,9 +214,11 @@ public:
     explicit FdtdRoom(float resolution,
                       const asmr::SvgSilhouette& head,
                       bool channels,
-                      const asmr::SvgSilhouette& speaker):
-      dx_(resolution),nx_(asmr::cells(resolution)),
-      ny_(asmr::cellsY(resolution)),
+                      const asmr::SvgSilhouette& speaker,
+                      float zoom=1.0f):
+      dx_(resolution),nx_(asmr::cells(resolution*zoom)),
+      ny_(asmr::cellsY(resolution*zoom)),
+      view_(asmr::roomView(zoom)),
       dt_((float)asmr::stepSeconds(resolution)),
       halfMicSeparation_(asmr::micSpacing(channels,head.pinnaV2)*0.5f),
       micYOffset_(channels?asmr::kChannelEarY:0.0f){
@@ -227,8 +229,10 @@ public:
         speakerW_=speaker.w;speakerH_=speaker.h;
         speakerWidthCells_=speaker.widthMetres/dx_;
         speakerHeightCells_=speaker.heightMetres/dx_;
-        const auto mask=asmr::svgRoomMask(nx_,ny_,dx_,head);
-        if(!asmr::validateMicrophones(mask,nx_,ny_,dx_,channels,head)) {
+        const auto mask=asmr::svgRoomMask(nx_,ny_,dx_,head,
+            view_.originX,view_.originY);
+        if(!asmr::validateMicrophones(mask,nx_,ny_,dx_,channels,head,
+            view_.originX,view_.originY)) {
             std::fprintf(stderr,
                 "[ASMR ERROR] Mic at x = %.4f / %.4f m is inside a "
                 "SOLID SVG cell, blocked bilinear footprint, or "
@@ -277,7 +281,8 @@ public:
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
-                nx_,ny_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
+                nx_,ny_,dx_,dt_,decay,view_.originX,view_.originY,
+                halfMicSeparation_,micYOffset_,
                 0.0,1e12,false,deviceSpeaker_,speakerW_,speakerH_,
                 speakerWidthCells_,speakerHeightCells_);
         }
@@ -301,7 +306,8 @@ public:
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
-                nx_,ny_,dx_,dt_,decay,halfMicSeparation_,micYOffset_,
+                nx_,ny_,dx_,dt_,decay,view_.originX,view_.originY,
+                halfMicSeparation_,micYOffset_,
                 absoluteStart,length,offline,
                 deviceSpeaker_,speakerW_,speakerH_,
                 speakerWidthCells_,speakerHeightCells_);
@@ -357,6 +363,9 @@ public:
     }
     float dx()const{return dx_;}
     float dt()const{return dt_;}
+    asmr::RoomView view()const{return view_;}
+    int nx()const{return nx_;}
+    int ny()const{return ny_;}
     ~FdtdRoom(){
         if(execution_)cudaGraphExecDestroy(execution_);
         if(graph_)cudaGraphDestroy(graph_);
@@ -375,6 +384,7 @@ public:
     FdtdRoom& operator=(const FdtdRoom&)=delete;
 private:
     float dx_=0,dt_=0;
+    asmr::RoomView view_{};
     float halfMicSeparation_=0,micYOffset_=0;
     float speakerWidthCells_=0,speakerHeightCells_=0;
     int speakerW_=0,speakerH_=0;
@@ -424,7 +434,7 @@ static std::array<float4,asmr::kGraphBatch> mouthBatch(
     const std::vector<asmr::PathPoint>& track,double start,
     double dt,uint64_t baseStep,float dx,
     asmr::Vec2& physicalSource,const asmr::Vec2& liveTarget,
-    bool offline) {
+    bool offline,float originX=0,float originY=0) {
     std::array<float4,asmr::kGraphBatch> result{};
     for(int k=0;k<asmr::kGraphBatch;++k) {
         const double elapsed=(double)(baseStep+(uint64_t)k)*dt;
@@ -433,19 +443,24 @@ static std::array<float4,asmr::kGraphBatch> mouthBatch(
         physicalSource=asmr::advanceSource(
             physicalSource,target,(float)dt,0.012f,2.25f);
         const auto m=asmr::mouth(physicalSource);
-        result[k]=make_float4(m.x/dx-0.5f,m.y/dx-0.5f,
-                              physicalSource.x/dx-0.5f,
-                              physicalSource.y/dx-0.5f);
+        result[k]=make_float4((m.x-originX)/dx-0.5f,
+                              (m.y-originY)/dx-0.5f,
+                              (physicalSource.x-originX)/dx-0.5f,
+                              (physicalSource.y-originY)/dx-0.5f);
     }
     return result;
 }
 
+static asmr::RoomView gView=asmr::roomView();
+static int pixelsForMetres(float distance){
+    return (int)std::lround(distance/gView.width*kWindowW);
+}
 static int screenX(float x){
-    return (int)std::lround(x/asmr::kRoomMetres*kWindowW);
+    return (int)std::lround((x-gView.originX)/gView.width*kWindowW);
 }
 static int screenY(float y){
-    return (int)std::lround((asmr::kRoomHeightMetres-y)/
-                             asmr::kRoomHeightMetres*kWindowH);
+    return (int)std::lround((gView.originY+gView.height-y)/
+                             gView.height*kWindowH);
 }
 static void color(SDL_Renderer* r,Uint8 red,Uint8 green,Uint8 blue){
     SDL_SetRenderDrawColor(r,red,green,blue,255);
@@ -472,8 +487,8 @@ static void drawHeadSvg(SDL_Renderer* renderer,SDL_Texture* texture,
                         const asmr::SvgSilhouette& shape,
                         asmr::Vec2 centre,double rotation) {
     if(!texture||!shape.present())return;
-    const int w=screenX(shape.widthMetres);
-    const int h=screenX(shape.heightMetres);
+    const int w=pixelsForMetres(shape.widthMetres);
+    const int h=pixelsForMetres(shape.heightMetres);
     const SDL_Rect destination{screenX(centre.x)-w/2,
                                screenY(centre.y)-h/2,w,h};
     SDL_RenderCopyEx(renderer,texture,nullptr,&destination,rotation,
@@ -537,7 +552,7 @@ static void drawRoom(SDL_Renderer* renderer,
                         asmr::listener(),0.0);
         else
             circle(renderer,screenX(asmr::kListenerX),
-                screenY(asmr::kListenerY),screenX(asmr::kHeadRadius),true);
+                screenY(asmr::kListenerY),pixelsForMetres(asmr::kHeadRadius),true);
     }
     color(renderer,105,203,252);
     circle(renderer,screenX(asmr::leftEar(channels,listenerShape.pinnaV2).x),
@@ -557,7 +572,7 @@ static void drawRoom(SDL_Renderer* renderer,
                     artist,degrees);
     }else
         circle(renderer,screenX(artist.x),screenY(artist.y),
-            screenX(asmr::kArtistRadius),!(showPressure&&waves));
+            pixelsForMetres(asmr::kArtistRadius),!(showPressure&&waves));
     // The yellow spot is the *actual interpolated CUDA source*,
     // not a decorative mouth or artificial stereo panning.
     const asmr::Vec2 m=asmr::mouth(physicalSource);
@@ -575,14 +590,14 @@ static void drawRoom(SDL_Renderer* renderer,
     // Mouth orientation and 20-30cm peripersonal space reference.
     color(renderer,58,110,132);
     circle(renderer,screenX(asmr::kListenerX),
-           screenY(asmr::kListenerY),screenX(0.30f),false);
+           screenY(asmr::kListenerY),pixelsForMetres(0.30f),false);
     // 25cm ruler: scaled to the physical 2m horizontal width.
     color(renderer,186,184,160);
     SDL_RenderDrawLine(renderer,24,kWindowH-20,
-                       24+screenX(0.25f),kWindowH-20);
+                       24+pixelsForMetres(0.25f),kWindowH-20);
     SDL_RenderDrawLine(renderer,24,kWindowH-25,24,kWindowH-15);
-    SDL_RenderDrawLine(renderer,24+screenX(0.25f),kWindowH-25,
-                       24+screenX(0.25f),kWindowH-15);
+    SDL_RenderDrawLine(renderer,24+pixelsForMetres(0.25f),kWindowH-25,
+                       24+pixelsForMetres(0.25f),kWindowH-15);
     if(processing){
         color(renderer,88,91,106);
         SDL_Rect bg{80,kWindowH-43,kWindowW-160,14};
