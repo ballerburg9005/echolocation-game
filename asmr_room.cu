@@ -1411,7 +1411,7 @@ int main(int argc,char** argv){
                         "earPeak=%.5g MP3=%s preview=%s probe=%s "
                         "(V toggles REAL CUDA wave field)\n",
                 live->dx()*1000,
-                asmr::cells(live->dx()),asmr::cellsY(live->dx()),
+                live->nx(),live->ny(),
                 (unsigned long long)previewStep,
                 1000.0*SDL_GetQueuedAudioSize(device)/
                     (2.0*sizeof(float)*asmr::kOutputRate),
@@ -1421,9 +1421,9 @@ int main(int argc,char** argv){
                 previewSignalPeak,waveLoaded?"loaded":"missing",
                 previewEnabled?"on":"off",
                 diagnosticTone?"chirp":"off");
-            // Explicit metre-scale audit: this is a 2m room, not a
-            // 50cm world with exaggerated mouse motion. The FDTD CFL
-            // timestep and travel times below derive from that scale.
+            // METRES describes the CURRENT physically cropped FDTD
+            // world, not just its 1x window. The source-to-ear flight
+            // times still use true metres and 343 m/s at every zoom.
             const auto actualMouth=asmr::mouth(sourceCursor);
             const auto left=asmr::leftEar(channels,head->pinnaV2);
             const auto right=asmr::rightEar(channels,head->pinnaV2);
@@ -1437,7 +1437,7 @@ int main(int argc,char** argv){
                 "mouseLag=%.3fm centreRange=%.3fm, "
                 "micSeparation=%.3fm, L=%.3fm/%.2fms, "
                 "R=%.3fm/%.2fms; physics dx=%.4fm dt=%.2fus\n",
-                asmr::kRoomMetres,asmr::kRoomHeightMetres,
+                live->view().width,live->view().height,
                 asmr::kListenerX,asmr::kListenerY,
                 artist.x,artist.y,sourceCursor.x,sourceCursor.y,
                 actualMouth.x,actualMouth.y,
