@@ -214,6 +214,11 @@ int main(){
     // A source well above the physical reference must be audibly
     // attenuated at F12=20 even at minimum safe approach.
     assert(asmr::kFalloffReferenceMetres<asmr::kMinimumSeparation);
+    const float closestV2Ear=asmr::kMinimumSeparation-
+        asmr::kMouthOffset-0.5f*asmr::micSpacing(true,true);
+    assert(closestV2Ear>asmr::kFalloffReferenceMetres);
+    assert(asmr::distanceFalloffGain(
+        closestV2Ear*0.5f,20,0.5f)<0.05f);
     // Whole-MP3 streaming: no 60-second looping. The device window
     // remains 60 seconds; its 58s stride includes an interpolation
     // overlap and only the *full track* end wraps song time.
