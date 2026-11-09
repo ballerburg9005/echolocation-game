@@ -1118,6 +1118,13 @@ int main(int argc,char** argv){
             if(event.type==SDL_QUIT)quit=true;
             if(event.type!=SDL_KEYDOWN||event.key.repeat)continue;
             const SDL_Keycode key=event.key.keysym.sym;
+            if((key==SDLK_h||key==SDLK_z||key==SDLK_q)&&
+               mode!=Mode::Preview){
+                selectorNotice=mode==Mode::Playback?
+                    "[H/Z/Q] REPLAY ACTIVE: press SPACE to return to live":
+                    "[H/Z/Q] OFFLINE RENDER ACTIVE: navigation locked";
+                selectorNoticeUntil=SDL_GetTicks64()+4000;
+            }
             if(key==SDLK_ESCAPE)quit=true;
             if(key==SDLK_m) {
                 mouseMode=!mouseMode;
