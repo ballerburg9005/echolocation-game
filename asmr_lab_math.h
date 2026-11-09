@@ -149,6 +149,30 @@ inline PathSelection selectLast(const std::vector<PathPoint>& record,
     out.points.push_back({now,interpolate(record,now)});
     return out;
 }
+// Exact requested clip durations are measured in stereo FRAMES, never
+// CUDA acoustic time steps. The interpolation resampler can emit 1-2
+// extra frames when an acoustic batch overshoots the target time;
+// truncate them, and pad if a partial history was selected.
+inline size_t clipFrames(int seconds,int sampleRate=kOutputRate) {
+    return seconds>0&&sampleRate>0?
+        (size_t)seconds*(size_t)sampleRate:0;
+}
+inline void fitStereoClip(std::vector<float>& samples,int seconds,
+                          int sampleRate=kOutputRate) {
+    samples.resize(clipFrames(seconds,sampleRate)*2,0.0f);
+}
+// SDL's queued-byte count is the only timing source while replaying.
+// Count across enqueued loop copies, then wrap the playback marker at
+// exactly the clip's stereo PCM frame length.
+inline double playbackSeconds(uint64_t queuedTotalFrames,
+                              uint64_t pendingFrames,
+                              size_t clipFrameCount,
+                              int sampleRate=kOutputRate) {
+    if(clipFrameCount==0||sampleRate<=0)return 0.0;
+    const uint64_t played=queuedTotalFrames>=pendingFrames?
+        queuedTotalFrames-pendingFrames:0;
+    return (double)(played%clipFrameCount)/sampleRate;
+}
 inline int cells(float dx){return (int)std::lround(kRoomMetres/dx);}
 inline double stepSeconds(float dx){
     return (double)dx/((double)echo::kSpeedOfSound*
