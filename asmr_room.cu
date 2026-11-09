@@ -863,7 +863,8 @@ int main(int argc,char** argv){
     }
     // Default is the supplied 185.35mm mirrored PINNA silhouette,
     // not the old 17cm circle or the previous channel drawing.
-    int headIndex=0; // 0 new V2, 1 explicit canal, 2 original simple
+    int headIndex=0; // acoustic/visible SVG actually in use
+    int headCycleIndex=0; // H advances even if a candidate is invalid
     bool channels=true; // V2 uses its own 12.4cm open pinna probes
     const auto* head=&listenerV2;
     SDL_Texture* speakerSprite=headTexture(
@@ -1042,53 +1043,88 @@ int main(int argc,char** argv){
                     live->dt(),asmr::kOutputRate);
             }
             if(key==SDLK_h && mode==Mode::Preview){
-                // Skip unavailable SVGs rather than getting stuck at
-                // the 8cm alternative if the user edits an ear neck
-                // too narrowly for the selected acoustic grid.
-                const asmr::SvgSilhouette* nextHead=nullptr;
-                int nextIndex=headIndex;
-                for(int offset=1;offset<3;++offset){
-                    const int proposed=(headIndex+offset)%3;
-                    const asmr::SvgSilhouette& shape=proposed==0?
-                        listenerV2:proposed==1?listenerChannels:listenerSimple;
-                    const bool proposedChannels=proposed!=2;
-                    const auto view=live->view();
-                    const auto mask=asmr::svgRoomMask(
-                        live->nx(),live->ny(),live->dx(),shape,
-                        view.originX,view.originY);
-                    if(!asmr::validateMicrophones(mask,
-                        live->nx(),live->ny(),live->dx(),
-                        proposedChannels,shape,
-                        view.originX,view.originY)) {
-                        std::fprintf(stderr,"[SVG HEAD] Skipping mode %d "
-                            "at %.2fmm: blocked or disconnected ear "
-                            "passage. Try Q or inspect the SVG.\n",
-                            proposed,live->dx()*1000);
-                        continue;
+                // H has a deterministic V2 -> CHANNEL -> SIMPLE cycle.
+                // NEVER quietly substitute the simple SVG for CHANNEL.
+                headCycleIndex=(headCycleIndex+1)%3;
+                const int requested=headCycleIndex;
+                const auto& candidate=requested==0?listenerV2:
+                                      requested==1?listenerChannels:
+                                                   listenerSimple;
+                const bool requestedChannels=requested!=2;
+                auto validCandidate=[&](const asmr::RoomView& v,
+                                        float dx){
+                    const int nx=(int)std::lround(v.width/dx);
+                    const int ny=(int)std::lround(v.height/dx);
+                    const auto mask=asmr::svgRoomMask(nx,ny,dx,candidate,
+                                        v.originX,v.originY);
+                    return asmr::validateMicrophones(mask,nx,ny,dx,
+                        requestedChannels,candidate,v.originX,v.originY);
+                };
+                bool valid=validCandidate(live->view(),live->dx());
+                bool changedZoom=false;
+                if(!valid && requested==1){
+                    // The authored channel has sub-5mm passages. At
+                    // 1x they can be sealed by rasterization. Offer the
+                    // new *moderate* square-grid resolution instead
+                    // of substituting a completely different head.
+                    const auto squareView=
+                        asmr::roomView(zoomSteps.back(),true);
+                    const float squareDx=asmr::squareDxFromBase(
+                        qualityDx[qualityIndex]);
+                    if(validCandidate(squareView,squareDx)){
+                        zoomIndex=(int)zoomSteps.size()-1;
+                        changedZoom=true;
+                        valid=true;
+                        std::fprintf(stderr,
+                            "[H] CHANNEL has disconnected mics at "
+                            "current grid; using 1.8m SQUARE (%.2fmm) "
+                            "to show the actual channel SVG.\n",
+                            squareDx*1000);
                     }
-                    nextHead=&shape;
-                    nextIndex=proposed;
-                    break;
                 }
-                if(nextHead){
-                    headIndex=nextIndex;
-                    channels=headIndex!=2;
-                    head=nextHead;
+                if(!valid){
+                    std::fprintf(stderr,
+                        "[H] Cannot select %s: its microphone is "
+                        "blocked or disconnected at %.2fmm. "
+                        "Still showing %s; press H for next model, "
+                        "or Q for finer geometry.\n",
+                        requested==0?"V2":requested==1?"CHANNEL":"SIMPLE",
+                        live->dx()*1000,
+                        headIndex==0?"V2":headIndex==1?"CHANNEL":"SIMPLE");
+                }else{
+                    headIndex=requested;
+                    channels=requestedChannels;
+                    head=&candidate;
+                    if(changedZoom){
+                        liveCutoff=liveBand();
+                        if(waveLoaded)liveAudio=asmr::lowpass(
+                            fullAudio,liveCutoff,asmr::kOutputRate);
+                        gView=activeView();
+                        artist=asmr::restrictCentreInView(artist,gView);
+                        SDL_WarpMouseInWindow(window,
+                            screenX(artist.x),screenY(artist.y));
+                        recordingClock=0;
+                        record.clear();record.push_back({0.0,artist});
+                    }
                     SDL_ClearQueuedAudio(device);
                     highQuality.reset();live.reset();
                     live=std::make_unique<FdtdRoom>(
                         liveDx(),*head,channels,speakerShape,
-        zoomValue(),squareMode());
-                    live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
-                    previewStep=0;sourceCursor=artist;
+                        zoomValue(),squareMode());
+                    live->uploadAudio(diagnosticTone?diagnosticAudio:
+                                      liveAudio);
+                    sourceCursor=artist;previewStep=0;
                     liveResampler=echo::StereoLinearResampler(
                         live->dt(),asmr::kOutputRate);
-                    std::printf("[SVG HEAD] %s, physically open mics "
-                        "%.1fcm apart.\n",
-                        headIndex==0?"listener_v2 pinna":
-                        headIndex==1?"ear-channel alternative":
-                        "original simple alternative",
-                        asmr::micSpacing(channels,head->pinnaV2)*100);
+                    std::fprintf(stderr,
+                        "[H] ACTIVE %s (original SVG), %.1fmm mic "
+                        "separation, y offset %.1fmm, %.2fmm dx.\n",
+                        requested==0?"listener_v2.svg":
+                        requested==1?"listener_with_ear_channel.svg":
+                                     "listener.svg",
+                        asmr::micSpacing(channels,head->pinnaV2)*1000,
+                        asmr::micOffsetY(channels,head->pinnaV2)*1000,
+                        live->dx()*1000);
                 }
             }
             if(key==SDLK_q && mode==Mode::Preview){
