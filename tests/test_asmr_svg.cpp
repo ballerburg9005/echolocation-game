@@ -1,4 +1,5 @@
 #include "../asmr_svg_geometry.h"
+#include "../asmr_dynamic_head.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -102,6 +103,25 @@ int main(){
             (asmr::kListenerX+0.5f-asmr::kMouthOffset)/dx);
         assert(b[n/2*n+sourceX]==0.0f);
     }
+    // Real CUDA moving-scatterer stencil samples exactly the same
+    // alpha pixels as librsvg used for the artist's display.
+    constexpr float dx=.0025f;
+    const asmr::Vec2 centre{1.5f,1.0f};
+    const auto forward=asmr::faceListener(centre);
+    const auto cover=[&](asmr::Vec2 world) {
+        return asmr::movingHeadCoverage(
+            speaker.alpha.data(),speaker.w,speaker.h,
+            speaker.widthMetres/dx,speaker.heightMetres/dx,
+            centre.x/dx-.5f,centre.y/dx-.5f,
+            forward.x,forward.y,world.x/dx-.5f,world.y/dx-.5f);
+    };
+    assert(cover(centre)>0.7f); // actual moving speaker body scatters
+    assert(cover(asmr::mouth(centre))<0.10f); // mouth port stays air
+    assert(cover({1.85f,1.0f})==0.0f);
+    assert(std::fabs(asmr::movingHeadNeighbor(1,2,0,0)-2)<1e-6f);
+    assert(asmr::movingHeadNeighbor(1,2,1,1)<1.2f);
+    // A fixed listener and a moving *soft* speaker both scatter, but
+    // no moving speaker cell is ever set to a hard mask / zeroed.
     const auto speakerForward=asmr::faceListener({1.5f,1.0f});
     const auto m=asmr::mouth({1.5f,1.0f});
     assert(!asmr::headSolidAt(
