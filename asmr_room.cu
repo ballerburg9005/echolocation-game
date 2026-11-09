@@ -257,7 +257,7 @@ public:
                     dt_*1e6,view_.width,view_.height);
         std::printf("[F11 PHYSICAL] room %.2fx%.2fm, "
             "listener SVG %.1fx%.1fmm, mics %.1fmm apart, "
-            "real dx=%.2fmm, dt=%.2fus, scale=%.0fx; "
+            "real dx=%.2fmm, dt=%.2fus, scale=%gx; "
             "grid remains %dx%d.\n",
             view_.width*physicsScale_,view_.height*physicsScale_,
             head.widthMetres*physicsScale_*1000,
@@ -842,9 +842,10 @@ static void printUsage(const char* executable){
         "                1.00/1.25/1.55/2.00/SQUARE 0.75m\n"
         "                last view is a 0.75m square, still orbitable\n"
         "                (~85% -> 27.2% of original full-room cell-work)\n"
-        "  F11 / Shift+F11 Cycle real physics metre scale 1/2/5/10x\n"
-        "                room, listener, artist, mics, wall/ports ALL scale\n"
-        "                same GPU grid; physical dx/dt and LP change\n"
+        "  F11 / Shift+F11 Cycle real physical scale in both directions\n"
+        "                0.1 / 0.2 / 0.5 / 1 / 2 / 5 / 10x\n"
+        "                Shift+F11 from 1x = 0.5x smaller room\n"
+        "                small scales coarsen the GPU grid to cap work\n"
         "  F12           Cycle distance falloff: raw, 1,2,3,4,6,8,\n"
         "                10,12,16,20x extra 2D-to-3D pressure loss\n"
         "  Shift+F12     Previous distance-falloff strength\n"
@@ -1180,7 +1181,7 @@ int main(int argc,char** argv){
             "[%s] ACTIVE head=%s Z=%.2fx%s Q=%d dx=%.3fmm "
             "room=%.3fx%.3fm cells=%dx%d expected FDTD "
             "cell-work=%.1f%% of old 5mm full room, "
-            "F11 %.0fx physical, dx %.2fmm, LP %.0fHz.\n",
+            "F11 %gx physical, dx %.2fmm, LP %.0fHz.\n",
             changed,h==0?"V2":h==1?"CHANNEL":"SIMPLE",
             zoomValue(),squareMode()?" SQUARE":"",qualityIndex,
             live->dx()*1000,gView.width,gView.height,
@@ -1201,7 +1202,7 @@ int main(int argc,char** argv){
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload selected MP3, D FDTD test chirp, T toggle live, "
        "H V2/channel/simple, Q quality, Z 1/1.25/1.55/2/square, "
-       "F11 physical metres 1/2/5/10x, "
+       "F11 physical metres 0.1/0.2/0.5/1/2/5/10x, "
        "F12 distance 0x-20x (Shift reverses), "
        "V pressure waves, B authored mask guide, 9/0 exposure, "
        "R reset, Esc exit.\n");
@@ -1365,19 +1366,20 @@ int main(int argc,char** argv){
                     const bool reverse=(event.key.keysym.mod&KMOD_SHIFT)!=0;
                     const int next=asmr::nextPhysicalScaleIndex(
                         physicsScaleIndex,reverse);
-                    selectConfiguration(headIndex,qualityIndex,zoomIndex,
-                                        "F11",next);
-                    char notice[200];
-                    std::snprintf(notice,sizeof(notice),
-                        "F11 PHYSICS %.0fx | ROOM %.1fx%.1fm | "
-                        "REAL DX %.1fmm | BAND %.0fHz | Q%d Z %.2fx",
-                        physicsScaleValue(),
-                        live->view().width*physicsScaleValue(),
-                        live->view().height*physicsScaleValue(),
-                        live->physicalDx()*1000,
-                        liveCutoff,qualityIndex,zoomValue());
-                    selectorNotice=notice;
-                    selectorNoticeUntil=SDL_GetTicks64()+3500;
+                    if(selectConfiguration(headIndex,qualityIndex,zoomIndex,
+                                           "F11",next)){
+                        char notice[200];
+                        std::snprintf(notice,sizeof(notice),
+                            "F11 PHYSICS %gx | ROOM %.2fx%.2fm | "
+                            "REAL DX %.2fmm | BAND %.0fHz | Q%d Z %.2fx",
+                            physicsScaleValue(),
+                            live->view().width*physicsScaleValue(),
+                            live->view().height*physicsScaleValue(),
+                            live->physicalDx()*1000,
+                            liveCutoff,qualityIndex,zoomValue());
+                        selectorNotice=notice;
+                        selectorNoticeUntil=SDL_GetTicks64()+3500;
+                    }
                 }else{
                     selectorNotice="F11: press SPACE / return to LIVE first";
                     selectorNoticeUntil=SDL_GetTicks64()+3500;
@@ -1477,7 +1479,7 @@ int main(int argc,char** argv){
                     fullAudio,offlineCutoff,asmr::kOutputRate);
                 highQuality->uploadAudio(offlineAudio);
                 std::printf("[F11 OFFLINE] physical dx %.2fmm, "
-                    "band-limited MP3 to %.0fHz, F11 %.0fx.\n",
+                    "band-limited MP3 to %.0fHz, F11 %gx.\n",
                     highQuality->physicalDx()*1000,offlineCutoff,
                     physicsScaleValue());
                 highQuality->setRenderTiming(job.selected.start,
@@ -1861,7 +1863,7 @@ int main(int argc,char** argv){
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR %s | F11 %.0fx (%.1fx%.1fm) | "
+            "ASMR %s | F11 %gx (%.2fx%.2fm) | "
             "Z %.2fx%s Q%d real dx %.1fmm LP %.0fHz | "
             "head:%s | F12 %dx | range %.1fm | work~%.0f%% | MP3:%s",
             mode==Mode::Render?"OFFLINE":mode==Mode::Playback?
