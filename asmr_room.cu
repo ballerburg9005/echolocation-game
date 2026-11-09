@@ -3,7 +3,7 @@
 // Listener head is a REAL stationary 2D FDTD obstruction with two ears.
 // Artist is a collision-safe moving visual head; its mouth is a real
 // moving FDTD pressure emitter facing the listener on every path sample.
-// Live true-zoom presets target 85%->68% of the OLD 400x711@5mm
+// Live true-zoom presets target 85%->27.2% of the OLD 400x711@5mm
 // acoustic cell-update budget; default 1x dx is now ~5.28mm.
 // Offline starts near 2.11mm with the same physical zoom and a finer
 // independent mesh; neither simulates an unchanged square-room grid.
@@ -774,7 +774,7 @@ static void printUsage(const char* executable){
         "  Z / Shift+Z   Next / previous FDTD zoom; keeps listener\n"
         "                1.00/1.25/1.55/2.00/SQUARE 0.75m\n"
         "                last view is a 0.75m square, still orbitable\n"
-        "                (~85% -> 68% of original full-room cell-work)\n"
+        "                (~85% -> 27.2% of original full-room cell-work)\n"
         "  V             Toggle pressure field visualization\n"
         "  B             Toggle translucent original SVG on acoustic mask\n"
         "  9, 0          Decrease / increase pressure exposure\n"
