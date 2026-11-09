@@ -227,8 +227,9 @@ int main(){
                                        view.originX,view.originY);
         const bool channelIsOpen=asmr::validateMicrophones(
             channelMask,nx,ny,dx,true,channels,view.originX,view.originY);
+        if(stage==2)assert(channelIsOpen); // authored groove has verified connected air
         std::fprintf(stderr,"[SVG ZOOM] stage %d %.2fx %s dx=%.3fmm "
-            "grid=%dx%d channel microphone connected=%s\\n",
+            "grid=%dx%d channel microphone connected=%s\n",
             stage,zoom,square?"SQUARE":"PORTRAIT",dx*1000,
             nx,ny,channelIsOpen?"YES":"NO");
     }
