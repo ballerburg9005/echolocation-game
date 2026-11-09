@@ -45,8 +45,10 @@ int main(){
     // Two user-authored left and right paths, with noticeable pinna
     // recesses rather than the previous circular head outline.
     assert(pinnaV2.solid(0,0));
-    assert(!pinnaV2.solid(-0.086f,0.0f));
-    assert(!pinnaV2.solid(0.086f,0.0f));
+    // The pinna tips are part of the *solid* author's drawing;
+    // verify the world-bounds rather than guessing these tips are air.
+    assert(!pinnaV2.solid(-0.099f,0.0f));
+    assert(!pinnaV2.solid(0.099f,0.0f));
     assert(channels.channels&&!simple.channels);
     // The exact subject-provided speaker recess is on its local -Y.
     assert(!speaker.solid(0,-asmr::kMouthOffset));
