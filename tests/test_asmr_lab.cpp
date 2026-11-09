@@ -7,14 +7,24 @@
 int main(){
     static_assert(asmr::kGraphBatch%3==0,
                   "CUDA graph must preserve triple-buffer identity");
-    assert(asmr::cells(asmr::kLiveDx)==571);
+    assert(asmr::cells(asmr::kLiveDx)==533);
+    // Approximate 2D FDTD cost scales with grid area * timesteps/sec.
+    // The new default reduces updates by ~19% vs 3.5 mm, with the
+    // *same* room dimensions, MP3 filter, and 48 kHz output format.
+    constexpr float formerDx=0.0035f;
+    constexpr int formerCells=571;
+    const double updateRatio=
+        (double)asmr::cells(asmr::kLiveDx)*asmr::cells(asmr::kLiveDx)/
+        ((double)formerCells*formerCells)*formerDx/asmr::kLiveDx;
+    assert(updateRatio>0.79 && updateRatio<0.83);
     assert(asmr::cells(asmr::kMediumDx)==667);
     assert(asmr::cells(asmr::kUltraDx)==800);
     assert(asmr::cells(asmr::kSafeDx)==400);
     assert(asmr::cells(asmr::kLowDx)==250);
     assert(asmr::cells(asmr::kLowestDx)==200);
     assert(asmr::cells(asmr::kOfflineDx)==1333);
-    assert(asmr::tenCellFrequency(asmr::kLiveDx)>9700.0f);
+    assert(asmr::tenCellFrequency(asmr::kLiveDx)>9100.0f);
+    assert(asmr::kLivePassband<asmr::tenCellFrequency(asmr::kLiveDx));
     assert(asmr::tenCellFrequency(asmr::kOfflineDx)>22800.0f);
     assert(asmr::kOfflinePassband<24000.0f);
     assert(asmr::kOfflinePassband>=8000.0f);
@@ -80,7 +90,7 @@ int main(){
             previousStep=displacement;
             smoothed=updated;
         }
-    // A 3150-step interval is only ~23ms at 3.5mm; a max-velocity
+    // A 3150-step interval is ~24ms at 3.75mm; a max-velocity
     // source correctly covers only a few centimetres in that time.
     assert(previousDistance<
         asmr::length(asmr::sub(asmr::Vec2{1.52f,1.0f},target))-0.03f);
@@ -133,6 +143,31 @@ int main(){
     assert(partial.points.front().t==0.0);
     assert(asmr::selectLast({},5.0,5.0).points.empty());
 
+    // Verify that changing the *FDTD* timestep cannot change pitch or
+    // recorded duration: acoustic 440Hz at 3.75mm -> 48kHz stereo.
+    {
+        const double step=asmr::stepSeconds(asmr::kLiveDx);
+        echo::StereoLinearResampler resampler(step,asmr::kOutputRate);
+        std::vector<float> frames;
+        constexpr double sourceHz=440.0, duration=0.15;
+        const int steps=(int)std::ceil(duration/step);
+        for(int i=0;i<steps;++i){
+            const float sound=(float)std::sin(2.0*echo::kPi*sourceHz*i*step);
+            resampler.push(sound,sound,frames);
+        }
+        const size_t stereoFrames=frames.size()/2;
+        assert(stereoFrames>asmr::kOutputRate*0.149);
+        assert(stereoFrames<asmr::kOutputRate*0.151);
+        double errorSum=0.0;
+        for(size_t i=256;i+256<stereoFrames;++i){
+            const double exact=std::sin(2.0*echo::kPi*sourceHz*i/
+                                        asmr::kOutputRate);
+            const double diff=frames[2*i]-exact;
+            errorSum+=diff*diff;
+            assert(std::fabs(frames[2*i]-frames[2*i+1])<1e-7);
+        }
+        assert(std::sqrt(errorSum/(stereoFrames-512))<0.005);
+    }
     // Both filters must retain audible speech and reject unusably
     // high frequencies in the discovery mode, while offline can
     // reproduce >8kHz content. Avoid dependence on a file upload.
@@ -166,5 +201,5 @@ int main(){
     assert(rms(preview18)<0.08);
     assert(rms(offline18)>0.35);
     assert(rms(offlineHigh)>0.45);
-    std::puts("ASMR lab: 3.5/3/2.5/5/8/10mm live and 1.5mm offline REAL 2m FDTD, contiguous source trajectory, 8.5k/19k filters passed");
+    std::puts("ASMR lab: 3.75/3/2.5/5/8/10mm live and 1.5mm offline REAL 2m FDTD, ~19% fewer live space-time updates, correct 440Hz-to-48kHz clock, 8.5k/19k filters passed");
 }
