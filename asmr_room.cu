@@ -673,6 +673,9 @@ struct RenderJob {
     int window=0;
     uint64_t current=0,total=0;
     std::vector<float> samples;
+    // The displayed replay head must follow the *same smoothed physical
+    // centre* that fed moving CUDA impedance, not the unfiltered mouse path.
+    std::vector<asmr::PathPoint> physicalPath;
     // Precomputed actual FDTD pressure snapshots for looping visual playback.
     std::vector<std::vector<uint32_t>> waveFrames;
     size_t nextWaveFrame=0;
@@ -834,6 +837,7 @@ int main(){
     std::vector<std::vector<uint32_t>> lastPlaybackWaves;
     int displayedPlaybackWave=-1;
     asmr::PathSelection lastPlaybackPath;
+    std::vector<asmr::PathPoint> lastPlaybackPhysicalPath;
     uint64_t playbackEnqueuedCycles=0;
     double playbackPhase=0.0;
     int lastWindow=5;
@@ -1053,6 +1057,8 @@ int main(){
                 job.current=0;
                 job.sourceCursor=asmr::interpolate(
                     job.selected.points,job.selected.start);
+                job.physicalPath.clear();
+                job.physicalPath.push_back({0.0,job.sourceCursor});
                 // The render is EXACTLY the requested length in
                 // 48kHz stereo frames. Two extra acoustic steps ensure
                 // the resampler never runs short of its final frame.
@@ -1167,6 +1173,9 @@ int main(){
                     job.resampler->push(
                         samples[2*i],samples[2*i+1],job.samples);
                 job.current+=count;
+                job.physicalPath.push_back({
+                    (double)job.current*highQuality->dt(),
+                    job.sourceCursor});
             }
             // Keep 24 fps REAL FDTD pressure snapshots separate from
             // untouched high-resolution stereo sound computation.
@@ -1199,6 +1208,7 @@ int main(){
                 writeTrajectory(trackPath,job.selected);
                 lastWindow=job.window;
                 lastPlaybackPath=job.selected;
+                lastPlaybackPhysicalPath.swap(job.physicalPath);
                 lastPlayback.swap(job.samples);
                 while(job.waveFrames.size()<targetWaveFrames)
                     job.waveFrames.push_back(job.waveFrames.empty()?
@@ -1319,8 +1329,7 @@ int main(){
         // the smoothed source position. They must coincide.
         const asmr::Vec2 visibleArtist=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
-            asmr::interpolate(lastPlaybackPath.points,
-                              lastPlaybackPath.start+playbackPhase):
+            asmr::interpolate(lastPlaybackPhysicalPath,playbackPhase):
             sourceCursor;
         const asmr::Vec2 visibleSource=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
