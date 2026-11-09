@@ -18,7 +18,7 @@ constexpr float kChannelEarY=0.003f; // exact SVG groove sits 3mm above centre
 
 constexpr float kOuterMicSeparation=
     kEardrumSeparation+0.8f*kEarCanalLength; // 9.6cm simple notch mics
-constexpr float kHeadRadius=0.085f; // conservative collider for 17cm ear SVG
+constexpr float kHeadRadius=0.105f; // encloses 185mm pinna-v2 lateral extent with clearance
 constexpr float kArtistRadius=0.070f; // ~13cm diameter SVG sender
 constexpr float kEarOffset=kOuterMicSeparation*0.5f;
 constexpr float kMouthOffset=0.050f; // 5cm: inside speaker's lower recess
