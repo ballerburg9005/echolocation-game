@@ -7,6 +7,7 @@
 // Offline: 2.5mm grid, 12kHz lowpass for 8kHz+ cues, processed BEFORE
 // stutter-free 48kHz stereo WAV playback and writing an output file.
 #include "asmr_lab_math.h"
+#include "source_model.h"
 #include <cuda_runtime.h>
 #include <SDL2/SDL.h>
 #include <algorithm>
@@ -67,8 +68,8 @@ __global__ void asmrPressureStep(
     // Unlike separate output kernels, this doesn't double graph launches.
     // The p field is read-only for the entirety of this CUDA kernel.
     if(x==0&&y==0){
-        const float lx=asmr::leftEar().x/dx-0.5f;
-        const float rx=asmr::rightEar().x/dx-0.5f;
+        const float lx=(asmr::kListenerX-asmr::kEarOffset)/dx-0.5f;
+        const float rx=(asmr::kListenerX+asmr::kEarOffset)/dx-0.5f;
         const float ey=asmr::kListenerY/dx-0.5f;
         outStereo[localStep*2]=echo::bilinearSample(now,n,lx,ey);
         outStereo[localStep*2+1]=echo::bilinearSample(now,n,rx,ey);
@@ -304,7 +305,9 @@ static std::array<float2,asmr::kGraphBatch> mouthBatch(
     return result;
 }
 
-static int screenX(float x){return (int)std::lround(x/kRoomMetres*kWindow);}
+static int screenX(float x){
+    return (int)std::lround(x/asmr::kRoomMetres*kWindow);
+}
 static int screenY(float y){
     return (int)std::lround((asmr::kRoomMetres-y)/
                              asmr::kRoomMetres*kWindow);
