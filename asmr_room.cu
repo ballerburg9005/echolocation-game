@@ -929,25 +929,36 @@ int main(){
                     live->dt(),asmr::kOutputRate);
             }
             if(key==SDLK_h && mode==Mode::Preview){
-                const int proposed=(headIndex+1)%3;
-                const asmr::SvgSilhouette& shape=proposed==0?
-                    listenerV2:proposed==1?listenerChannels:listenerSimple;
-                const bool proposedChannels=proposed!=2;
-                const auto mask=asmr::svgRoomMask(
-                    asmr::cells(live->dx()),asmr::cellsY(live->dx()),
-                    live->dx(),shape);
-                if(!asmr::validateMicrophones(mask,
-                    asmr::cells(live->dx()),asmr::cellsY(live->dx()),
-                    live->dx(),proposedChannels,shape)) {
-                    std::fprintf(stderr,"[SVG HEAD] Mode %d at %.2fmm "
-                        "has a blocked or disconnected ear passage. "
-                        "Press Q for another grid size or inspect "
-                        "your channel SVG.\n",proposed,
-                        live->dx()*1000);
-                }else{
-                    headIndex=proposed;
-                    channels=proposedChannels;
-                    head=&shape;
+                // Skip unavailable SVGs rather than getting stuck at
+                // the 8cm alternative if the user edits an ear neck
+                // too narrowly for the selected acoustic grid.
+                const asmr::SvgSilhouette* nextHead=nullptr;
+                int nextIndex=headIndex;
+                for(int offset=1;offset<3;++offset){
+                    const int proposed=(headIndex+offset)%3;
+                    const asmr::SvgSilhouette& shape=proposed==0?
+                        listenerV2:proposed==1?listenerChannels:listenerSimple;
+                    const bool proposedChannels=proposed!=2;
+                    const auto mask=asmr::svgRoomMask(
+                        asmr::cells(live->dx()),asmr::cellsY(live->dx()),
+                        live->dx(),shape);
+                    if(!asmr::validateMicrophones(mask,
+                        asmr::cells(live->dx()),asmr::cellsY(live->dx()),
+                        live->dx(),proposedChannels,shape)) {
+                        std::fprintf(stderr,"[SVG HEAD] Skipping mode %d "
+                            "at %.2fmm: blocked or disconnected ear "
+                            "passage. Try Q or inspect the SVG.\n",
+                            proposed,live->dx()*1000);
+                        continue;
+                    }
+                    nextHead=&shape;
+                    nextIndex=proposed;
+                    break;
+                }
+                if(nextHead){
+                    headIndex=nextIndex;
+                    channels=headIndex!=2;
+                    head=nextHead;
                     SDL_ClearQueuedAudio(device);
                     highQuality.reset();live.reset();
                     live=std::make_unique<FdtdRoom>(
