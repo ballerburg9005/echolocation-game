@@ -32,7 +32,7 @@ int main(){
             const int mx=(int)(asmr::kListenerX/dx);
             const int my=(int)(asmr::kListenerY/dx);
             assert(mask[(size_t)my*n+mx]>0); // stitched solid core
-            const int outer=(int)(0.014f/dx);
+            const int outer=(int)(0.035f/dx); // safely beyond 2-cell outer ring at 10mm
             assert(mask[(size_t)outer*n+outer]==0);
         }
     }
