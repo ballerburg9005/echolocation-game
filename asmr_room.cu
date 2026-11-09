@@ -1433,6 +1433,9 @@ int main(int argc,char** argv){
                 }
                 char notice[128];
                 std::snprintf(notice,sizeof(notice),
+                    ambientEnabled||
+                        (mode==Mode::Playback&&lastPlaybackAmbient)?
+                    "F12 %dx STORED (ambient probe bypasses F12)":
                     "F12 DISTANCE %dx | %s",
                     strength,strength==0?"RAW 2D":
                         strength==1?"~3D 1/r PRESSURE":
@@ -1843,6 +1846,12 @@ int main(int argc,char** argv){
                 // Both saved WAV and SDL loop are N*48000 frames.
                 asmr::fitStereoClip(job.samples,job.window);
                 makeSafePlayback(job.samples);
+                if(ambientEnabled){
+                    // Silence-to-room-tone diagnostic, not a full
+                    // scale noise recording: cap after normalizer.
+                    for(float& sample:job.samples)
+                        sample*=asmr::kAmbientReplayGain;
+                }
                 if(squareMode()){
                     // Apply 75% AFTER offline peak normalization so
                     // the limiter cannot silently undo it.
