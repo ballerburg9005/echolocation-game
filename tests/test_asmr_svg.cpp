@@ -90,7 +90,7 @@ int main(){
     assert(!pinnaV2.solid(-0.062f,asmr::kChannelEarY));
     assert(!pinnaV2.solid(0.062f,asmr::kChannelEarY));
 
-    for(float dx:{0.0035f,0.0030f,0.0025f,0.0015f}) {
+    for(float dx:{asmr::kLiveDx,0.0035f,0.0030f,0.0025f,0.0015f}) {
         const int n=asmr::cells(dx);
         const auto a=asmr::svgRoomMask(n,dx,simple);
         const auto b=asmr::svgRoomMask(n,dx,channels);
