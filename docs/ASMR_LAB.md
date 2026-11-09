@@ -466,19 +466,44 @@ loss or attenuation.
 
 ### Full-length MP3 input and CUDA streaming
 
-The **entire MP3** is now decoded, rather than silently stopping
-after the first 60 seconds. Live and offline FDTD read from the
-whole track, preserving the source timeline across H, Z, Q,
-and F11 changes. A **60-second overlapping GPU cache** advances
-every 58 seconds of song time; the cache boundary is not a
-musical loop boundary. Playback loops only after the **actual
-end of the full MP3**, with a short quiet crossfade-style
-fade at the end/start to avoid an abrupt sample jump.
-The high-resolution F5/F6/F7 captures remain exactly
-5/10/20 seconds as explicitly requested; those limits do
-not truncate the MP3 source. Reloading with L restarts the
-file from the beginning. The decoded track remains in host
-RAM, not completely allocated in device memory.
+The **entire MP3** is decoded as host-memory mono 48kHz PCM,
+rather than silently stopping after the first 60 seconds.
+The decoder reports **[MP3] Decoded N seconds so far** in the
+terminal while loading a long recording. libmpg123's resynchronization
+remains enabled; recoverable damaged MPEG frames no longer cause
+an immediate abort. Repeated irrecoverable errors still fail with a
+clear message rather than claiming to have loaded the track.
+
+A **60-second GPU source cache** advances every 58 seconds of
+the complete track. The original path ran **two 81-tap FIR filters
+over the *entire* recording** at startup and reran one for every
+H/Z/F11 configuration change. For 20 minutes at 48kHz that cost
+approximately **9.3 billion filter operations** before playback.
+Now the complete decoded song remains unfiltered in host memory,
+and **only the current CUDA source window is band-limited** via
+two fast cascaded biquad filters (a 4th-order Butterworth low-pass).
+This is O(N) in *one cache window*, not O(81×N) across the complete
+recording. Every cache reload includes **one second of pre-roll**
+so the IIR response settles before playback reaches the new window.
+
+Live and offline FDTD read from the complete track; the cache
+boundary is **not a musical loop boundary**. Playback loops only
+at the **actual end of the full MP3**, with a short fade at the
+loop edge to avoid an abrupt sample jump. H, Z, Q and F11 changes
+preserve the playhead; pressing **L** explicitly reloads the track
+from the beginning. The F5/F6/F7 high-quality renders remain
+exactly 5/10/20 seconds, but sample the selected time slice of
+the full MP3. Source filtering takes place once per cache window,
+and after applying each configuration's real physical frequency
+cutoff. Large decoded files remain in host RAM; only the active
+window is uploaded to CUDA.
+
+The CPU integration test generates a **75-second stereo MP3**,
+damages MPEG header/side-info bytes near offset 12,217
+(to exercise the reported decoder-resync path), and verifies that
+both clean and damaged files still decode **past 60 seconds**
+without silent truncation. Separate math tests verify the
+efficient window filter's passband, stopband and finite output.
 
 ### Controls
 
