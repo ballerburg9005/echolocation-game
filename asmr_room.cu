@@ -636,18 +636,42 @@ int main(){
         SDL_Quit();return 1;
     }
     SDL_PauseAudioDevice(device,0);
-    const std::array<float,3> qualityDx{
-        asmr::kLiveDx,asmr::kMediumDx,asmr::kSafeDx};
-    const std::array<float,3> qualityBand{
-        asmr::kLivePassband,asmr::kMediumPassband,
-        asmr::kSafePassband};
+    asmr::SvgSilhouette speakerShape=asmr::speakerSilhouette();
+    asmr::SvgSilhouette listenerSimple=asmr::listenerSilhouette(
+        asmr::HeadStyle::Simple);
+    asmr::SvgSilhouette listenerChannels=asmr::listenerSilhouette(
+        asmr::HeadStyle::Channels);
+    if(!speakerShape.present()||!listenerSimple.present()||
+       !listenerChannels.present()) {
+        std::fprintf(stderr,"[FDTD SVG] Cannot load exact head shapes. "
+            "Place listener.svg, speaker.svg and "
+            "listener_with_ear_channel.svg in HOME, "
+            "or run from the checkout with asmr_shapes/.\n");
+        return 4;
+    }
+    bool channels=true; // default: two joined halves, OPEN ear canals
+    const auto* head=&listenerChannels;
+    SDL_Texture* speakerSprite=headTexture(
+        renderer,speakerShape,237,141,98);
+    SDL_Texture* simpleSprite=headTexture(
+        renderer,listenerSimple,38,132,218);
+    SDL_Texture* channelsSprite=headTexture(
+        renderer,listenerChannels,38,132,218);
+    const std::array<float,6> qualityDx{
+        asmr::kLiveDx,asmr::kMediumDx,asmr::kUltraDx,
+        asmr::kSafeDx,asmr::kLowDx,asmr::kLowestDx};
+    const std::array<float,6> qualityBand{
+        asmr::kLivePassband,asmr::kMediumPassband,asmr::kUltraPassband,
+        asmr::kSafePassband,asmr::kLowPassband,
+        asmr::kLowestPassband};
     int qualityIndex=0;
     float liveCutoff=qualityBand[qualityIndex];
     std::vector<float> fullAudio,liveAudio;
     bool waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
                                     liveCutoff);
 
-    auto live=std::make_unique<FdtdRoom>(qualityDx[qualityIndex]);
+    auto live=std::make_unique<FdtdRoom>(
+        qualityDx[qualityIndex],*head,channels);
     live->uploadAudio(liveAudio);
     std::unique_ptr<FdtdRoom> highQuality;
     echo::StereoLinearResampler liveResampler(live->dt(),
@@ -739,7 +763,7 @@ int main(){
                 // allocating the new-size pressure grid.
                 live.reset();
                 live=std::make_unique<FdtdRoom>(
-                    qualityDx[qualityIndex]);
+                    qualityDx[qualityIndex],*head,channels);
                 live->uploadAudio(liveAudio);
                 previewStep=0;sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
@@ -793,7 +817,7 @@ int main(){
             } else {
                 if(!highQuality)
                     highQuality=std::make_unique<FdtdRoom>(
-                        asmr::kOfflineDx);
+                        asmr::kOfflineDx,*head,channels);
                 highQuality->uploadAudio(fullAudio);
                 highQuality->setRenderTiming(job.selected.start,
                     job.selected.duration,true);
@@ -971,7 +995,10 @@ int main(){
             job.sourceCursor:sourceCursor;
         drawRoom(renderer,record,visibleArtist,visibleSource,progress,
                  mode==Mode::Render,mode==Mode::Playback,
-                 mouseMode,waveTexture,showPressure);
+                 mouseMode,waveTexture,showPressure,
+                 *head,speakerShape,
+                 channels?channelsSprite:simpleSprite,
+                 speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
             "ASMR CUDA FDTD | %s | MP3:%s | path %.1fs | live %.0fHz / offline %.0fHz | Q quality | V pressure",
@@ -986,6 +1013,9 @@ int main(){
     SDL_ClearQueuedAudio(device);
     SDL_CloseAudioDevice(device);
     highQuality.reset();
+    if(speakerSprite)SDL_DestroyTexture(speakerSprite);
+    if(simpleSprite)SDL_DestroyTexture(simpleSprite);
+    if(channelsSprite)SDL_DestroyTexture(channelsSprite);
     if(waveTexture)SDL_DestroyTexture(waveTexture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
