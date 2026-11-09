@@ -7,23 +7,29 @@
 int main(){
     static_assert(asmr::kGraphBatch%3==0,
                   "CUDA graph must preserve triple-buffer identity");
-    assert(asmr::cells(asmr::kLiveDx)==533);
-    // Approximate 2D FDTD cost scales with grid area * timesteps/sec.
-    // The new default reduces updates by ~19% vs 3.5 mm, with the
-    // *same* room dimensions, MP3 filter, and 48 kHz output format.
-    constexpr float formerDx=0.0035f;
-    constexpr int formerCells=571;
+    assert(asmr::cells(asmr::kLiveDx)==400);
+    assert(asmr::cellsY(asmr::kLiveDx)==711);
+    assert(std::fabs(asmr::kRoomHeightMetres/
+                     asmr::kRoomMetres-16.0/9.0)<1e-6);
+    // New 9:16 room with 5mm preview uses about 25% fewer cell updates
+    // per simulated second than the previous 533x533 at 5mm.
+    constexpr float formerDx=0.00375f;
+    constexpr int formerCells=533;
     const double updateRatio=
-        (double)asmr::cells(asmr::kLiveDx)*asmr::cells(asmr::kLiveDx)/
-        ((double)formerCells*formerCells)*formerDx/asmr::kLiveDx;
-    assert(updateRatio>0.79 && updateRatio<0.83);
+        (double)asmr::cells(asmr::kLiveDx)*
+        asmr::cellsY(asmr::kLiveDx)*formerDx/
+        ((double)formerCells*formerCells*asmr::kLiveDx);
+    assert(updateRatio>0.73 && updateRatio<0.78);
+    assert(asmr::validArtist({1.0f,3.20f}));
+    assert(!asmr::validArtist({1.0f,asmr::kRoomHeightMetres}));
     assert(asmr::cells(asmr::kMediumDx)==667);
     assert(asmr::cells(asmr::kUltraDx)==800);
     assert(asmr::cells(asmr::kSafeDx)==400);
     assert(asmr::cells(asmr::kLowDx)==250);
     assert(asmr::cells(asmr::kLowestDx)==200);
     assert(asmr::cells(asmr::kOfflineDx)==1333);
-    assert(asmr::tenCellFrequency(asmr::kLiveDx)>9100.0f);
+    assert(asmr::cellsY(asmr::kOfflineDx)==2370);
+    assert(asmr::tenCellFrequency(asmr::kLiveDx)>6800.0f);
     assert(asmr::kLivePassband<asmr::tenCellFrequency(asmr::kLiveDx));
     assert(asmr::tenCellFrequency(asmr::kOfflineDx)>22800.0f);
     assert(asmr::kOfflinePassband<24000.0f);
@@ -34,17 +40,19 @@ int main(){
                   asmr::kUltraDx,asmr::kSafeDx,
                   asmr::kLowDx,asmr::kLowestDx,
                   asmr::kOfflineDx}){
-        const int n=asmr::cells(dx);
-        const auto mask=asmr::roomMask(n,dx);
-        assert(mask.size()==(size_t)n*n);
+        const int nx=asmr::cells(dx),ny=asmr::cellsY(dx);
+        const auto mask=asmr::roomMask(nx,ny,dx);
+        assert(mask.size()==(size_t)nx*ny);
         assert(mask[0]==echo::kOuterBoundaryMaterial);
-        assert(mask[n/2*n+n/2]==1.0f);
-        assert(mask[(n/2-1)*n+(n/2-1)]==1.0f);
-        assert(asmr::probeInAir(mask,n,asmr::leftEar(),dx));
-        assert(asmr::probeInAir(mask,n,asmr::rightEar(),dx));
+        const int hx=(int)(asmr::kListenerX/dx);
+        const int hy=(int)(asmr::kListenerY/dx);
+        assert(mask[(size_t)hy*nx+hx]==1.0f);
+        assert(mask[(size_t)(hy-1)*nx+hx-1]==1.0f);
+        assert(asmr::probeInAir(mask,nx,ny,asmr::leftEar(),dx));
+        assert(asmr::probeInAir(mask,nx,ny,asmr::rightEar(),dx));
         const auto mouth=asmr::mouth({1.42f,1.0f});
-        assert(asmr::probeInAir(mask,n,mouth,dx));
-        assert(asmr::probeInAir(mask,n,{0.75f,1.0f},dx));
+        assert(asmr::probeInAir(mask,nx,ny,mouth,dx));
+        assert(asmr::probeInAir(mask,nx,ny,{0.75f,1.0f},dx));
     }
 
     // Body-circle constraints apply even when the cursor jumps from one
@@ -90,7 +98,7 @@ int main(){
             previousStep=displacement;
             smoothed=updated;
         }
-    // A 3150-step interval is ~24ms at 3.75mm; a max-velocity
+    // A 3150-step interval is ~24ms at 5mm; a max-velocity
     // source correctly covers only a few centimetres in that time.
     assert(previousDistance<
         asmr::length(asmr::sub(asmr::Vec2{1.52f,1.0f},target))-0.03f);
@@ -144,7 +152,7 @@ int main(){
     assert(asmr::selectLast({},5.0,5.0).points.empty());
 
     // Verify that changing the *FDTD* timestep cannot change pitch or
-    // recorded duration: acoustic 440Hz at 3.75mm -> 48kHz stereo.
+    // recorded duration: acoustic 440Hz at 5mm -> 48kHz stereo.
     {
         const double step=asmr::stepSeconds(asmr::kLiveDx);
         echo::StereoLinearResampler resampler(step,asmr::kOutputRate);
@@ -188,7 +196,7 @@ int main(){
         return std::sqrt(sum/(data.size()-600));
     };
     assert(rms(liveLow)>0.5);
-    assert(rms(liveHigh)<0.18); // 10kHz near the 8.5kHz stopband transition
+    assert(rms(liveHigh)<0.18); // 10kHz above the 6kHz lowpass
     // A still-higher 18kHz component must be represented offline
     // but rejected by all preview settings.
     std::vector<float> veryHigh(N);
@@ -201,5 +209,5 @@ int main(){
     assert(rms(preview18)<0.08);
     assert(rms(offline18)>0.35);
     assert(rms(offlineHigh)>0.45);
-    std::puts("ASMR lab: 3.75/3/2.5/5/8/10mm live and 1.5mm offline REAL 2m FDTD, ~19% fewer live space-time updates, correct 440Hz-to-48kHz clock, 8.5k/19k filters passed");
+    std::puts("ASMR lab: 5/4.5/3.75/3/2.5/6/8/10mm live, 1.5mm offline 2x3.56m FDTD, ~25% fewer cell updates, correct 440Hz-to-48kHz clock, 8.5k/19k filters passed");
 }
