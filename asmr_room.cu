@@ -532,6 +532,20 @@ static void drawRoom(SDL_Renderer* renderer,
             kWindowW-2*thickness,kWindowH-2*thickness};
         SDL_RenderDrawRect(renderer,&r);
     }
+    // Bright teal slits are locally matched absorbing exits (door at
+    // left, window at right, high transom on far wall). The simulation
+    // uses exactly the same normalized positions in roomMask().
+    color(renderer,40,174,145);
+    for(int thickness=0;thickness<7;++thickness){
+        SDL_RenderDrawLine(renderer,thickness,
+            (int)(0.30f*kWindowH),(int)thickness,
+            (int)(0.38f*kWindowH));
+        SDL_RenderDrawLine(renderer,kWindowW-1-thickness,
+            (int)(0.71f*kWindowH),kWindowW-1-thickness,
+            (int)(0.80f*kWindowH));
+        SDL_RenderDrawLine(renderer,(int)(0.23f*kWindowW),thickness,
+            (int)(0.34f*kWindowW),thickness);
+    }
     // The movement trail is the path that will be rendered afterwards.
     color(renderer,66,85,89);
     for(size_t i=1;i<record.size();++i)
