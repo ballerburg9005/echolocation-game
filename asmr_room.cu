@@ -1,12 +1,13 @@
 // Standalone ASMR room experiment. No changes to the arcade executable.
-// Default soundtrack: test.wav, optionally overridden by argv[1].
+// Source is always ~/test.mp3: decoded into mono PCM inside the real FDTD room.
 // Listener head is a REAL stationary 2D FDTD obstruction with two ears.
 // Artist is a collision-safe moving visual head; its mouth is a real
 // moving FDTD pressure emitter facing the listener on every path sample.
-// Live: 1cm grid, ~2.8kHz source lowpass for cheaper live discovery.
-// Offline: 2.5mm grid, 12kHz lowpass for 8kHz+ cues, processed BEFORE
+// Live: 5mm grid, 5.5kHz band (Q cycles 5/8/10mm for weaker GPUs).
+// Offline: 2mm grid, 15kHz band to preserve >8kHz spatial effects, BEFORE
 // stutter-free 48kHz stereo WAV playback and writing an output file.
 #include "asmr_lab_math.h"
+#include "asmr_mp3_audio.h"
 #include "source_model.h"
 #include <cuda_runtime.h>
 #include <SDL2/SDL.h>
@@ -229,58 +230,26 @@ private:
     cudaGraphExec_t execution_=nullptr;
 };
 
-static bool loadWavFile(const std::string& filename,
-                        std::vector<float>& full,
-                        std::vector<float>& live){
+static bool loadSourceAudio(const std::string& filename,
+                            std::vector<float>& full,
+                            std::vector<float>& live,
+                            float liveCutoff) {
     full.clear();live.clear();
-    SDL_AudioSpec spec{};
-    Uint8* input=nullptr;
-    Uint32 inputBytes=0;
-    if(!SDL_LoadWAV(filename.c_str(),&spec,&input,&inputBytes)){
-        std::fprintf(stderr,
-            "[WAV] Cannot load %s: %s. Path capture remains available.\n",
-            filename.c_str(),SDL_GetError());
+    std::vector<float> source;
+    std::string error;
+    if(!asmr::decodeMP3(filename,source,error,asmr::kOutputRate,
+                         kMaxWavSeconds)) {
+        std::fprintf(stderr,"[MP3] %s: %s (path recording still works).\n",
+                     filename.c_str(),error.c_str());
         return false;
     }
-    SDL_AudioCVT cvt{};
-    const int conversion=SDL_BuildAudioCVT(&cvt,
-        spec.format,spec.channels,spec.freq,
-        AUDIO_F32SYS,1,asmr::kOutputRate);
-    if(conversion<0){
-        SDL_FreeWAV(input);
-        std::fprintf(stderr,"[WAV] Unsupported PCM conversion\n");
-        return false;
-    }
-    cvt.len=(int)inputBytes;
-    cvt.buf=(Uint8*)SDL_malloc(inputBytes*(size_t)std::max(1,cvt.len_mult));
-    if(!cvt.buf){SDL_FreeWAV(input);return false;}
-    std::memcpy(cvt.buf,input,inputBytes);
-    SDL_FreeWAV(input);
-    if(cvt.needed&&SDL_ConvertAudio(&cvt)!=0){
-        std::fprintf(stderr,"[WAV] Convert failed: %s\n",SDL_GetError());
-        SDL_free(cvt.buf);return false;
-    }
-    if(!cvt.needed)cvt.len_cvt=cvt.len;
-    const float* data=(const float*)cvt.buf;
-    const size_t count=std::min((size_t)cvt.len_cvt/sizeof(float),
-                                (size_t)kMaxWavFrames);
-    std::vector<float> normalized(count,0);
-    for(size_t i=0;i<count;++i) {
-        const float sample=data[i];
-        normalized[i]=std::isfinite(sample)?
-            std::clamp(sample,-1.0f,1.0f):0.0f;
-    }
-    SDL_free(cvt.buf);
-    if(count<128)return false;
-    if((size_t)cvt.len_cvt/sizeof(float)>count)
-        std::fprintf(stderr,"[WAV] Limited input to first %d seconds\n",
-                      kMaxWavSeconds);
-    full=asmr::lowpass(normalized,asmr::kOfflinePassband,asmr::kOutputRate);
-    live=asmr::lowpass(normalized,asmr::kLivePassband,asmr::kOutputRate);
-    std::printf("[WAV] Loaded %s, %.2fs, mono 48kHz. "
-        "Preview LP %.0fHz; offline LP %.0fHz.\n",
-        filename.c_str(),(double)count/asmr::kOutputRate,
-        asmr::kLivePassband,asmr::kOfflinePassband);
+    full=asmr::lowpass(source,asmr::kOfflinePassband,asmr::kOutputRate);
+    live=asmr::lowpass(source,liveCutoff,asmr::kOutputRate);
+    std::printf("[MP3] Loaded %s (%.2fs, mono 48kHz). "
+                "LIVE %.0fHz, OFFLINE %.0fHz. Input enters CUDA FDTD.\n",
+                filename.c_str(),source.size()/
+                (double)asmr::kOutputRate,liveCutoff,
+                asmr::kOfflinePassband);
     return true;
 }
 
@@ -461,8 +430,10 @@ struct RenderJob {
 };
 enum class Mode {Preview,Render,Playback};
 
-int main(int argc,char** argv){
-    const std::string filename=argc>1?argv[1]:"test.wav";
+int main(){
+    const char* home=std::getenv("HOME");
+    const std::string filename=std::string(home&&*home?home:".")+
+                               "/test.mp3";
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO)<0){
         std::fprintf(stderr,"[SDL] %s\n",SDL_GetError());return 1;
     }
@@ -494,7 +465,8 @@ int main(int argc,char** argv){
     }
     SDL_PauseAudioDevice(device,0);
     std::vector<float> fullAudio,liveAudio;
-    bool waveLoaded=loadWavFile(filename,fullAudio,liveAudio);
+    bool waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
+                                    asmr::kLivePassband);
 
     FdtdRoom live(asmr::kLiveDx);
     live.uploadAudio(liveAudio);
@@ -580,7 +552,8 @@ int main(int argc,char** argv){
             }
         }
         if(reload){
-            waveLoaded=loadWavFile(filename,fullAudio,liveAudio);
+            waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
+                                       liveCutoff);
             live.uploadAudio(liveAudio);
             if(highQuality)highQuality->uploadAudio(fullAudio);
             if(mode==Mode::Preview){
