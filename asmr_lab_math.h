@@ -60,6 +60,15 @@ constexpr float kHeadReflection=0.74f;
 constexpr float kOutsideReflection=0.82f;
 constexpr float kPortMaterial=5.0f;
 constexpr float kPortReflection=0.035f;
+// Port extents are PHYSICAL metre values so they grow in relative
+// screen size as the acoustic room is cropped. Shares parameters
+// with the SDL wall drawing; all ports terminate sound.
+constexpr float kLeftPortCentre=0.66f;  // fraction from bottom
+constexpr float kLeftPortHeight=0.28f; // metres
+constexpr float kRightPortCentre=0.245f;
+constexpr float kRightPortHeight=0.32f;
+constexpr float kFarPortCentre=0.285f; // fraction from left
+constexpr float kFarPortWidth=0.22f; // metres
 // This ASMR-specific impedance leaves the original arcade's wall
 // physics untouched. All materials use the same 5-point stencil.
 #ifdef __CUDACC__
@@ -308,9 +317,16 @@ inline std::vector<float> roomMask(int nx,int ny,float dx,
             // all remaining walls are substantially reflective.
             const float u=((float)x+0.5f)/nx;
             const float v=((float)y+0.5f)/ny;
-            const bool port=(x<border && v>0.62f && v<0.70f)||
-                (x>=nx-border && v>0.20f && v<0.29f)||
-                (y>=ny-border && u>0.23f && u<0.34f);
+            const float realH=ny*dx,realW=nx*dx;
+            const bool port=(x<border &&
+                    std::fabs(v-kLeftPortCentre)*realH<
+                                0.5f*kLeftPortHeight)||
+                (x>=nx-border &&
+                    std::fabs(v-kRightPortCentre)*realH<
+                                0.5f*kRightPortHeight)||
+                (y>=ny-border &&
+                    std::fabs(u-kFarPortCentre)*realW<
+                                0.5f*kFarPortWidth);
             mask[id]=port?kPortMaterial:
                          echo::kOuterBoundaryMaterial;
             continue;
