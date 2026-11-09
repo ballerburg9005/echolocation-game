@@ -28,6 +28,20 @@ your original bezier curves, elliptic arcs and SVG transforms. The program
 loads the user's copy from `~/` when present, otherwise the copies
 checked into `asmr_shapes/`.
 
+### Testing silence or missing pressure waves
+
+Press **D** to toggle a built-in one-second repeating 320–2720 Hz
+calibration chirp. It goes into the *same moving-mouth CUDA FDTD
+pressure solver* as `~/test.mp3`, not directly to an audio output.
+The chirp is available even when the MP3 is absent and is only enabled
+when explicitly requested; **D** again returns to normal MP3 input.
+Look for `[ASMR FDTD]` diagnostics every five seconds: `MP3=`,
+`preview=`, `probe=`, `earPeak=` and queue depth. If `earPeak`
+is nonzero but headphones remain silent, check SDL's selected output
+device, system volume and mute. If `earPeak` stays zero on the
+calibration tone, that points to a source/mask/FDTD problem instead.
+The visible cyan/magenta field in V mode is the same solver field.
+
 ### Head geometries and eardrums
 
 **The default listener is YOUR `listener_v2.svg`** — both mirrored halves
@@ -114,6 +128,7 @@ not added artificial 3D distance gain or HRTF processing.
 | F7 / 2 | Render and then **loop exactly 20 s** |
 | P | Restart the most recently completed replay loop |
 | **Space** | Stop playback and return to live movement/recording |
+| D | Toggle in-solver FDTD test chirp even without MP3 |
 | T | Toggle live FDTD audio preview |
 | L | Reload `~/test.mp3` |
 | R | Reset live wave field and path history |
