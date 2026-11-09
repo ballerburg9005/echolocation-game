@@ -273,7 +273,7 @@ int main(){
     // seal an authored mic or disable H/Z navigation. Check every
     // listener at each small F11 scale and acoustic zoom.
     int shrinkConfigurationsFailing=0;
-    for(const float scale:{0.5f,0.2f,0.1f}){
+    for(const float scale:{0.1f,0.25f,0.5f,0.75f}){
         for(size_t stage=0;stage<asmr::kZoomSteps.size();++stage){
             const auto view=asmr::roomView(
                 asmr::kZoomSteps[stage],
@@ -283,9 +283,12 @@ int main(){
             const int nx=(int)std::lround(view.width/dx);
             const int ny=(int)std::lround(view.height/dx);
             const float work=asmr::physicalScaleWork(dx,view,scale);
-            // Calibrated 1% coarser grid saves another ~2.9% work.
-            assert(work<=asmr::kZoomWorkRatios[stage]+0.001f);
-            assert(work>=asmr::kZoomWorkRatios[stage]*0.95f);
+            // Full small-room target is 0.60 of the prior 1.01x
+            // compensated FDTD cell-work/real-second baseline.
+            const float prev=asmr::kZoomWorkRatios[stage]/
+                                  (1.01f*1.01f*1.01f);
+            const float newTarget=prev*asmr::kSmallRoomWorkFraction;
+            assert(std::fabs(work-newTarget)<newTarget*0.005f);
             for(const int h:{0,1,2}){
                 const auto& shape=h==0?pinnaV2:h==1?channels:simple;
                 const auto mask=asmr::svgRoomMask(
@@ -335,8 +338,8 @@ int main(){
     }
     if(shrinkConfigurationsFailing)
         std::fprintf(stderr,
-            "[F11 SVG] %d of 45 configurations fail "
-            "at exact cube-root dx; tune common dx to pass.\\n",
+            "[F11 SVG] %d of 60 configurations fail "
+            "at 60%-work scaled dx; tune geometry to pass.\\n",
             shrinkConfigurationsFailing);
     assert(shrinkConfigurationsFailing==0);
     // Real CUDA moving-scatterer stencil samples exactly the same
