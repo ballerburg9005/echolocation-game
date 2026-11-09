@@ -193,6 +193,37 @@ int main(){
     assert(asmr::boundaryDamping(asmr::kPortMaterial,0,0,0)>
            asmr::boundaryDamping(
                echo::kOuterBoundaryMaterial,0,0,0));
+    // F12 bug regression: at F11=0.5x the near-reference
+    // also scales to 10cm. A 20x gain must NOT be identically
+    // 1 across the entire smaller room.
+    for(const float scale:{0.1f,0.25f,0.5f,0.75f,1.0f,2.0f,4.0f}){
+        const float near=asmr::kFalloffReferenceMetres*scale;
+        assert(std::fabs(asmr::distanceFalloffGain(
+            near,20,scale)-1.0f)<1e-6f);
+        assert(asmr::distanceFalloffGain(near*2.0f,20,scale)<0.002f);
+        assert(std::fabs(asmr::distanceFalloffGain(
+            near*4.0f,1,scale)-0.5f)<1e-6f);
+        assert(asmr::distanceFalloffGain(
+            near*0.5f,20,scale)==1.0f);
+    }
+    assert(asmr::distanceFalloffGain(0.18f,20,0.5f)<0.01f);
+    assert(asmr::distanceFalloffGain(0.18f,20,1.0f)==1.0f);
+    // Whole-MP3 streaming: no 60-second looping. The device window
+    // remains 60 seconds; its 58s stride includes an interpolation
+    // overlap and only the *full track* end wraps song time.
+    const uint64_t songFrames=210ULL*asmr::kOutputRate;
+    assert(asmr::mp3WindowStart(0.0,songFrames)==0);
+    assert(asmr::mp3WindowStart(59.0,songFrames)==
+           asmr::kMp3WindowStride);
+    assert(asmr::mp3WindowStart(117.0,songFrames)==
+           2*asmr::kMp3WindowStride);
+    assert(asmr::mp3WindowStart(175.0,songFrames)==
+           3*asmr::kMp3WindowStride);
+    assert(asmr::mp3WindowStart(209.99,songFrames)==
+           3*asmr::kMp3WindowStride);
+    assert(asmr::mp3WindowStart(210.0,songFrames)==0);
+    assert(asmr::mp3WindowStart(65.0,
+        43ULL*asmr::kOutputRate)==0);
     assert(asmr::cells(asmr::kLiveDx)==400);
     assert(asmr::cellsY(asmr::kLiveDx)==711);
     // Every zoom is a REAL smaller FDTD room and finer dx, yet its
