@@ -367,6 +367,35 @@ static int screenY(float y){
 static void color(SDL_Renderer* r,Uint8 red,Uint8 green,Uint8 blue){
     SDL_SetRenderDrawColor(r,red,green,blue,255);
 }
+static SDL_Texture* headTexture(SDL_Renderer* renderer,
+                                     const asmr::SvgSilhouette& shape,
+                                     Uint8 red,Uint8 green,Uint8 blue) {
+    if(!shape.present())return nullptr;
+    SDL_Texture* result=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STATIC,shape.w,shape.h);
+    if(!result)return nullptr;
+    std::vector<uint32_t> pixels((size_t)shape.w*shape.h,0);
+    for(size_t j=0;j<pixels.size();++j) {
+        const uint32_t opacity=shape.alpha[j];
+        pixels[j]=(opacity<<24)|((uint32_t)blue<<16)|
+                  ((uint32_t)green<<8)|red;
+    }
+    SDL_UpdateTexture(result,nullptr,pixels.data(),
+                      shape.w*sizeof(uint32_t));
+    SDL_SetTextureBlendMode(result,SDL_BLENDMODE_BLEND);
+    return result;
+}
+static void drawHeadSvg(SDL_Renderer* renderer,SDL_Texture* texture,
+                        const asmr::SvgSilhouette& shape,
+                        asmr::Vec2 centre,double rotation) {
+    if(!texture||!shape.present())return;
+    const int w=screenX(shape.widthMetres);
+    const int h=screenX(shape.heightMetres);
+    const SDL_Rect destination{screenX(centre.x)-w/2,
+                               screenY(centre.y)-h/2,w,h};
+    SDL_RenderCopyEx(renderer,texture,nullptr,&destination,rotation,
+                     nullptr,SDL_FLIP_NONE);
+}
 static void circle(SDL_Renderer* r,int cx,int cy,int radius,bool filled){
     if(filled){
         for(int y=-radius;y<=radius;++y){
@@ -388,7 +417,11 @@ static void drawRoom(SDL_Renderer* renderer,
     const std::vector<asmr::PathPoint>& record,
     asmr::Vec2 artist,asmr::Vec2 physicalSource,
     float progress,bool processing,bool playing,bool mouseMode,
-    SDL_Texture* waves,bool showPressure){
+    SDL_Texture* waves,bool showPressure,
+    const asmr::SvgSilhouette& listenerShape,
+    const asmr::SvgSilhouette& speakerShape,
+    SDL_Texture* listenerTexture,SDL_Texture* speakerTexture,
+    bool channels){
     color(renderer,9,14,21);SDL_RenderClear(renderer);
     // Full-size texture with nearest physical pressure sampled and
     // colored on the GPU from the current REAL wave grid.
@@ -409,19 +442,32 @@ static void drawRoom(SDL_Renderer* renderer,
                 screenX(record[i].centre.x),
                 screenY(record[i].centre.y));
     color(renderer,39,117,189);
-    circle(renderer,screenX(asmr::kListenerX),
-        screenY(asmr::kListenerY),
-        screenX(asmr::kHeadRadius),!(showPressure&&waves));
+    if(listenerTexture)
+        drawHeadSvg(renderer,listenerTexture,listenerShape,
+                    asmr::listener(),0.0);
+    else
+        circle(renderer,screenX(asmr::kListenerX),
+            screenY(asmr::kListenerY),screenX(asmr::kHeadRadius),
+            !(showPressure&&waves));
     color(renderer,105,203,252);
-    circle(renderer,screenX(asmr::leftEar().x),
-           screenY(asmr::leftEar().y),6,true);
+    circle(renderer,screenX(asmr::leftEar(channels).x),
+           screenY(asmr::leftEar(channels).y),3,true);
     color(renderer,245,158,245);
-    circle(renderer,screenX(asmr::rightEar().x),
-           screenY(asmr::rightEar().y),6,true);
+    circle(renderer,screenX(asmr::rightEar(channels).x),
+           screenY(asmr::rightEar(channels).y),3,true);
     // Artist head always points mouth toward the centre of the listener.
     color(renderer,236,141,107);
-    circle(renderer,screenX(artist.x),screenY(artist.y),
-        screenX(asmr::kArtistRadius),!(showPressure&&waves));
+    if(speakerTexture) {
+        // SVG mouth notch faces DOWN on the authored image. Rotate
+        // it precisely to the fixed listener; the source coordinates
+        // are the matching local -Y recess in world centimetres.
+        const asmr::Vec2 f=asmr::faceListener(artist);
+        const double degrees=std::atan2(-f.x,-f.y)*180.0/echo::kPi;
+        drawHeadSvg(renderer,speakerTexture,speakerShape,
+                    artist,degrees);
+    }else
+        circle(renderer,screenX(artist.x),screenY(artist.y),
+            screenX(asmr::kArtistRadius),!(showPressure&&waves));
     // The yellow spot is the *actual interpolated CUDA source*,
     // not a decorative mouth or artificial stereo panning.
     const asmr::Vec2 m=asmr::mouth(physicalSource);
@@ -431,6 +477,13 @@ static void drawRoom(SDL_Renderer* renderer,
     color(renderer,58,110,132);
     circle(renderer,screenX(asmr::kListenerX),
            screenY(asmr::kListenerY),screenX(0.30f),false);
+    // 25cm physical ruler: 100 pixels in a 2m wide 800px room.
+    color(renderer,186,184,160);
+    SDL_RenderDrawLine(renderer,24,kWindow-20,
+                       24+screenX(0.25f),kWindow-20);
+    SDL_RenderDrawLine(renderer,24,kWindow-25,24,kWindow-15);
+    SDL_RenderDrawLine(renderer,24+screenX(0.25f),kWindow-25,
+                       24+screenX(0.25f),kWindow-15);
     if(processing){
         color(renderer,88,91,106);
         SDL_Rect bg{80,kWindow-43,kWindow-160,14};
