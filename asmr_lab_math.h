@@ -268,9 +268,11 @@ inline float physicalScaleDxFactor(float scale){
     // Cell updates per real second ∝ area/(S*normalized_dx^3).
     // Previous small-room work: 1/(1.01^3) of the 1x work.
     // New small-room target: kSmallRoomWorkFraction of that.
-    // Maintain the extra 1% guard against mic raster aliasing.
+    // An additional ~1% spacing guard keeps the authored V2 pinna
+    // microphone sample fully in air at 0.1x / Z=1.25, without
+    // changing any head artwork or increasing the work budget.
     return scale<1.0f?
-        1.01f*std::cbrt(1.0f/(scale*kSmallRoomWorkFraction)):
+        1.0201f*std::cbrt(1.0f/(scale*kSmallRoomWorkFraction)):
         1.0f;
 }
 inline float physicalScaleDesignDx(float zoomDx,float scale){
