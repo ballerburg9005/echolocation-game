@@ -738,10 +738,21 @@ int main(){
     std::vector<float> fullAudio,liveAudio;
     bool waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
                                     liveCutoff);
+    // Explicit D-key diagnostic: a ONE-SECOND CHIRP injected through
+    // exactly the same moving-mouth CUDA FDTD solver as the MP3.
+    // It never substitutes for ~/test.mp3 unless the user toggles it.
+    std::vector<float> diagnosticAudio(asmr::kOutputRate);
+    for(size_t i=0;i<diagnosticAudio.size();++i) {
+        const double t=(double)i/asmr::kOutputRate;
+        const double env=std::sin(echo::kPi*t);
+        const double phase=2.0*echo::kPi*(320.0*t+1200.0*t*t);
+        diagnosticAudio[i]=(float)(0.18*env*env*std::sin(phase));
+    }
+    bool diagnosticTone=false;
 
     auto live=std::make_unique<FdtdRoom>(
         qualityDx[qualityIndex],*head,channels,speakerShape);
-    live->uploadAudio(liveAudio);
+    live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
     std::unique_ptr<FdtdRoom> highQuality;
     echo::StereoLinearResampler liveResampler(live->dt(),
                                                 asmr::kOutputRate);
@@ -788,7 +799,7 @@ int main(){
     std::printf("[CONTROLS] F5 = render last 5s, F6 = 10s, F7 = 20s "
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
-       "L reload ~/test.mp3, T toggle live, "
+       "L reload ~/test.mp3, D FDTD test chirp, T toggle live, "
        "H cycle V2 pinna/channel/simple, Q 3.5/3/2.5/5/8/10mm, "
        "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
@@ -831,6 +842,18 @@ int main(){
                 0.025f,pressureExposure/1.4f);
             if(key==SDLK_0)pressureExposure=std::min(
                 500.0f,pressureExposure*1.4f);
+            if(key==SDLK_d && mode==Mode::Preview) {
+                diagnosticTone=!diagnosticTone;
+                live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
+                live->reset();previewStep=0;sourceCursor=artist;
+                liveResampler=echo::StereoLinearResampler(
+                    live->dt(),asmr::kOutputRate);
+                SDL_ClearQueuedAudio(device);
+                std::printf("[FDTD PROBE] %s: 320-2720Hz chirp goes "
+                    "through the REAL moving-source FDTD path, "
+                    "even if ~/test.mp3 is missing.\\n",
+                    diagnosticTone?"ON":"OFF");
+            }
             if(key==SDLK_t) {
                 previewEnabled=!previewEnabled;
                 SDL_ClearQueuedAudio(device);
@@ -861,7 +884,7 @@ int main(){
                     highQuality.reset();live.reset();
                     live=std::make_unique<FdtdRoom>(
                         qualityDx[qualityIndex],*head,channels,speakerShape);
-                    live->uploadAudio(liveAudio);
+                    live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
                         live->dt(),asmr::kOutputRate);
@@ -896,7 +919,7 @@ int main(){
                     live.reset();
                     live=std::make_unique<FdtdRoom>(
                         qualityDx[qualityIndex],*head,channels,speakerShape);
-                    live->uploadAudio(liveAudio);
+                    live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
                         live->dt(),asmr::kOutputRate);
@@ -940,7 +963,7 @@ int main(){
         if(reload){
             waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
                                        liveCutoff);
-            live->uploadAudio(liveAudio);
+            live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
             if(highQuality)highQuality->uploadAudio(fullAudio);
             if(mode==Mode::Preview){
                 live->reset();previewStep=0;
@@ -1017,7 +1040,7 @@ int main(){
                   record[1].t<recordingClock-60.0)
                 record.erase(record.begin());
 
-            if(previewEnabled&&waveLoaded){
+            if(previewEnabled&&(waveLoaded||diagnosticTone)){
                 const int queuedFrames=(int)(
                     SDL_GetQueuedAudioSize(device)/(2*sizeof(float)));
                 if(previewStep>0 && queuedFrames<24)
@@ -1122,7 +1145,7 @@ int main(){
             std::printf("[ASMR FDTD] LIVE dx=%.1fmm cells=%dx%d "
                         "pressure steps=%llu queue=%.1fms "
                         "near-empty queues=%llu safety-clipped samples=%llu "
-                        "earPeak=%.5g MP3=%s preview=%s "
+                        "earPeak=%.5g MP3=%s preview=%s probe=%s "
                         "(V toggles REAL CUDA wave field)\n",
                 live->dx()*1000,
                 asmr::cells(live->dx()),asmr::cells(live->dx()),
@@ -1132,7 +1155,8 @@ int main(){
                 (unsigned long long)shortQueueWarnings,
                 (unsigned long long)clippedPreview,
                 previewSignalPeak,waveLoaded?"loaded":"missing",
-                previewEnabled?"on":"off");
+                previewEnabled?"on":"off",
+                diagnosticTone?"chirp":"off");
             // Explicit metre-scale audit: this is a 2m room, not a
             // 50cm world with exaggerated mouse motion. The FDTD CFL
             // timestep and travel times below derive from that scale.
@@ -1193,7 +1217,7 @@ int main(){
             "ASMR FDTD | %s | MP3:%s | path %.1fs | REPLAY %.2f/%.0fs | %.0fHz / %.0fHz | P loop SPACE stop",
             mode==Mode::Render?"HIGH-RES RENDER":mode==Mode::Playback?
                 "VISIBLE LOOP":"LIVE RECORDING",
-            waveLoaded?"READY":"MISSING",
+            diagnosticTone?"FDTD TEST":waveLoaded?"READY":"MISSING",
             record.empty()?0:record.back().t-record.front().t,
             playbackPhase,(double)lastWindow,
             liveCutoff,asmr::kOfflinePassband);
