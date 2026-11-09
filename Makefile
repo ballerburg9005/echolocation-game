@@ -17,7 +17,7 @@ asmr: build/asmr_room
 
 build/asmr_room: asmr_room.cu asmr_lab_math.h asmr_mp3_audio.h asmr_svg_geometry.h acoustics.h source_model.h
 	mkdir -p build
-	$(NVCC) $(NVCCFLAGS) $(shell pkg-config --cflags librsvg-2.0 cairo) -o $@ asmr_room.cu -lSDL2 -lmpg123 $(shell pkg-config --libs librsvg-2.0 cairo) -lpthread
+	$(NVCC) $(NVCCFLAGS) $(filter-out -pthread,$(shell pkg-config --cflags librsvg-2.0 cairo)) -o $@ asmr_room.cu -lSDL2 -lmpg123 $(shell pkg-config --libs librsvg-2.0 cairo) -lpthread
 
 test:
 	@set -e; for src in tests/test_*.cpp; do \
