@@ -22,7 +22,7 @@ constexpr float kOfflineDx=0.0025f;// ~13.7kHz / 10 cells; 8-12kHz experiment
 constexpr float kLivePassband=2800.0f;
 constexpr float kOfflinePassband=12000.0f;
 constexpr int kOutputRate=48000;
-constexpr int kGraphBatch=128;
+constexpr int kGraphBatch=126; // multiple of 3 for GPU field ring to repeat in a CUDA Graph
 constexpr float kOutsideReflection=0.32f;
 constexpr float kHeadReflection=0.74f;
 
