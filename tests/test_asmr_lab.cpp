@@ -118,6 +118,35 @@ int main(){
         asmr::kRoomHeightMetres,10.0f)-35.55556f)<0.0001f);
     assert(std::fabs(asmr::physicalMetres(
         asmr::kRoomMetres,10.0f)-20.0f)<1e-6f);
+    // N diagnostic excites the SAME FDTD physics from four fixed,
+    // distinct, air-borne positions; it is not noise mixed at the ears.
+    // All four positions must stay well outside the listener and walls
+    // for all five Z stages and all scaled physical worlds.
+    static_assert(asmr::kAmbientSourceCount==4);
+    assert(asmr::kAmbientNoiseSeconds>=5);
+    assert(asmr::kAmbientInjection>0.0f);
+    assert(asmr::kAmbientInjection<0.25f);
+    for(size_t z=0;z<asmr::kZoomSteps.size();++z){
+        const auto view=asmr::roomView(
+            asmr::kZoomSteps[z],
+            z+1==asmr::kZoomSteps.size());
+        std::array<asmr::Vec2,4> sources{};
+        for(int i=0;i<asmr::kAmbientSourceCount;++i){
+            sources[(size_t)i]=asmr::ambientSource(view,i);
+            const auto p=sources[(size_t)i];
+            assert(p.x>view.originX+0.1f*view.width);
+            assert(p.x<view.originX+0.9f*view.width);
+            assert(p.y>view.originY+0.1f*view.height);
+            assert(p.y<view.originY+0.9f*view.height);
+            assert(asmr::length(asmr::sub(p,asmr::listener()))>
+                   asmr::kMinimumSeparation+0.02f);
+        }
+        for(int i=0;i<4;++i)
+            for(int j=i+1;j<4;++j)
+                assert(asmr::length(
+                    asmr::sub(sources[(size_t)i],sources[(size_t)j]))>
+                    0.15f);
+    }
     // Ports are physically different from reflecting wall material.
     assert(asmr::kOutsideReflection>0.8f);
     assert(asmr::kPortReflection<0.04f);
