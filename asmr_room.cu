@@ -1091,11 +1091,17 @@ int main(){
                 pressurePixels.data(),kPressureImage*sizeof(uint32_t));
         }
         const asmr::Vec2 visibleArtist=mode==Mode::Render?
-            job.sourceCursor:artist;
+            job.sourceCursor:mode==Mode::Playback?
+            asmr::interpolate(lastPlaybackPath.points,
+                              lastPlaybackPath.start+playbackPhase):artist;
         const asmr::Vec2 visibleSource=mode==Mode::Render?
-            job.sourceCursor:sourceCursor;
-        drawRoom(renderer,record,visibleArtist,visibleSource,progress,
-                 mode==Mode::Render,mode==Mode::Playback,
+            job.sourceCursor:mode==Mode::Playback?
+            visibleArtist:sourceCursor;
+        const auto& visibleTrail=mode==Mode::Playback?
+            lastPlaybackPath.points:record;
+        drawRoom(renderer,visibleTrail,visibleArtist,visibleSource,
+                 progress,mode==Mode::Render,mode==Mode::Playback,
+                 lastWindow>0?(float)(playbackPhase/lastWindow):0.0f,
                  mouseMode,waveTexture,showPressure,
                  *head,speakerShape,
                  headIndex==0?pinnaV2Sprite:
@@ -1103,11 +1109,12 @@ int main(){
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR CUDA FDTD | %s | MP3:%s | path %.1fs | live %.0fHz / offline %.0fHz | Q quality | V pressure",
-            mode==Mode::Render?"RENDERING":mode==Mode::Playback?
-                "PLAYING FINISHED WAV":"RECORDING",
+            "ASMR FDTD | %s | MP3:%s | path %.1fs | REPLAY %.2f/%.0fs | %.0fHz / %.0fHz | P loop SPACE stop",
+            mode==Mode::Render?"HIGH-RES RENDER":mode==Mode::Playback?
+                "VISIBLE LOOP":"LIVE RECORDING",
             waveLoaded?"READY":"MISSING",
             record.empty()?0:record.back().t-record.front().t,
+            playbackPhase,(double)lastWindow,
             liveCutoff,asmr::kOfflinePassband);
         SDL_SetWindowTitle(window,title);
         SDL_Delay(6);
