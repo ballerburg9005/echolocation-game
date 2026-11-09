@@ -503,6 +503,25 @@ int main(){
     }
     const auto liveLow=asmr::lowpass(low,asmr::kLivePassband,rate);
     const auto liveHigh=asmr::lowpass(high,asmr::kLivePassband,rate);
+    // Long-MP3 source cache uses an O(N) two-biquad lowpass,
+    // not a full-20-minute 81-tap convolution. Confirm it passes
+    // bass, rejects out-of-band tones, and stays numerically finite.
+    const auto fastLow=asmr::lowpassSourceWindow(low,1000.0f,rate);
+    const auto fastHigh=asmr::lowpassSourceWindow(high,1000.0f,rate);
+    const auto steadyRms=[](const std::vector<float>& values){
+        double power=0.0;
+        for(size_t i=4800;i<values.size();++i)
+            power+=(double)values[i]*values[i];
+        return std::sqrt(power/(values.size()-4800));
+    };
+    assert(steadyRms(fastLow)>0.60);
+    assert(steadyRms(fastHigh)<0.025);
+    for(float value:fastHigh)assert(std::isfinite(value));
+    std::vector<float> twentySeconds(960000,0.5f);
+    const auto fastDC=asmr::lowpassSourceWindow(
+        std::move(twentySeconds),350.0f,rate);
+    assert(fastDC.size()==960000);
+    assert(std::fabs(fastDC.back()-0.5f)<0.001f);
     const auto offlineHigh=asmr::lowpass(high,asmr::kOfflinePassband,rate);
     auto rms=[](const std::vector<float>& data){
         double sum=0;
