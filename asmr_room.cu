@@ -3,8 +3,10 @@
 // Listener head is a REAL stationary 2D FDTD obstruction with two ears.
 // Artist is a collision-safe moving visual head; its mouth is a real
 // moving FDTD pressure emitter facing the listener on every path sample.
-// Live 9:16: 5mm, 6kHz, 400x711 ~= original square preview cell budget.
-// Offline: 2mm, 16kHz, 1000x1778 ~= original square offline cell budget;
+// Live true-zoom presets target 85%->68% of the OLD 400x711@5mm
+// acoustic cell-update budget; default 1x dx is now ~5.28mm.
+// Offline starts near 2.11mm with the same physical zoom and a finer
+// independent mesh; neither simulates an unchanged square-room grid.
 // both paths resample physically timed FDTD samples to 48kHz stereo
 // WAV before playback. The GPU cannot change playback speed or pitch.
 #include "asmr_lab_math.h"
@@ -249,7 +251,7 @@ public:
                     "dx=%.2fmm, dt=%.2fus, room=%.1fx%.1fm.\n",
                     head.widthMetres*1000,head.heightMetres*1000,
                     nx_,ny_,halfMicSeparation_*2000,dx_*1000,
-                    dt_*1e6,asmr::kRoomMetres,asmr::kRoomHeightMetres);
+                    dt_*1e6,view_.width,view_.height);
         const size_t size=mask.size()*sizeof(float);
         for(auto& p:fields_) {LAB_CUDA(cudaMalloc(&p,size));
                               LAB_CUDA(cudaMemset(p,0,size));}
@@ -1013,7 +1015,7 @@ int main(int argc,char** argv){
             std::fprintf(stderr,
                 "[%s] REFUSED head=%s, Z=%.2fx%s, Q=%d: "
                 "mic cavity solid/disconnected at this dx. "
-                "Keeping current H/Z/Q unchanged.\\n",
+                "Keeping current H/Z/Q unchanged.\n",
                 changed,h==0?"V2":h==1?"CHANNEL":"SIMPLE",
                 zoomSteps[(size_t)z],z==4?" SQUARE":"",q);
             return false;
@@ -1064,7 +1066,7 @@ int main(int argc,char** argv){
         std::fprintf(stderr,
             "[%s] ACTIVE head=%s Z=%.2fx%s Q=%d dx=%.3fmm "
             "room=%.3fx%.3fm cells=%dx%d expected FDTD "
-            "cell-work=%.1f%% of old 5mm full room.\\n",
+            "cell-work=%.1f%% of old 5mm full room.\n",
             changed,h==0?"V2":h==1?"CHANNEL":"SIMPLE",
             zoomValue(),squareMode()?" SQUARE":"",qualityIndex,
             live->dx()*1000,gView.width,gView.height,
@@ -1133,7 +1135,7 @@ int main(int argc,char** argv){
                 SDL_ClearQueuedAudio(device);
                 std::printf("[FDTD PROBE] %s: 320-2720Hz chirp goes "
                     "through the REAL moving-source FDTD path, "
-                    "even if ~/test.mp3 is missing.\\n",
+                    "even if ~/test.mp3 is missing.\n",
                     diagnosticTone?"ON":"OFF");
             }
             if(key==SDLK_t) {
@@ -1161,7 +1163,7 @@ int main(int argc,char** argv){
                     }
                 }
                 if(!applied)std::fprintf(stderr,
-                    "[Q] No compatible quality preset for this H/Z.\\n");
+                    "[Q] No compatible quality preset for this H/Z.\n");
             }
             if(key==SDLK_z && mode==Mode::Preview){
                 // Zoom never changes the selected head. Walk past
@@ -1176,7 +1178,7 @@ int main(int argc,char** argv){
                 }
                 if(!applied)std::fprintf(stderr,
                     "[Z] No compatible physical zoom for this head/Q; "
-                    "head and room left unchanged.\\n");
+                    "head and room left unchanged.\n");
             }
             if(key==SDLK_r){
                 record.clear();recordingClock=0;
