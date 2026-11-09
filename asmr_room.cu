@@ -1086,9 +1086,8 @@ int main(int argc,char** argv){
     auto activeView=[&](){
         return asmr::roomView(zoomValue(),squareMode());};
     auto liveDx=[&](){
-        return asmr::physicalScaleDesignDx(
-            asmr::zoomDx(qualityDx[qualityIndex],zoomIndex),
-            physicsScaleValue());
+        return asmr::budgetedLiveDx(
+            qualityDx[qualityIndex],zoomIndex,physicsScaleValue());
     };
     auto liveBand=[&](){return std::min(
         std::min(19000.0f,
@@ -1200,8 +1199,8 @@ int main(int argc,char** argv){
                           h==1?listenerChannels:listenerSimple;
         const auto view=asmr::roomView(
             zoomSteps[(size_t)z],z==(int)zoomSteps.size()-1);
-        const float dx=asmr::physicalScaleDesignDx(
-            asmr::zoomDx(qualityDx[(size_t)q],z),physicalScale);
+        const float dx=asmr::budgetedLiveDx(
+            qualityDx[(size_t)q],z,physicalScale);
         const int nx=(int)std::lround(view.width/dx);
         const int ny=(int)std::lround(view.height/dx);
         const auto mask=asmr::svgRoomMask(nx,ny,dx,shape,
@@ -1235,8 +1234,8 @@ int main(int argc,char** argv){
         selectorNoticeUntil=0;
         const auto* newHead=h==0?&listenerV2:
                              h==1?&listenerChannels:&listenerSimple;
-        const float dx=asmr::physicalScaleDesignDx(
-            asmr::zoomDx(qualityDx[(size_t)q],z),physicalScale);
+        const float dx=asmr::budgetedLiveDx(
+            qualityDx[(size_t)q],z,physicalScale);
         const float nextCutoff=std::min(
             std::min(19000.0f,
                 qualityBand[(size_t)q]*qualityDx[(size_t)q]/
