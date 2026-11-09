@@ -826,6 +826,11 @@ static void printUsage(const char* executable){
         "                1.00/1.25/1.55/2.00/SQUARE 0.75m\n"
         "                last view is a 0.75m square, still orbitable\n"
         "                (~85% -> 27.2% of original full-room cell-work)\n"
+        "  F12           Cycle distance falloff: raw, 1,2,3,4,6,8,\n"
+        "                10,12,16,20x extra 2D-to-3D pressure loss\n"
+        "  Shift+F12     Previous distance-falloff strength\n"
+        "                0x = original 2D waves, 1x = ~3D (1/r)\n"
+        "                20x is exaggerated, not physically realistic\n"
         "  V             Toggle pressure field visualization\n"
         "  B             Toggle translucent original SVG on acoustic mask\n"
         "  9, 0          Decrease / increase pressure exposure\n"
@@ -1147,6 +1152,7 @@ int main(int argc,char** argv){
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload selected MP3, D FDTD test chirp, T toggle live, "
        "H V2/channel/simple, Q quality, Z 1/1.25/1.55/2/square, "
+       "F12 distance 0x-20x (Shift reverses), "
        "V pressure waves, B authored mask guide, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
@@ -1190,6 +1196,89 @@ int main(int argc,char** argv){
             if(key==SDLK_F6||key==SDLK_1)captureSeconds=10;
             if(key==SDLK_F7||key==SDLK_2)captureSeconds=20;
             if(key==SDLK_l)reload=true;
+            if(key==SDLK_F12){
+                const int oldStrength=falloffStrength();
+                const bool reverse=(event.key.keysym.mod&KMOD_SHIFT)!=0;
+                const int count=(int)asmr::kDistanceFalloffSteps.size();
+                falloffIndex=(falloffIndex+count+(reverse?-1:1))%count;
+                const int strength=falloffStrength();
+                std::fprintf(stderr,
+                    "[F12 DISTANCE] %dx  (old %dx). 0x=raw 2D FDTD, "
+                    "1x=approx 3D amplitude 1/r, "
+                    "20x=exaggerated. Reference %.0fcm.\n",
+                    strength,oldStrength,
+                    asmr::kFalloffReferenceMetres*100.0f);
+                if(mode==Mode::Playback && !lastPlaybackBase.empty()){
+                    // Reapply instantly to the *existing* offline FDTD
+                    // recording, without rerendering a single CUDA step
+                    // or restarting the WAV timeline at t=0.
+                    const size_t frames=lastPlaybackBase.size()/2;
+                    const size_t atFrame=std::min(frames-1,
+                        (size_t)std::max(0.0,std::floor(
+                            playbackPhase*asmr::kOutputRate)));
+                    auto updated=distanceShapedClip(lastPlaybackBase,
+                        lastPlaybackPhysicalPath,channels,head->pinnaV2,
+                        strength);
+                    std::vector<float> tail(
+                        updated.begin()+2*atFrame,updated.end());
+                    // An instantaneous change of exponent otherwise
+                    // clicks: crossfade 20ms from the previous PCM.
+                    const size_t fade=std::min(tail.size()/2,
+                        (size_t)asmr::kOutputRate/50);
+                    for(size_t n=0;n<fade;++n){
+                        const float fraction=(float)n/(float)fade;
+                        for(int ear=0;ear<2;++ear){
+                            tail[2*n+ear]=
+                                (1.0f-fraction)*
+                                    lastPlayback[2*(atFrame+n)+ear]+
+                                fraction*tail[2*n+ear];
+                        }
+                    }
+                    SDL_PauseAudioDevice(device,1);
+                    SDL_ClearQueuedAudio(device);
+                    lastPlayback=std::move(updated);
+                    playbackEnqueuedCycles=1;
+                    if(SDL_QueueAudio(device,tail.data(),
+                        (Uint32)(tail.size()*sizeof(float)))!=0)
+                        std::fprintf(stderr,
+                            "[F12 DISTANCE] SDL audio queue: %s\n",
+                            SDL_GetError());
+                    if(tail.size()/2<
+                       (size_t)asmr::kOutputRate/4){
+                        if(SDL_QueueAudio(device,lastPlayback.data(),
+                            (Uint32)(lastPlayback.size()*sizeof(float)))==0)
+                            ++playbackEnqueuedCycles;
+                    }
+                    playbackPhase=(double)atFrame/
+                                      asmr::kOutputRate;
+                    displayedPlaybackWave=-1;
+                    SDL_PauseAudioDevice(device,0);
+                    char wavPath[80];
+                    std::snprintf(wavPath,sizeof(wavPath),
+                        "asmr_last_%02ds.wav",lastWindow);
+                    if(!writeWav(wavPath,lastPlayback))
+                        std::fprintf(stderr,
+                            "[F12 DISTANCE] Could not update %s\n",
+                            wavPath);
+                }else if(mode==Mode::Preview &&
+                         previewEnabled&&(waveLoaded||diagnosticTone)){
+                    // Change gain immediately, not after the 160ms of
+                    // audio queued under the previous F12 setting.
+                    // Do NOT reset/rewind the live wavefield.
+                    SDL_PauseAudioDevice(device,1);
+                    SDL_ClearQueuedAudio(device);
+                    previewFadeFrames=0;
+                    primeAudioAfterSwitch=true;
+                }
+                char notice[128];
+                std::snprintf(notice,sizeof(notice),
+                    "F12 DISTANCE %dx | %s",
+                    strength,strength==0?"RAW 2D":
+                        strength==1?"~3D 1/r PRESSURE":
+                                     "EXAGGERATED FALL-OFF");
+                selectorNotice=notice;
+                selectorNoticeUntil=SDL_GetTicks64()+2300;
+            }
             if(key==SDLK_v)showPressure=!showPressure;
             if(key==SDLK_b)showSvgGuide=!showSvgGuide;
             if(key==SDLK_9)pressureExposure=std::max(
@@ -1654,7 +1743,7 @@ int main(int argc,char** argv){
                  speakerSprite,channels);
         char title[255];
         std::snprintf(title,sizeof(title),
-            "ASMR FDTD | %s | Z %.2fx%s Q%d dx %.2fmm work %.0f%% | head:%s | range %.2fm | lag %.2fm | MP3:%s | path %.1fs | replay %.2f/%.0fs",
+            "ASMR FDTD | %s | Z %.2fx%s Q%d dx %.2fmm work %.0f%% | head:%s | F12 %dx | range %.2fm | lag %.2fm | MP3:%s | path %.1fs | replay %.2f/%.0fs",
             mode==Mode::Render?"HIGH-RES RENDER":mode==Mode::Playback?
                 "VISIBLE LOOP":"LIVE RECORDING",
             gView.zoom,
@@ -1664,6 +1753,7 @@ int main(int argc,char** argv){
                 live->dx()*1000,
             100.0f*asmr::relativeCellWork(live->dx(),live->view()),
             headIndex==0?"V2":headIndex==1?"CHANNEL":"SIMPLE",
+            falloffStrength(),
             asmr::length(asmr::sub(asmr::mouth(visibleSource),
                                    asmr::listener())),
             asmr::length(asmr::sub(artist,sourceCursor)),
