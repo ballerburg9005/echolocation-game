@@ -293,6 +293,18 @@ int main(){
                 const bool connected=asmr::validateMicrophones(
                     mask,nx,ny,dx,h!=2,shape,
                     view.originX,view.originY);
+                // All ambient emitters must be in actual air, never
+                // blocked by a wall, port or a listener SVG material.
+                for(int source=0;source<asmr::kAmbientSourceCount;
+                    ++source){
+                    const auto point=asmr::ambientSource(view,source);
+                    const int ix=(int)std::floor(
+                        (point.x-view.originX)/dx);
+                    const int iy=(int)std::floor(
+                        (point.y-view.originY)/dx);
+                    assert(ix>2&&ix<nx-2&&iy>2&&iy<ny-2);
+                    assert(mask[(size_t)iy*nx+ix]==0.0f);
+                }
                 if(!connected){
                     ++shrinkConfigurationsFailing;
                     std::fprintf(stderr,
