@@ -454,15 +454,30 @@ static std::array<float4,asmr::kGraphBatch> mouthBatch(
 }
 
 static asmr::RoomView gView=asmr::roomView();
+// Draw the real physical aspect of the FDTD domain. A square acoustic
+// room gets a centered 540x540 viewport, NOT stretched over 540x960.
+static SDL_Rect roomViewport(){
+    const float ratio=gView.width/gView.height;
+    constexpr float screenRatio=(float)kWindowW/kWindowH;
+    if(ratio>screenRatio+0.0001f){
+        const int h=(int)std::lround(kWindowW*gView.height/gView.width);
+        return {0,(kWindowH-h)/2,kWindowW,h};
+    }
+    const int w=(int)std::lround(kWindowH*ratio);
+    return {(kWindowW-w)/2,0,w,kWindowH};
+}
 static int pixelsForMetres(float distance){
-    return (int)std::lround(distance/gView.width*kWindowW);
+    const SDL_Rect v=roomViewport();
+    return (int)std::lround(distance/gView.width*v.w);
 }
 static int screenX(float x){
-    return (int)std::lround((x-gView.originX)/gView.width*kWindowW);
+    const SDL_Rect v=roomViewport();
+    return v.x+(int)std::lround((x-gView.originX)/gView.width*v.w);
 }
 static int screenY(float y){
-    return (int)std::lround((gView.originY+gView.height-y)/
-                             gView.height*kWindowH);
+    const SDL_Rect v=roomViewport();
+    return v.y+(int)std::lround((gView.originY+gView.height-y)/
+                                gView.height*v.h);
 }
 static void color(SDL_Renderer* r,Uint8 red,Uint8 green,Uint8 blue){
     SDL_SetRenderDrawColor(r,red,green,blue,255);
@@ -525,29 +540,35 @@ static void drawRoom(SDL_Renderer* renderer,
     SDL_Texture* listenerTexture,SDL_Texture* speakerTexture,
     bool channels){
     color(renderer,9,14,21);SDL_RenderClear(renderer);
-    // Full-size texture with nearest physical pressure sampled and
-    // colored on the GPU from the current REAL wave grid.
-    if(showPressure && waves)SDL_RenderCopy(renderer,waves,nullptr,nullptr);
-    color(renderer,39,78,113);
-    for(int thickness=0;thickness<7;++thickness){
-        const SDL_Rect r{thickness,thickness,
-            kWindowW-2*thickness,kWindowH-2*thickness};
-        SDL_RenderDrawRect(renderer,&r);
-    }
-    // Bright teal slits are locally matched absorbing exits (door at
-    // left, window at right, high transom on far wall). The simulation
-    // uses exactly the same normalized positions in roomMask().
+    const SDL_Rect viewport=roomViewport();
+    // GPU pressure and the SVG/mic/cursor share ONE physical viewport.
+    if(showPressure && waves)
+        SDL_RenderCopy(renderer,waves,nullptr,&viewport);
+    // Model *one* physical reflecting perimeter, not seven nested
+    // outlines that look like a crowd of extra walls when zoomed.
+    const int wallPx=std::max(2,pixelsForMetres(0.012f));
+    color(renderer,98,111,135);
+    SDL_Rect walls[4]{
+       {viewport.x,viewport.y,wallPx,viewport.h},
+       {viewport.x+viewport.w-wallPx,viewport.y,wallPx,viewport.h},
+       {viewport.x,viewport.y,viewport.w,wallPx},
+       {viewport.x,viewport.y+viewport.h-wallPx,viewport.w,wallPx}
+    };
+    for(const auto& rect:walls)SDL_RenderFillRect(renderer,&rect);
+    // Same exact normalized wall segments as the CUDA material mask;
+    // fill across the wall thickness at every portrait/square zoom.
     color(renderer,40,174,145);
-    for(int thickness=0;thickness<7;++thickness){
-        SDL_RenderDrawLine(renderer,thickness,
-            (int)(0.30f*kWindowH),(int)thickness,
-            (int)(0.38f*kWindowH));
-        SDL_RenderDrawLine(renderer,kWindowW-1-thickness,
-            (int)(0.71f*kWindowH),kWindowW-1-thickness,
-            (int)(0.80f*kWindowH));
-        SDL_RenderDrawLine(renderer,(int)(0.23f*kWindowW),thickness,
-            (int)(0.34f*kWindowW),thickness);
-    }
+    SDL_Rect ports[3]{
+       {viewport.x,
+        viewport.y+(int)std::lround(0.30f*viewport.h),wallPx,
+        (int)std::lround(0.08f*viewport.h)},
+       {viewport.x+viewport.w-wallPx,
+        viewport.y+(int)std::lround(0.71f*viewport.h),wallPx,
+        (int)std::lround(0.09f*viewport.h)},
+       {viewport.x+(int)std::lround(0.23f*viewport.w),viewport.y,
+        (int)std::lround(0.11f*viewport.w),wallPx}
+    };
+    for(const auto& port:ports)SDL_RenderFillRect(renderer,&port);
     // The movement trail is the path that will be rendered afterwards.
     color(renderer,66,85,89);
     for(size_t i=1;i<record.size();++i)
@@ -1255,10 +1276,14 @@ int main(int argc,char** argv){
             if(mouseMode){
                 int x=0,y=0;
                 SDL_GetMouseState(&x,&y);
+                const SDL_Rect viewport=roomViewport();
+                const float u=std::clamp(
+                    ((float)(x-viewport.x)+0.5f)/viewport.w,0.0f,1.0f);
+                const float v=std::clamp(
+                    ((float)(y-viewport.y)+0.5f)/viewport.h,0.0f,1.0f);
                 const asmr::Vec2 wanted{
-                    gView.originX+gView.width*((float)x+0.5f)/kWindowW,
-                    gView.originY+gView.height*
-                        (1.0f-((float)y+0.5f)/kWindowH)};
+                    gView.originX+gView.width*u,
+                    gView.originY+gView.height*(1.0f-v)};
                 artist=asmr::moveArtistInView(artist,wanted,gView);
             }else{
                 const Uint8* keys=SDL_GetKeyboardState(nullptr);
