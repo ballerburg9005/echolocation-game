@@ -319,58 +319,96 @@ pressure amplitude. This difference can make a physically correct
 2D FDTD experiment sound unusually near even when its measured
 time-of-flight, head scattering, and left/right cues are consistent.
 
-### F11 — physical-scale experiment, not screen zoom
+### F11 — physical-scale experiment in both directions
 
-Press **F11** to cycle the real physical metre scale **1× → 2× →
-5× → 10× → 1×**. **Shift+F11** moves backward. This is independent
-of H (listener model), Q (grid quality), Z (cropped acoustic room) and
-F12 (additional distance attenuation). The window title and
-five-second **[METRES]** log show the actual F11 physical dimensions,
-head/microphone range, CFL timestep and resolvable audio bandwidth.
+**F11** cycles **0.1× → 0.2× → 0.5× → 1× → 2× → 5× → 10× →
+0.1×**, with **1×** as the default. **Shift+F11** cycles
+backward, so **one Shift+F11 from 1× selects 0.5×**. The acoustic
+world genuinely shrinks or grows in metres; this is not a display
+zoom. H, Q, Z and F12 remain independent.
 
-Unlike Z, **F11 does not crop, magnify, or resample the drawing on
-screen**. It interprets **every** design-world metre as S real
-metres. The authored SVG masks, speaker geometry, head/microphone
-separation, wall thickness, door/window openings, mouse movement
-and collision clearance all scale uniformly. For example:
+The authored head/speaker SVGs, microphones, mouth, port openings,
+walls, movement and collision geometry scale *together* in real
+metres. They occupy the same screen proportions, but the FDTD
+CFL timestep is calculated with **physical dx**, not the old
+2-metre world units. The window title and **[METRES]** logs show
+the room size, physical grid spacing, audible cutoff and time delays.
 
-| F11 scale | Full-size (Z=1) room | V2 SVG physical size | Default live physical dx |
-|---|---|---|---|
-| 1× | 2.00 × 3.56 m | 185 × 137 mm | ~5.28 mm |
-| 2× | 4.00 × 7.11 m | 371 × 274 mm | ~10.56 mm |
-| 5× | 10.0 × 17.78 m | 927 × 684 mm | ~26.4 mm |
-| 10× | **20.0 × 35.56 m** | **1.85 × 1.37 m** | **~52.8 mm** |
+| F11 | Full-room (Z=1) physical size | Approx. default live dx |
+|---|---|---|
+| 0.1× | **0.20 × 0.36m** | ~1.15mm |
+| 0.2× | **0.40 × 0.71m** | ~1.82mm |
+| 0.5× | **1.00 × 1.78m** | ~3.36mm |
+| 1× | 2.00 × 3.56m | ~5.28mm |
+| 2× | 4.00 × 7.11m | ~10.56mm |
+| 5× | 10.00 × 17.78m | ~26.4mm |
+| 10× | 20.00 × 35.56m | ~52.8mm |
 
-A sound crossing the same screen-space distance now takes S times
-longer in **real seconds**, because the CUDA graph uses
-`dt = (design_dx × S) / (343m/s × sqrt(2))`.
-The grid dimensions and number of cells per CUDA step stay fixed,
-so the **number of steps needed per simulated second decreases
-approximately 1/S** instead of requiring S² more GPU cells.
-The physical wall and window reflection coefficients remain
-unchanged: wall R≈0.82 and absorbing opening R≈0.035.
+For F11≥1×, the normalized GPU grid remains the same size at a
+given Z/Q, so longer physical distances mean proportionally
+longer travel times, lower spatial audio bandwidth, and fewer
+FDTD updates per real second. For F11<escape><</escape>1×, an unchanged
+grid would increase timesteps per second dramatically. We
+therefore **coarsen its normalized mesh by approximately
+`1.01 × (1/F11)^(1/3)`**, reducing the cell count so the modeled
+cell-update work stays roughly equal to the 1× setting. This
+trades numerical precision for interactive performance; it does
+**not** artificially scale audio pitch. An existing narrow
+simple-head acoustic microphone notch is rasterized by cell
+intersection to prevent disappearing at these coarser grids,
+without changing any SVG artwork.
 
-**Important limitation:** At constant GPU cell count the physical
-cell spacing also grows S times, so the highest accurately
-resolvable sound frequency falls by approximately 1/S.
-At 10× full-room scale, the default live ten-cells-per-wavelength
-reference decreases from ~6.5kHz to **~650Hz**. The MP3 and
-diagnostic chirp are therefore low-pass filtered appropriately.
-The high-quality offline WAV renderer also uses the scaled physical
-CFL timestep and anti-aliased input. Keeping the original
-multi-kHz sound detail while expanding the room tenfold
-would require substantially more GPU cells and compute;
-F11 cannot provide both for free. This experiment is useful for
-testing whether the apparent room metres were wrong, **not a claim
-that they were**. Relative screen positions of head/mics/walls
-remain unchanged precisely because the entire world scales.
+**Important:** F11 is an experiment about the interpretation of
+the metre scale, *not evidence that the original scene was ten
+times too small*. At 10×, the resolvable frequency band is about
+one-tenth the 1× band: the default live source cutoff is only
+~570Hz, causing very bass-heavy, unnatural sound. At 0.1× the
+physical cutoff is much higher, but the head and fine passages
+have fewer grid cells. Neither 10× larger nor 10× smaller can
+preserve identical timbre and computational cost. F11 changes
+physical sound transit times and bandwidth, while F12 separately
+changes *post-FDTD microphone amplitude with distance*.
 
-In the most zoomed-in **Z=SQUARE** room, MP3 audio is now rendered
-at **75% of the previous output amplitude** in both live preview and
-offline WAV output. The 0.75 factor is applied **after offline
-peak normalization**, so it cannot be canceled by that stage.
-It does not affect other zoom settings and remains independent
-of F11 and F12.
+The most zoomed **Z=SQUARE** room still applies **75% of the prior
+output amplitude**, including offline WAV playback, after
+normalization so the reducer is not undone.
+
+### N — broadband ear-cavity and ambient-field diagnostic
+
+**N** toggles a deliberately simple environmental noise probe
+which uses **four spatially separated FDTD pressure emitters**.
+The emitters (small yellow dots in the room view) drive seeded,
+bandlimited broadband noise *through the same room pressure solver*;
+the listener's microphone receives actual simulated scattering
+and cavity filtering. N is **off by default** and **replaces**
+the moving MP3 or D diagnostic chirp while active, rather than
+adding noise after the stereo microphones. Toggle N off to
+restore the normal moving MP3.
+
+This makes it possible to compare V2, CHANNEL and SIMPLE with
+steady broadband excitation, instead of inferring resonance
+solely from music. **F5/F6/F7 work with N even when no MP3 file
+is loaded**, rendering the *same ambient-excited solver* on the
+offline higher-resolution mesh. Finished ambient-only WAVs
+are capped at **25% output amplitude after normalization**,
+to avoid deafening full-scale noise. F12 is bypassed while N
+is active because its moving-mouth distance law has no physical
+meaning for four stationary distributed noise emitters.
+
+**Limitations:** Four independent pressure sources approximate
+some diffuse room excitation but do not reproduce a full
+diffuse 3D soundfield, a hand-cupped pinna, the mechanical
+impedance of the actual eardrum, bone/tissue-conducted noise
+or the nervous system. A cupped-ear or seashell "ocean"
+sound involves background noise exciting **frequency-selective
+cavity resonances**. It is not a universal high-frequency
+boost: some frequency bands become louder, others quieter.
+The existing ear-channel head is a **2D, finite-cell simulation**
+and may produce mostly attenuation rather than distinct
+resonance peaks, particularly in low-res live mode. HQ mainly
+changes the spatial resolution and input-passband ceiling;
+it does not add the missing 3D anatomy. N provides an
+auditable diagnostic, not a claim that these phenomena are solved.
 
 ### F12 — experimental 2D-to-3D distance falloff
 
@@ -425,7 +463,8 @@ loss or attenuation.
 | M | Toggle mouse versus WASD/arrow movement |
 | V | Toggle the **actual CUDA pressure-wave visualization** |
 | B | Toggle semi-transparent authored SVG over FDTD head mask to audit alignment |
-| F11 / Shift+F11 | Cycle uniform **physical** scale 1× / 2× / 5× / 10× and back; keeps GPU cells, changes real dx/dt/bandwidth |
+| F11 / Shift+F11 | Cycle physical size **0.1× / 0.2× / 0.5× / 1× / 2× / 5× / 10×** in both directions |
+| N | Toggle four-source real FDTD broadband ambient probe; temporarily replaces MP3/chirp and supports HQ offline WAV |
 | F12 / Shift+F12 | Cycle extra source-to-microphone distance loss 0×–20× forward / backward (0× raw 2D; 1× approx. 3D amplitude) |
 | 9 / 0 | Decrease/increase wave exposure, not the physical pressure |
 | H / Shift+H | Next / previous listener: V2 → CHANNEL → SIMPLE; retains zoom |
@@ -483,10 +522,15 @@ raw signed pressure with adjustable exposure.
 
 ## Acoustic limitations and validation
 
-- **F11 is a genuine uniform physical metre/CFL scaling experiment**;
-  the proportions on screen are unchanged, but real room dimensions,
-  travel times, spatial bandwidth and resolving frequency all change.
-  F11 at 10× is limited to about one-tenth the former acoustic bandwidth.
+- **F11 is a genuine uniform physical metre/CFL scaling experiment**:
+  0.1×–10× changes true acoustic dimensions, transit time and
+  frequency resolution. To avoid GPU overload at F11<escape><</escape>1×
+  we compensate with fewer numerical cells, which is a resolution
+  tradeoff. F11 at 10× is limited to about one-tenth the former bandwidth.
+- **N's background noise is FDTD-excited**, not inserted after the ears,
+  but four point sources are not a calibrated 3D diffuse field.
+  A real cup can amplify and suppress different frequencies, and
+  natural ambient or body noise is otherwise absent from the sim.
 - **F12 is a post-FDTD distance-dependent microphone gain
   experiment**, not a replacement 3D propagation solver. The full
   wavefield, obstacles, and travel time stay exactly 2D; at
