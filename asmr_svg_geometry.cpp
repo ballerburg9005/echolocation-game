@@ -74,22 +74,33 @@ SvgSilhouette renderSvg(const std::string& filename,
 }
 
 std::string svgLocation(const char* filename) {
-    // The user keeps their authored SVGs under HOME; prefer those,
-    // falling back to exact copies committed with the experiment.
+    // The edited SVG in the working tree must win over any stale
+    // ~/listener_*.svg left over from earlier experiments. Previously
+    // HOME silently shadowed the newly authored checkout shape.
+    const std::string checkedIn=std::string("asmr_shapes/")+filename;
+    if(FILE* file=std::fopen(checkedIn.c_str(),"rb")){
+        std::fclose(file);
+        return checkedIn;
+    }
     const char* home=std::getenv("HOME");
     if(home&&*home){
-        std::string direct=std::string(home)+"/"+filename;
-        if(FILE* file=std::fopen(direct.c_str(),"rb")){
-            std::fclose(file);return direct;
+        const std::string fallback=std::string(home)+"/"+filename;
+        if(FILE* file=std::fopen(fallback.c_str(),"rb")){
+            std::fclose(file);
+            return fallback;
         }
     }
-    return std::string("asmr_shapes/")+filename;
+    return checkedIn;
 }
 SvgSilhouette listenerSilhouette(HeadStyle style){
     const char* filename=style==HeadStyle::PinnaV2?"listener_v2.svg":
                          style==HeadStyle::Channels?
                          "listener_with_ear_channel.svg":"listener.svg";
-    SvgSilhouette shape=renderSvg(svgLocation(filename));
+    const auto source=svgLocation(filename);
+    SvgSilhouette shape=renderSvg(source);
+    std::fprintf(stderr,"[SVG LOAD] %s from %s; %.1fx%.1fmm raster=%dx%d\\n",
+        filename,source.c_str(),shape.widthMetres*1000,
+        shape.heightMetres*1000,shape.w,shape.h);
     shape.channels=style!=HeadStyle::Simple;
     shape.pinnaV2=style==HeadStyle::PinnaV2;
     return shape;
