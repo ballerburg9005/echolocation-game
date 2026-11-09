@@ -312,6 +312,21 @@ inline RoomView roomView(float zoom=1.0f,bool square=false){
     return {scale,width,height,kListenerX-width*0.5f,
             kListenerY-height/3.0f};
 }
+// Four widely separated sources approximate a diffuse external
+// noise field for the optional N diagnostic. They are actual pressure
+// emitters inside the FDTD grid, not sound added after the microphones.
+// Deliberately well away from the head at every square/portrait Z.
+inline Vec2 ambientSource(RoomView view,int index){
+    constexpr float positions[4][2]{
+        {0.14f,0.18f},{0.85f,0.22f},
+        {0.18f,0.83f},{0.82f,0.79f}};
+    index=std::clamp(index,0,3);
+    return {view.originX+positions[index][0]*view.width,
+            view.originY+positions[index][1]*view.height};
+}
+constexpr int kAmbientSourceCount=4;
+constexpr int kAmbientNoiseSeconds=8;
+constexpr float kAmbientInjection=0.14f; // relative to MP3 excitation
 // Full-size baseline is the PREVIOUS 400x711 @5mm, not the more
 // expensive Q quality variants. Keep Q's relative dx factor, while
 // reducing its geometry workload by the same proportion at each Z.
