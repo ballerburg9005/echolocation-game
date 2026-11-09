@@ -834,7 +834,6 @@ int main(){
                 sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
-                previousArtist=artist;
             }
         }
         if(SDL_GetTicks64()-audioDiagTime>=5000){
