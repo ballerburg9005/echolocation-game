@@ -220,13 +220,13 @@ inline double playbackSeconds(uint64_t queuedTotalFrames,
 // Five physical zooms, with deliberately smaller simulation volumes.
 // Solver cell-work per simulated second scales as area/dx^3; prior
 // same-cell-count zoom increased it *linearly* with zoom, causing
-// audible real-time underruns. These presets target 85%,81%,76%,72%
-// and 68% of the ORIGINAL full-size 5.00mm solver cell-work, while
+// audible real-time underruns. These presets target 85%,81%,76%,68.4%
+// and 27.2% of the ORIGINAL full-size 5.00mm solver cell-work, while
 // genuinely refining the acoustic grid near the listener.
 // The final view is an actual 0.75m square; there is room to orbit
 // the head since its center has 0.375m to all four walls.
 constexpr std::array<float,5> kZoomSteps{1.00f,1.25f,1.55f,2.00f,2.6666667f};
-constexpr std::array<float,5> kZoomWorkRatios{0.85f,0.81f,0.76f,0.72f,0.68f};
+constexpr std::array<float,5> kZoomWorkRatios{0.85f,0.81f,0.76f,0.684f,0.272f};
 constexpr float kSquareRoomSide=0.75f;
 struct RoomView {
     float zoom=1, width=kRoomMetres,height=kRoomHeightMetres;
