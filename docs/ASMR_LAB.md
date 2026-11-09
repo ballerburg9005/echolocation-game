@@ -51,7 +51,7 @@ hardware cannot keep pace; a nearly empty queue plus frequent
 `near-empty queues` supports underruns. Neither causes the device
 sample rate to change automatically. A low-pass at 6kHz in the economical live preset, 2D room
 resonances and partially transmissive artist geometry may instead
-color the live timbre. The **offline 1.5mm/19kHz WAV is fully
+color the live timbre. The **offline 2mm/16kHz WAV is fully
 precomputed** and therefore does not play at a lower pitch when
 rendering takes longer than real time.
 
@@ -69,8 +69,15 @@ SVG physical dimensions, and offline paths share these metre units.
 The window is **540 × 960**. Signed-pressure visual readback runs at
 up to **30 fps** with a **360 × 640** preview, whereas the solver still
 runs at its required physical rate. The completed offline WAV keeps
-**1.5mm FDTD grid and 19kHz passband**, but with more cells it may
-need longer to render; 9:16 replay snapshots are 180 × 320 pixels.
+**2mm FDTD grid and 16kHz input passband**, so its
+**1000 × 1778 = 1,778,000 cells** also match the former square
+**1333 × 1333 = 1,776,889** offline budget (within 0.1%).
+The 2mm grid has a 17.15kHz ten-cells/wavelength numerical reference;
+keeping 19kHz at that dx would compromise frequency accuracy. Thus
+retaining a fixed cell count requires a modest trade-off in high-end
+bandwidth. The finished 48kHz WAV remains fully precomputed and
+crackle-free without live CUDA deadlines, while the 9:16 replay
+pressure snapshots remain 180 × 320 pixels.
 
 The default live grid is **5mm**, approximately **400 × 711 = 284,400**
 cells, with a 6kHz input filter. The previous 3.75mm square-room
@@ -176,19 +183,19 @@ without judging range solely by how loud the 2D acoustics seem.
 | Property | Default live | Offline 5/10/20 s render |
 |---|---:|---:|
 | Physical room | **2.0 × 3.56 m** | **2.0 × 3.56 m** |
-| Grid cell | **5.0 mm** | **1.5 mm** |
-| Acoustic grid X × Y | **400 × 711** | **1333 × 2370** |
-| Wave steps/s (CFL) | ~97k | ~323k |
-| Ten-cells/wavelength reference | ~6.86 kHz | ~22.9 kHz |
-| Source low-pass | **6.0 kHz** | **19 kHz** |
+| Grid cell | **5.0 mm** | **2.0 mm** |
+| Acoustic grid X × Y | **400 × 711** | **1000 × 1778** |
+| Wave steps/s (CFL) | ~97k | ~243k |
+| Ten-cells/wavelength reference | ~6.86 kHz | ~17.15 kHz |
+| Source low-pass | **6.0 kHz** | **16 kHz** |
 | Sound capture | two FDTD microphones | same two microphones |
 
 Press **Q** to cycle 5 / 4.5 / 3.75 / 3 / 2.5 / 6 / 8 / 10mm live
 resolutions (unsupported coarse-grid mic placements are skipped).
 The default aims to free GPU time rather than simulate a physically
 smaller room. The previous 3.75mm / 8.5kHz preview is still available
-as a more demanding option. The high-quality offline grid remains
-**1.5mm / 19kHz**, independent of the live resolution.
+as a more demanding option. The offline grid remains independent of live resolution and now
+uses **2mm / 16kHz** to preserve the **old offline cell budget**, too.
 
 Every five seconds the terminal prints `[METRES]` with the actual
 listener, mouse target, smoothed acoustic head, mouth, left/right
@@ -250,7 +257,7 @@ pressure field** are also saved at a reduced 180×320 *display-only*
 resolution. During looping replay, SDL's consumed audio-frame count
 advances these snapshots in sync with the animated speaker. This
 eliminates the old frozen final-pressure image in playback without
-changing the 1.5mm FDTD simulation, 48kHz stereo buffer, or MP3 input.
+changing the 2mm FDTD simulation, 48kHz stereo buffer, or MP3 input.
 The snapshots are a visual record; no sound is synthesized from them. The
 visible artist SVG follows the recorded path again, the bottom
 playhead counts each exact loop, and the title shows elapsed/
@@ -278,8 +285,10 @@ raw signed pressure with adjustable exposure.
 - Outer walls use a lower broad-band reflection coefficient for
   rubber-like attenuation; no measured rubber frequency response.
 - The GPU load must be benchmarked in actual runtime, not inferred
-  from its board's wattage. Larger 1.5mm offline grids require much
-  more work even though completed audio plays at normal speed.
+  from its board's wattage. The 2mm 9:16 offline grid preserves
+  the old square grid's ~1.78 million cells rather than growing to
+  ~3.16 million cells. Precomputation may still take much longer
+  than playback, but the finished audio plays at normal speed.
 - Use low headphone gain during initial tests. Numerical code
   compilation and offline CPU geometry checks cannot verify physical
   loudness or your subjective ASMR response.
