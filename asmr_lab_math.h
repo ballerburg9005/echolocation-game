@@ -55,7 +55,25 @@ constexpr float kLowestPassband=2800.0f;
 constexpr float kOfflinePassband=16000.0f; // below 17.15kHz 10-cell limit
 constexpr int kOutputRate=48000;
 constexpr int kGraphBatch=126; // multiple of 3 for GPU field ring to repeat in a CUDA Graph
-constexpr float kOutsideReflection=0.32f;
+constexpr float kOutsideReflection=0.82f;
+constexpr float kPortMaterial=5.0f;
+constexpr float kPortReflection=0.035f;
+// This ASMR-specific impedance leaves the original arcade's wall
+// physics untouched. All materials use the same 5-point stencil.
+ECHO_HD inline float boundaryDamping(float left,float right,
+                                     float below,float above){
+    const float values[4]{left,right,below,above};
+    int head=0,wall=0,port=0;
+    for(int i=0;i<4;++i){
+        const float m=values[i];
+        if(m>=4.5f)++port;
+        else if(m>=3.5f)++wall;
+        else if(m>0)++head;
+    }
+    return echo::wallDamping(kHeadReflection,echo::kCourant,head)+
+           echo::wallDamping(kOutsideReflection,echo::kCourant,wall)+
+           echo::wallDamping(kPortReflection,echo::kCourant,port);
+}
 constexpr float kHeadReflection=0.74f;
 
 struct Vec2 {float x=0,y=0;};
@@ -272,7 +290,7 @@ inline std::vector<float> roomMask(int nx,int ny,float dx,
             const bool port=(x<border && v>0.62f && v<0.70f)||
                 (x>=nx-border && v>0.20f && v<0.29f)||
                 (y>=ny-border && u>0.23f && u<0.34f);
-            mask[id]=port?echo::kAbsorbingPortMaterial:
+            mask[id]=port?kPortMaterial:
                          echo::kOuterBoundaryMaterial;
             continue;
         }
