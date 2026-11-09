@@ -98,7 +98,7 @@ SvgSilhouette listenerSilhouette(HeadStyle style){
                          "listener_with_ear_channel.svg":"listener.svg";
     const auto source=svgLocation(filename);
     SvgSilhouette shape=renderSvg(source);
-    std::fprintf(stderr,"[SVG LOAD] %s from %s; %.1fx%.1fmm raster=%dx%d\\n",
+    std::fprintf(stderr,"[SVG LOAD] %s from %s; %.1fx%.1fmm raster=%dx%d\n",
         filename,source.c_str(),shape.widthMetres*1000,
         shape.heightMetres*1000,shape.w,shape.h);
     shape.channels=style!=HeadStyle::Simple;
