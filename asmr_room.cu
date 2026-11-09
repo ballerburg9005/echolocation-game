@@ -34,7 +34,7 @@ static constexpr int kWindow=800;
 static constexpr int kMaxWavSeconds=60;
 static constexpr int kMaxWavFrames=asmr::kOutputRate*kMaxWavSeconds;
 static constexpr float kInputStrength=3.0f;
-static constexpr int kPressureImage=400; // real pressure cells, decimated on CUDA
+static constexpr int kPressureImage=800; // full screen, no smoothing upscaled 400px tiles
 
 
 __device__ float roomWaveSample(const float* pcm,int length,double seconds) {
@@ -134,8 +134,11 @@ __global__ void pressureImageKernel(const float* p,const float* mask,
     if(material>=3.5f){r=34;g=72;b=96;}
     else if(material>0.0f){r=32;g=85;b=135;}
     else if(isfinite(pressure)) {
+        // A high-contrast signed pressure view; do NOT log-compress
+        // into smooth broad blobs, which concealed interference fringes.
+        // This is only a GPU-to-display transfer function.
         const float tone=fminf(1.0f,
-            log1pf(fabsf(pressure)*exposure*150.0f)/log1pf(30.0f));
+            sqrtf(fabsf(pressure)*exposure*32.0f));
         if(pressure>=0.0f) {
             r=9+(int)(100.0f*tone);
             g=14+(int)(210.0f*tone);
@@ -534,6 +537,7 @@ int main(){
         kWindow,kWindow,0);
     if(!window){std::fprintf(stderr,"[SDL] %s\n",SDL_GetError());
                 SDL_Quit();return 1;}
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"0"); // nearest FDTD cells
     SDL_Renderer* renderer=SDL_CreateRenderer(window,-1,
         SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
     if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);
