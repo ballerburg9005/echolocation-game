@@ -13,14 +13,18 @@
 #include <vector>
 
 namespace asmr {
+// Decode the *entire* input. SDL_AudioStream converts/resamples each
+// small mpg123 block instead of using one signed-int-sized SDL_AudioCVT
+// buffer; a 4-minute MP3 must not silently become a 60-second loop.
+// secondsLimit>0 is an explicit optional caller limit, not a default.
 inline bool decodeMP3(const std::string& filename,
                       std::vector<float>& pcm,
                       std::string& error,
-                      int outputRate=48000,int secondsLimit=60) {
+                      int outputRate=48000,int secondsLimit=0) {
     pcm.clear();
     error.clear();
-    if(mpg123_init()!=MPG123_OK) {
-        error="libmpg123 initialization failed"; return false;
+    if(mpg123_init()!=MPG123_OK){
+        error="libmpg123 initialization failed";return false;
     }
     int code=MPG123_OK;
     mpg123_handle* mh=mpg123_new(nullptr,&code);
@@ -28,38 +32,72 @@ inline bool decodeMP3(const std::string& filename,
         error="libmpg123 decoder allocation failed";
         mpg123_exit();return false;
     }
-    // Preserve native MP3 sample rate, decode standard signed-16bit
-    // stereo with libmpg123; SDL then handles 44.1->48kHz conversion
-    // and mono downmix, avoiding any external ffmpeg requirement.
+    const auto closeDecoder=[&](){
+        mpg123_delete(mh);
+        mpg123_exit();
+    };
     if(mpg123_open_fixed(mh,filename.c_str(),MPG123_STEREO,
                          MPG123_ENC_SIGNED_16)!=MPG123_OK){
         error=std::string("Cannot open MP3: ")+mpg123_strerror(mh);
-        mpg123_delete(mh);mpg123_exit();return false;
+        closeDecoder();return false;
     }
     long nativeRate=0;
     int channels=0,encoding=0;
-    if(mpg123_getformat(mh,&nativeRate,&channels,&encoding)!=MPG123_OK ||
+    if(mpg123_getformat(mh,&nativeRate,&channels,&encoding)!=MPG123_OK||
        nativeRate<8000||nativeRate>192000||channels!=2||
-       encoding!=MPG123_ENC_SIGNED_16){
-        error="Unsupported decoded MP3 rate or sample format";
-        mpg123_delete(mh);mpg123_exit();return false;
+       encoding!=MPG123_ENC_SIGNED_16||outputRate<=0){
+        error="Unsupported MP3 sample rate, format, or output rate";
+        closeDecoder();return false;
     }
-    const size_t frameBytes=channels*sizeof(int16_t);
-    const size_t maximum=(size_t)nativeRate*
-        (size_t)secondsLimit*frameBytes;
-    std::vector<unsigned char> bytes;
-    bytes.reserve(std::min(maximum,(size_t)8*1024*1024));
-    std::array<unsigned char,16384> buffer{};
+    SDL_AudioStream* stream=SDL_NewAudioStream(
+        AUDIO_S16SYS,(Uint8)channels,(int)nativeRate,
+        AUDIO_F32SYS,1,outputRate);
+    if(!stream){
+        error=std::string("MP3 resampler: ")+SDL_GetError();
+        closeDecoder();return false;
+    }
+    std::array<unsigned char,16384> input{};
+    std::array<float,8192> output{};
+    const size_t frameBytes=(size_t)channels*sizeof(int16_t);
+    const uint64_t maximum=secondsLimit>0?
+        (uint64_t)nativeRate*(uint64_t)secondsLimit:UINT64_MAX;
+    uint64_t nativeFrames=0;
     bool valid=true;
-    while(bytes.size()<maximum) {
+    const auto drain=[&]()->bool{
+        while(SDL_AudioStreamAvailable(stream)>0){
+            const int received=SDL_AudioStreamGet(
+                stream,output.data(),(int)(output.size()*sizeof(float)));
+            if(received<0){
+                error=std::string("MP3 resampler read: ")+SDL_GetError();
+                return false;
+            }
+            if(received==0)break;
+            if(received%(int)sizeof(float)!=0){
+                error="MP3 resampler emitted partial float";return false;
+            }
+            const size_t frames=(size_t)received/sizeof(float);
+            for(size_t i=0;i<frames;++i)
+                pcm.push_back(std::isfinite(output[i])?
+                    std::clamp(output[i],-1.0f,1.0f):0.0f);
+        }
+        return true;
+    };
+    while(nativeFrames<maximum){
         size_t received=0;
-        const size_t capacity=std::min(buffer.size(),
-                                      maximum-bytes.size());
-        const int status=mpg123_read(mh,buffer.data(),
-                                     capacity,&received);
-        if(received)
-            bytes.insert(bytes.end(),buffer.begin(),
-                         buffer.begin()+received);
+        const int status=mpg123_read(mh,input.data(),
+                                     input.size(),&received);
+        const size_t frames=std::min(
+            received/frameBytes,(size_t)std::min(
+                maximum-nativeFrames,(uint64_t)(received/frameBytes)));
+        if(frames>0){
+            if(SDL_AudioStreamPut(stream,input.data(),
+                (int)(frames*frameBytes))<0){
+                error=std::string("MP3 resampler write: ")+SDL_GetError();
+                valid=false;break;
+            }
+            nativeFrames+=frames;
+            if(!drain()){valid=false;break;}
+        }
         if(status==MPG123_DONE)break;
         if(status!=MPG123_OK){
             error=std::string("MP3 decoding failed: ")+
@@ -68,41 +106,18 @@ inline bool decodeMP3(const std::string& filename,
         }
         if(received==0)break;
     }
-    mpg123_delete(mh);
-    mpg123_exit();
-    bytes.resize(bytes.size()/frameBytes*frameBytes);
-    if(!valid||bytes.size()<frameBytes*128)return false;
-    SDL_AudioCVT cvt{};
-    const int conversion=SDL_BuildAudioCVT(&cvt,
-        AUDIO_S16SYS,channels,(int)nativeRate,
-        AUDIO_F32SYS,1,outputRate);
-    if(conversion<0){
-        error=std::string("SDL sample conversion failed: ")+
-              SDL_GetError();
-        return false;
+    if(valid&&SDL_AudioStreamFlush(stream)<0){
+        error=std::string("MP3 resampler flush: ")+SDL_GetError();
+        valid=false;
     }
-    cvt.len=(int)bytes.size();
-    cvt.buf=(Uint8*)SDL_malloc((size_t)cvt.len*
-                              (size_t)std::max(1,cvt.len_mult));
-    if(!cvt.buf){
-        error="Insufficient memory to resample MP3";return false;
+    if(valid)valid=drain();
+    SDL_FreeAudioStream(stream);
+    closeDecoder();
+    if(!valid)return false;
+    if(pcm.size()<128){
+        error="MP3 decoded to fewer than 128 audio frames";
+        pcm.clear();return false;
     }
-    std::memcpy(cvt.buf,bytes.data(),bytes.size());
-    if(cvt.needed&&SDL_ConvertAudio(&cvt)!=0){
-        error=std::string("SDL MP3 resampling failed: ")+
-              SDL_GetError();
-        SDL_free(cvt.buf);return false;
-    }
-    if(!cvt.needed)cvt.len_cvt=cvt.len;
-    const size_t sampleCount=std::min(
-        (size_t)cvt.len_cvt/sizeof(float),
-        (size_t)outputRate*(size_t)secondsLimit);
-    const float* samples=(const float*)cvt.buf;
-    pcm.resize(sampleCount);
-    for(size_t i=0;i<sampleCount;++i)
-        pcm[i]=std::isfinite(samples[i])?
-            std::clamp(samples[i],-1.0f,1.0f):0.0f;
-    SDL_free(cvt.buf);
-    return pcm.size()>=128;
+    return true;
 }
 } // namespace asmr
