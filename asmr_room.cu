@@ -7,6 +7,7 @@
 // Offline: 2mm grid, 15kHz band to preserve >8kHz spatial effects, BEFORE
 // stutter-free 48kHz stereo WAV playback and writing an output file.
 #include "asmr_lab_math.h"
+#include "asmr_svg_geometry.h"
 #include "asmr_mp3_audio.h"
 #include "source_model.h"
 #include <cuda_runtime.h>
@@ -61,7 +62,8 @@ __global__ void asmrPressureStep(
     const float* mask,const float* pcm,const int* pcmLength,
     const float2* mouthLocations,const uint64_t* blockBase,
     float* outStereo,int localStep,int n,float dx,float dt,float decay,
-    double absoluteStart,double recordingDuration,bool offline)
+    float halfMicSeparation,double absoluteStart,
+    double recordingDuration,bool offline)
 {
     const int x=blockIdx.x*blockDim.x+threadIdx.x;
     const int y=blockIdx.y*blockDim.y+threadIdx.y;
@@ -71,8 +73,8 @@ __global__ void asmrPressureStep(
     // Unlike separate output kernels, this doesn't double graph launches.
     // The p field is read-only for the entirety of this CUDA kernel.
     if(x==0&&y==0){
-        const float lx=(asmr::kListenerX-asmr::kEarOffset)/dx-0.5f;
-        const float rx=(asmr::kListenerX+asmr::kEarOffset)/dx-0.5f;
+        const float lx=(asmr::kListenerX-halfMicSeparation)/dx-0.5f;
+        const float rx=(asmr::kListenerX+halfMicSeparation)/dx-0.5f;
         const float ey=asmr::kListenerY/dx-0.5f;
         outStereo[localStep*2]=echo::bilinearSample(now,n,lx,ey);
         outStereo[localStep*2+1]=echo::bilinearSample(now,n,rx,ey);
@@ -152,9 +154,28 @@ __global__ void pressureImageKernel(const float* p,const float* mask,
 
 class FdtdRoom {
 public:
-    explicit FdtdRoom(float resolution):dx_(resolution),
-      n_(asmr::cells(resolution)),dt_((float)asmr::stepSeconds(resolution)){
-        const auto mask=asmr::roomMask(n_,dx_);
+    explicit FdtdRoom(float resolution,
+                      const asmr::SvgSilhouette& head,
+                      bool channels):
+      dx_(resolution),n_(asmr::cells(resolution)),
+      dt_((float)asmr::stepSeconds(resolution)),
+      halfMicSeparation_(asmr::micSpacing(channels)*0.5f){
+        const auto mask=asmr::svgRoomMask(n_,dx_,head);
+        if(!asmr::validateMicrophones(mask,n_,dx_,channels)) {
+            std::fprintf(stderr,
+                "[ASMR ERROR] Mic at x = %.4f / %.4f m is inside a "
+                "SOLID svg cell or blocked bilinear footprint, "
+                "resolution %.4fm. Refusing invalid ear samples.\n",
+                asmr::kListenerX-halfMicSeparation_,
+                asmr::kListenerX+halfMicSeparation_,dx_);
+            std::exit(3);
+        }
+        std::printf("[SVG FDTD] Actual head mask: %.1fx%.1fmm, "
+                    "%d cells across room, mics %.1fmm apart, "
+                    "dx=%.2fmm, dt=%.2fus, room=%.1fx%.1fm.\n",
+                    head.widthMetres*1000,head.heightMetres*1000,
+                    n_,halfMicSeparation_*2000,dx_*1000,
+                    dt_*1e6,asmr::kRoomMetres,asmr::kRoomMetres);
         const size_t size=mask.size()*sizeof(float);
         for(auto& p:fields_) {LAB_CUDA(cudaMalloc(&p,size));
                               LAB_CUDA(cudaMemset(p,0,size));}
@@ -185,7 +206,7 @@ public:
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
-                n_,dx_,dt_,decay,0.0,1e12,false);
+                n_,dx_,dt_,decay,halfMicSeparation_,0.0,1e12,false);
         }
         LAB_CUDA(cudaStreamEndCapture(stream_,&graph_));
         LAB_CUDA(cudaGraphInstantiate(&execution_,graph_,0));
@@ -207,7 +228,8 @@ public:
                 fields_[(t+2)%3],fields_[(t+1)%3],fields_[t%3],
                 deviceMask_,deviceAudio_,deviceAudioFrames_,
                 deviceMouth_,deviceStep_,deviceOutput_,t,
-                n_,dx_,dt_,decay,absoluteStart,length,offline);
+                n_,dx_,dt_,decay,halfMicSeparation_,
+                absoluteStart,length,offline);
         LAB_CUDA(cudaStreamEndCapture(stream_,&graph_));
         LAB_CUDA(cudaGraphInstantiate(&execution_,graph_,0));
         LAB_CUDA(cudaStreamSynchronize(stream_));
@@ -272,6 +294,7 @@ public:
     FdtdRoom& operator=(const FdtdRoom&)=delete;
 private:
     float dx_=0,dt_=0;
+    float halfMicSeparation_=0;
     int n_=0;
     float* fields_[3]{};
     float* deviceMask_=nullptr,*deviceAudio_=nullptr;
