@@ -1473,7 +1473,7 @@ int main(int argc,char** argv){
                 std::fprintf(stderr,
                     "[F12 GAIN] source-to-mic L %.3fm R %.3fm; "
                     "multipliers %.6f / %.6f (%.1f / %.1f dB), "
-                    "ambient bypass=%s.\\n",
+                    "ambient bypass=%s.\n",
                     dLeft,dRight,gLeft,gRight,
                     20.0f*std::log10(std::max(gLeft,1e-12f)),
                     20.0f*std::log10(std::max(gRight,1e-12f)),
