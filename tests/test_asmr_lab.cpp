@@ -9,20 +9,21 @@ int main(){
                   "CUDA graph must preserve triple-buffer identity");
     assert(asmr::cells(asmr::kLiveDx)==400);
     assert(asmr::cellsY(asmr::kLiveDx)==711);
-    // Real zoom NEVER multiplies the cost by 2x/4x/8x any more.
-    // Its four portrait sizes and final square all use ~284k cells.
-    constexpr float stages[]{1.00f,1.08f,1.16f,1.30f,1.40f};
-    for(int i=0;i<5;++i){
-        const bool square=i==4;
-        const float zoom=stages[i];
+    // Every zoom is a REAL smaller FDTD room and finer dx, yet its
+    // acoustic work budget declines rather than exploding with zoom.
+    for(size_t i=0;i<asmr::kZoomSteps.size();++i){
+        const bool square=i+1==asmr::kZoomSteps.size();
+        const float zoom=asmr::kZoomSteps[i];
         const auto view=asmr::roomView(zoom,square);
-        const float dx=square?asmr::squareDxFromBase(asmr::kLiveDx):
-                              asmr::kLiveDx/zoom;
+        const float dx=asmr::zoomDx(asmr::kLiveDx,(int)i);
         const int nx=(int)std::lround(view.width/dx);
         const int ny=(int)std::lround(view.height/dx);
-        assert(std::abs(nx*ny-400*711)<1800);
-        assert(asmr::kLiveDx/dx<1.50f);
-        assert(std::fabs((asmr::kListenerX-view.originX)/view.width-0.5f)<1e-5f);
+        const float work=asmr::relativeCellWork(dx,view);
+        assert(std::fabs(work-asmr::kZoomWorkRatios[i])<0.015f);
+        assert(dx<=asmr::kLiveDx*1.06f);
+        assert(nx>100&&ny>100);
+        assert(std::fabs((asmr::kListenerX-view.originX)/view.width-
+                         0.5f)<1e-5f);
         assert(std::fabs((asmr::kListenerY-view.originY)/view.height-
                          (square?0.5f:1.0f/3))<1e-5f);
         assert((std::fabs(view.width-view.height)<1e-5f)==square);
@@ -32,9 +33,23 @@ int main(){
         const auto clamped=asmr::restrictCentreInView(
             {asmr::kListenerX,asmr::kListenerY},view);
         assert(asmr::validArtistInView(clamped,view));
+        if(square){
+            assert(std::fabs(view.width-0.75f)<1e-5f);
+            for(int a=0;a<360;++a){
+                const float theta=2.0f*echo::kPi*a/360;
+                const asmr::Vec2 orbit{
+                    asmr::kListenerX+(asmr::kMinimumSeparation+0.01f)*
+                                       std::cos(theta),
+                    asmr::kListenerY+(asmr::kMinimumSeparation+0.01f)*
+                                       std::sin(theta)};
+                assert(asmr::validArtistInView(orbit,view));
+            }
+        }
     }
-    assert(std::fabs(asmr::micSpacing(true)-0.042f)<1e-6f);
-    assert(std::fabs(asmr::micOffsetY(true)-0.003f)<1e-6f);
+    assert(asmr::kZoomWorkRatios.front()<0.86f);
+    assert(asmr::kZoomWorkRatios.back()<=0.85f*0.80f+0.001f);
+    assert(std::fabs(asmr::micSpacing(true)-0.039f)<1e-6f);
+    assert(std::fabs(asmr::micOffsetY(true)-0.002f)<1e-6f);
     assert(std::fabs(asmr::micOffsetY(true,true)-0.003f)<1e-6f);
     // Reflecting walls lose less pressure than the three door slots.
     assert(asmr::kOutsideReflection>0.78f);
