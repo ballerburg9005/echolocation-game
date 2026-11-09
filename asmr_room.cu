@@ -213,7 +213,7 @@ public:
                       const asmr::SvgSilhouette& speaker):
       dx_(resolution),n_(asmr::cells(resolution)),
       dt_((float)asmr::stepSeconds(resolution)),
-      halfMicSeparation_(asmr::micSpacing(channels)*0.5f),
+      halfMicSeparation_(asmr::micSpacing(channels,head.pinnaV2)*0.5f),
       micYOffset_(channels?asmr::kChannelEarY:0.0f){
         if(!speaker.present()) {
             std::fprintf(stderr,"[FDTD] Missing speaker SVG.\n");
@@ -320,8 +320,11 @@ public:
     std::array<float,asmr::kGraphBatch*2> process(
         const std::array<float4,asmr::kGraphBatch>& mouths,
         uint64_t firstStep){
+        // Each source step is a float4: mouth XY + artist centre XY.
+        // Copying float2 here uploaded only HALF of the positions!
+        static_assert(sizeof(float4)==4*sizeof(float));
         LAB_CUDA(cudaMemcpy(deviceMouth_,mouths.data(),
-            mouths.size()*sizeof(float2),cudaMemcpyHostToDevice));
+            sizeof(mouths),cudaMemcpyHostToDevice));
         LAB_CUDA(cudaMemcpy(deviceStep_,&firstStep,
             sizeof(uint64_t),cudaMemcpyHostToDevice));
         LAB_CUDA(cudaGraphLaunch(execution_,stream_));
@@ -523,11 +526,11 @@ static void drawRoom(SDL_Renderer* renderer,
             screenY(asmr::kListenerY),screenX(asmr::kHeadRadius),
             !(showPressure&&waves));
     color(renderer,105,203,252);
-    circle(renderer,screenX(asmr::leftEar(channels).x),
-           screenY(asmr::leftEar(channels).y),3,true);
+    circle(renderer,screenX(asmr::leftEar(channels,listenerShape.pinnaV2).x),
+           screenY(asmr::leftEar(channels,listenerShape.pinnaV2).y),3,true);
     color(renderer,245,158,245);
-    circle(renderer,screenX(asmr::rightEar(channels).x),
-           screenY(asmr::rightEar(channels).y),3,true);
+    circle(renderer,screenX(asmr::rightEar(channels,listenerShape.pinnaV2).x),
+           screenY(asmr::rightEar(channels,listenerShape.pinnaV2).y),3,true);
     // Artist head always points mouth toward the centre of the listener.
     color(renderer,236,141,107);
     if(speakerTexture) {
@@ -545,7 +548,7 @@ static void drawRoom(SDL_Renderer* renderer,
     // not a decorative mouth or artificial stereo panning.
     const asmr::Vec2 m=asmr::mouth(physicalSource);
     color(renderer,255,231,126);
-    circle(renderer,screenX(m.x),screenY(m.y),5,true);
+    circle(renderer,screenX(m.x),screenY(m.y),2,true);
     // Mouth orientation and 20-30cm peripersonal space reference.
     color(renderer,58,110,132);
     circle(renderer,screenX(asmr::kListenerX),
@@ -747,6 +750,7 @@ int main(){
     blockSamples.reserve(asmr::kGraphBatch*4);
     uint64_t previewStep=0;
     uint64_t clippedPreview=0,shortQueueWarnings=0;
+    float previewSignalPeak=0.0f;
     uint64_t audioDiagTime=SDL_GetTicks64();
     asmr::Vec2 artist{1.50f,1.0f},sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
@@ -866,7 +870,7 @@ int main(){
                         headIndex==0?"listener_v2 pinna":
                         headIndex==1?"ear-channel alternative":
                         "original simple alternative",
-                        asmr::micSpacing(channels)*100);
+                        asmr::micSpacing(channels,head->pinnaV2)*100);
                 }
             }
             if(key==SDLK_q && mode==Mode::Preview){
@@ -1046,6 +1050,7 @@ int main(){
                     v=std::isfinite(v)?0.55f*v:0.0f;
                     if(std::fabs(v)>0.85f)++clippedPreview;
                     v=std::clamp(v,-0.85f,0.85f);
+                    previewSignalPeak=std::max(previewSignalPeak,std::fabs(v));
                 }
                 if(!queued.empty()&&SDL_QueueAudio(
                     device,queued.data(),
@@ -1117,6 +1122,7 @@ int main(){
             std::printf("[ASMR FDTD] LIVE dx=%.1fmm cells=%dx%d "
                         "pressure steps=%llu queue=%.1fms "
                         "near-empty queues=%llu safety-clipped samples=%llu "
+                        "earPeak=%.5g MP3=%s preview=%s "
                         "(V toggles REAL CUDA wave field)\n",
                 live->dx()*1000,
                 asmr::cells(live->dx()),asmr::cells(live->dx()),
@@ -1124,13 +1130,15 @@ int main(){
                 1000.0*SDL_GetQueuedAudioSize(device)/
                     (2.0*sizeof(float)*asmr::kOutputRate),
                 (unsigned long long)shortQueueWarnings,
-                (unsigned long long)clippedPreview);
+                (unsigned long long)clippedPreview,
+                previewSignalPeak,waveLoaded?"loaded":"missing",
+                previewEnabled?"on":"off");
             // Explicit metre-scale audit: this is a 2m room, not a
             // 50cm world with exaggerated mouse motion. The FDTD CFL
             // timestep and travel times below derive from that scale.
             const auto actualMouth=asmr::mouth(sourceCursor);
-            const auto left=asmr::leftEar(channels);
-            const auto right=asmr::rightEar(channels);
+            const auto left=asmr::leftEar(channels,head->pinnaV2);
+            const auto right=asmr::rightEar(channels,head->pinnaV2);
             const float dL=asmr::length(asmr::sub(actualMouth,left));
             const float dR=asmr::length(asmr::sub(actualMouth,right));
             const float dCentre=asmr::length(
@@ -1142,11 +1150,12 @@ int main(){
                 "R=%.3fm/%.2fms; physics dx=%.4fm dt=%.2fus\n",
                 asmr::kRoomMetres,asmr::kRoomMetres,
                 artist.x,artist.y,actualMouth.x,actualMouth.y,
-                dCentre,asmr::micSpacing(channels),
+                dCentre,asmr::micSpacing(channels,head->pinnaV2),
                 dL,1000.0f*dL/echo::kSpeedOfSound,
                 dR,1000.0f*dR/echo::kSpeedOfSound,
                 live->dx(),live->dt()*1e6f);
             shortQueueWarnings=0;clippedPreview=0;
+            previewSignalPeak=0.0f;
             audioDiagTime=SDL_GetTicks64();
         }
         const float progress=mode==Mode::Render&&job.total>0?
