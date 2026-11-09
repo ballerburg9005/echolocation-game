@@ -21,7 +21,7 @@ constexpr float kOuterMicSeparation=
 constexpr float kHeadRadius=0.105f; // encloses 185mm pinna-v2 lateral extent with clearance
 constexpr float kArtistRadius=0.070f; // ~13cm diameter SVG sender
 constexpr float kEarOffset=kOuterMicSeparation*0.5f;
-constexpr float kMouthOffset=0.050f; // 5cm: inside speaker's lower recess
+constexpr float kMouthOffset=0.055f; // 5.5cm: clear of the speaker's recess edge
 constexpr float kHeadClearance=0.018f;
 constexpr float kMinimumSeparation=kHeadRadius+kArtistRadius+kHeadClearance;
 constexpr float kRoomClearance=kArtistRadius+0.018f;
@@ -224,15 +224,20 @@ inline bool probeInAir(const std::vector<float>& mask,int n,
     return mask[iy*n+ix]==0 && mask[iy*n+ix+1]==0 &&
            mask[(iy+1)*n+ix]==0 && mask[(iy+1)*n+ix+1]==0;
 }
-inline float micSpacing(bool earChannels=false){
-    return earChannels?kEardrumSeparation:kOuterMicSeparation;
+// The v2 open pinna recess is air around x=+-62mm at y=+3mm.
+// These OUTER ear probes differ from the 8cm eardrum spacing, still
+// available in the separately selectable ear-channel head (H).
+constexpr float kPinnaMicSeparation=0.124f;
+inline float micSpacing(bool earChannels=false,bool pinnaV2=false){
+    return pinnaV2?kPinnaMicSeparation:
+        earChannels?kEardrumSeparation:kOuterMicSeparation;
 }
-inline Vec2 leftEar(bool earChannels=false){
-    return {kListenerX-0.5f*micSpacing(earChannels),
+inline Vec2 leftEar(bool earChannels=false,bool pinnaV2=false){
+    return {kListenerX-0.5f*micSpacing(earChannels,pinnaV2),
             kListenerY+(earChannels?kChannelEarY:0.0f)};
 }
-inline Vec2 rightEar(bool earChannels=false){
-    return {kListenerX+0.5f*micSpacing(earChannels),
+inline Vec2 rightEar(bool earChannels=false,bool pinnaV2=false){
+    return {kListenerX+0.5f*micSpacing(earChannels,pinnaV2),
             kListenerY+(earChannels?kChannelEarY:0.0f)};
 }
 inline std::vector<float> lowpass(const std::vector<float>& input,
