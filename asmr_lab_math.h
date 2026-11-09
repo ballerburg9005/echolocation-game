@@ -265,7 +265,10 @@ inline float physicalScaleDxFactor(float scale){
     // cell updates/sec ∝ area / (S * normalized_dx^3).
     // At S<1 the domain gets fewer normalized cells, preserving
     // approximately the SAME workload as the selected 1x H/Q/Z.
-    return scale<1.0f?std::cbrt(1.0f/scale):1.0f;
+    // A 1% coarser grid prevents the simple SVG mic notch from
+    // aliasing closed at 0.1x/0.2x on some Z stages, and slightly
+    // reduces rather than increases the proposed workload.
+    return scale<1.0f?1.01f*std::cbrt(1.0f/scale):1.0f;
 }
 inline float physicalScaleDesignDx(float zoomDx,float scale){
     return zoomDx*physicalScaleDxFactor(scale);
