@@ -16,12 +16,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compile and run dependency-free numerical tests
+      - name: Install curved SVG raster dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-dev libcairo2-dev pkg-config
+      - name: Compile and run physics and curved SVG numerical tests
         shell: bash
         run: |
           set -euo pipefail
           for source in tests/test_*.cpp; do
             executable="/tmp/$(basename "$source" .cpp)"
-            g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic "$source" -o "$executable"
+            if [[ "$(basename "$source")" == "test_asmr_svg.cpp" ]]; then
+              g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+                $(pkg-config --cflags librsvg-2.0 cairo) \
+                "$source" -o "$executable" \
+                $(pkg-config --libs librsvg-2.0 cairo)
+            else
+              g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+                "$source" -o "$executable"
+            fi
             "$executable"
           done
