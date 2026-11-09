@@ -17,7 +17,7 @@ int main(){
     assert(simple.loops[0].size()>200);
     assert(canal.loops[0].size()>200);
     assert(artist.loops[0].size()>200);
-    assert(std::fabs(asmr::micSpacing(true)-0.042f)<1e-6f);
+    assert(std::fabs(asmr::micSpacing(true)-0.039f)<1e-6f);
     assert(std::fabs(asmr::micSpacing(false)-0.096f)<1e-6f);
     assert(asmr::kMouthOffset<0.060f);
     for(float dx:{0.010f,0.005f,0.0035f,0.0015f}){
@@ -29,7 +29,7 @@ int main(){
             const auto right=asmr::rightEar(channel!=0);
             // The legacy polygon SVG rasterizer is not the active
             // curved librsvg acoustic mask. Its old 8cm tunnels do NOT
-            // represent the newly authored 4.2cm circular cavity.
+            // represent the newly authored 3.9cm circular cavity.
             // Real microphone air/connectivity is tested by
             // test_asmr_svg.cpp against the CUDA material mask.
             if(!channel){
@@ -58,7 +58,7 @@ int main(){
         artist,{1.50f,1.0f},echo::kPi,true);
     assert(facing.size()==1&&facing[0].size()>200);
     std::printf("SVG ASMR heads: simple %zu vertices, ear channels "
-        "%zu+%zu, speaker %zu; 4.2cm/9.6cm calibrated mics "
+        "%zu+%zu, speaker %zu; 3.9cm/9.6cm calibrated mics "
         "and mouth in fluid at 2m scale passed\n",
         simple.loops[0].size(),canal.loops[0].size(),
         canal.loops[1].size(),artist.loops[0].size());
