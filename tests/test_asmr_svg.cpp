@@ -227,6 +227,39 @@ int main(){
         const bool channelIsOpen=asmr::validateMicrophones(
             channelMask,nx,ny,dx,true,channels,view.originX,view.originY);
         if(channelIsOpen)++connectedChannelZooms;
+        // Every H mode must remain genuinely selectable at every Z
+        // stage, including after the steep square-room work cut.
+        assert(channelIsOpen);
+        const auto simpleMask=asmr::svgRoomMask(nx,ny,dx,simple,
+                                           view.originX,view.originY);
+        assert(asmr::validateMicrophones(simpleMask,nx,ny,dx,false,
+                       simple,view.originX,view.originY));
+        // Topology repair must not create unrelated air: every
+        // coarse material cell released along the mic airway must
+        // contain at least one ACTUAL transparent SVG raster pixel.
+        for(int y=0;y<ny;++y)for(int x=0;x<nx;++x){
+            const float px=view.originX+(x+0.5f)*dx-asmr::kListenerX;
+            const float py=view.originY+(y+0.5f)*dx-asmr::kListenerY;
+            if(!channels.solid(px,py))continue;
+            if(channelMask[(size_t)y*nx+x]!=0.0f)continue;
+            const float xa=px-0.5f*dx,xb=px+0.5f*dx;
+            const float ya=py-0.5f*dx,yb=py+0.5f*dx;
+            bool intersectedOriginalAir=false;
+            for(int ay=0;ay<channels.h&&!intersectedOriginalAir;++ay){
+                const float fy=(0.5f-(ay+0.5f)/(float)channels.h)*
+                               channels.heightMetres;
+                if(fy<ya||fy>=yb)continue;
+                for(int ax=0;ax<channels.w;++ax){
+                    const float fx=((ax+0.5f)/(float)channels.w-0.5f)*
+                                   channels.widthMetres;
+                    if(fx>=xa&&fx<xb&&
+                       channels.alpha[(size_t)ay*channels.w+ax]<48){
+                        intersectedOriginalAir=true;break;
+                    }
+                }
+            }
+            assert(intersectedOriginalAir);
+        }
         std::fprintf(stderr,"[SVG ZOOM] stage %zu %.2fx %s dx=%.3fmm "
             "grid=%dx%d channel microphone connected=%s\\n",
             stage,zoom,square?"SQUARE":"PORTRAIT",dx*1000,
@@ -234,7 +267,7 @@ int main(){
     }
     // We must have at least one state in which the current authored
     // ear channel can actually receive pressure from outside.
-    assert(connectedChannelZooms>=1);
+    assert(connectedChannelZooms==(int)asmr::kZoomSteps.size());
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
     constexpr float dx=.0025f;
