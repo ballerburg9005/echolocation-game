@@ -216,12 +216,12 @@ public:
                       bool channels,
                       const asmr::SvgSilhouette& speaker,
                       float zoom=1.0f):
-      dx_(resolution),nx_(asmr::cells(resolution*zoom)),
+      dx_(resolution),dt_((float)asmr::stepSeconds(resolution)),
+      nx_(asmr::cells(resolution*zoom)),
       ny_(asmr::cellsY(resolution*zoom)),
       view_(asmr::roomView(zoom)),
-      dt_((float)asmr::stepSeconds(resolution)),
       halfMicSeparation_(asmr::micSpacing(channels,head.pinnaV2)*0.5f),
-      micYOffset_(channels?asmr::kChannelEarY:0.0f){
+      micYOffset_(asmr::micOffsetY(channels,head.pinnaV2)){
         if(!speaker.present()) {
             std::fprintf(stderr,"[FDTD] Missing speaker SVG.\n");
             std::exit(4);
@@ -384,11 +384,11 @@ public:
     FdtdRoom& operator=(const FdtdRoom&)=delete;
 private:
     float dx_=0,dt_=0;
+    int nx_=0,ny_=0;
     asmr::RoomView view_{};
     float halfMicSeparation_=0,micYOffset_=0;
     float speakerWidthCells_=0,speakerHeightCells_=0;
     int speakerW_=0,speakerH_=0;
-    int nx_=0,ny_=0;
     float* fields_[3]{};
     float* deviceMask_=nullptr,*deviceAudio_=nullptr;
     float4* deviceMouth_=nullptr;
@@ -804,7 +804,13 @@ int main(){
         asmr::kUltraPassband,5000.0f,
         asmr::kLowPassband,asmr::kLowestPassband};
     int qualityIndex=0;
-    float liveCutoff=qualityBand[qualityIndex];
+    const std::array<float,5> zoomSteps{1.0f,2.0f,4.0f,6.0f,8.0f};
+    int zoomIndex=0;
+    auto zoomValue=[&](){return zoomSteps[zoomIndex];};
+    auto liveDx=[&](){return qualityDx[qualityIndex]/zoomValue();};
+    auto liveBand=[&](){return std::min(19000.0f,
+                         qualityBand[qualityIndex]*zoomValue());};
+    float liveCutoff=liveBand();
     std::vector<float> fullAudio,liveAudio;
     bool waveLoaded=loadSourceAudio(filename,fullAudio,liveAudio,
                                     liveCutoff);
@@ -821,7 +827,8 @@ int main(){
     bool diagnosticTone=false;
 
     auto live=std::make_unique<FdtdRoom>(
-        qualityDx[qualityIndex],*head,channels,speakerShape);
+        liveDx(),*head,channels,speakerShape,zoomValue());
+    gView=live->view();
     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
     std::unique_ptr<FdtdRoom> highQuality;
     echo::StereoLinearResampler liveResampler(live->dt(),
@@ -842,6 +849,7 @@ int main(){
                 sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
     bool showPressure=true;
+    asmr::RoomView lastPlaybackView=asmr::roomView();
     uint64_t lastWaveRefresh=0; // 30Hz signed-pressure display; never audio
     float pressureExposure=1.0f;
     Mode mode=Mode::Preview;
@@ -881,7 +889,7 @@ int main(){
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
        "L reload ~/test.mp3, D FDTD test chirp, T toggle live, "
-       "H cycle V2 pinna/channel/simple, Q 5/4.5/3.75/3/2.5/6/8/10mm, "
+       "H head, Q base quality, Z zoom 1x/2x/4x/6x/8x, "
        "V pressure waves, 9/0 exposure, "
        "R reset, Esc exit.\n");
     std::printf("[SPECTRUM] Live dx=%.1fmm ~%.0fHz (10 cells/lambda), "
@@ -954,12 +962,14 @@ int main(){
                     const asmr::SvgSilhouette& shape=proposed==0?
                         listenerV2:proposed==1?listenerChannels:listenerSimple;
                     const bool proposedChannels=proposed!=2;
+                    const auto view=live->view();
                     const auto mask=asmr::svgRoomMask(
-                        asmr::cells(live->dx()),asmr::cellsY(live->dx()),
-                        live->dx(),shape);
+                        live->nx(),live->ny(),live->dx(),shape,
+                        view.originX,view.originY);
                     if(!asmr::validateMicrophones(mask,
-                        asmr::cells(live->dx()),asmr::cellsY(live->dx()),
-                        live->dx(),proposedChannels,shape)) {
+                        live->nx(),live->ny(),live->dx(),
+                        proposedChannels,shape,
+                        view.originX,view.originY)) {
                         std::fprintf(stderr,"[SVG HEAD] Skipping mode %d "
                             "at %.2fmm: blocked or disconnected ear "
                             "passage. Try Q or inspect the SVG.\n",
@@ -977,7 +987,7 @@ int main(){
                     SDL_ClearQueuedAudio(device);
                     highQuality.reset();live.reset();
                     live=std::make_unique<FdtdRoom>(
-                        qualityDx[qualityIndex],*head,channels,speakerShape);
+                        liveDx(),*head,channels,speakerShape,zoomValue());
                     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
@@ -998,32 +1008,35 @@ int main(){
                 for(size_t trial=0;trial<qualityDx.size();++trial) {
                     qualityIndex=(qualityIndex+1)%
                         (int)qualityDx.size();
-                    const float dx=qualityDx[qualityIndex];
-                    const int side=asmr::cells(dx),length=asmr::cellsY(dx);
-                    const auto mask=asmr::svgRoomMask(side,length,dx,*head);
+                    const float dx=liveDx();
+                    const auto view=asmr::roomView(zoomValue());
+                    const int side=asmr::cells(dx*zoomValue());
+                    const int length=asmr::cellsY(dx*zoomValue());
+                    const auto mask=asmr::svgRoomMask(side,length,dx,*head,
+                        view.originX,view.originY);
                     if(asmr::validateMicrophones(
-                        mask,side,length,dx,channels,*head))
+                        mask,side,length,dx,channels,*head,
+                        view.originX,view.originY))
                         break;
                 }
                 if(old!=qualityIndex) {
-                    liveCutoff=qualityBand[qualityIndex];
+                    liveCutoff=liveBand();
                     if(waveLoaded)liveAudio=asmr::lowpass(
                         fullAudio,liveCutoff,asmr::kOutputRate);
                     SDL_ClearQueuedAudio(device);
                     live.reset();
                     live=std::make_unique<FdtdRoom>(
-                        qualityDx[qualityIndex],*head,channels,speakerShape);
+                        liveDx(),*head,channels,speakerShape,zoomValue());
                     live->uploadAudio(diagnosticTone?diagnosticAudio:liveAudio);
                     previewStep=0;sourceCursor=artist;
                     liveResampler=echo::StereoLinearResampler(
                         live->dt(),asmr::kOutputRate);
-                    std::printf("[QUALITY] Full 2.0x3.56m portrait FDTD grid "
+                    std::printf("[QUALITY] %.0fx physically cropped portrait room "
                         "dx=%.2fmm, %dx%d acoustic cells, "
                         "spatial 10-cell band %.0fHz, "
                         "input MP3 LP %.0fHz\n",
-                        live->dx()*1000,
-                        asmr::cells(live->dx()),
-                        asmr::cellsY(live->dx()),
+                        zoomValue(),live->dx()*1000,
+                        live->nx(),live->ny(),
                         asmr::tenCellFrequency(live->dx()),
                         liveCutoff);
                 }
