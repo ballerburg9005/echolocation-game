@@ -19,8 +19,10 @@ int main(){
     const float near=asmr::kFalloffReferenceMetres;
     assert(std::fabs(asmr::distanceFalloffGain(0.8f,0)-1.0f)<1e-6f);
     assert(std::fabs(asmr::distanceFalloffGain(near,20)-1.0f)<1e-6f);
-    assert(std::fabs(asmr::distanceFalloffGain(0.8f,1)-0.5f)<1e-6f);
-    assert(std::fabs(asmr::distanceFalloffGain(0.8f,2)-0.25f)<1e-6f);
+    assert(std::fabs(asmr::distanceFalloffGain(0.8f,1)-
+                     std::sqrt(near/0.8f))<1e-6f);
+    assert(std::fabs(asmr::distanceFalloffGain(0.8f,2)-
+                     near/0.8f)<1e-6f);
     assert(std::fabs(asmr::distanceFalloffGain(0.1f,20)-1.0f)<1e-6f);
     assert(asmr::distanceFalloffGain(
         std::numeric_limits<float>::quiet_NaN(),20)==0.0f);
@@ -206,8 +208,12 @@ int main(){
         assert(asmr::distanceFalloffGain(
             near*0.5f,20,scale)==1.0f);
     }
-    assert(asmr::distanceFalloffGain(0.18f,20,0.5f)<0.01f);
-    assert(asmr::distanceFalloffGain(0.18f,20,1.0f)==1.0f);
+    assert(asmr::distanceFalloffGain(0.18f,20,0.5f)<0.0001f);
+    assert(asmr::distanceFalloffGain(0.09f,20,0.5f)<0.01f);
+    assert(asmr::distanceFalloffGain(0.18f,20,1.0f)<0.01f);
+    // A source well above the physical reference must be audibly
+    // attenuated at F12=20 even at minimum safe approach.
+    assert(asmr::kFalloffReferenceMetres<asmr::kMinimumSeparation);
     // Whole-MP3 streaming: no 60-second looping. The device window
     // remains 60 seconds; its 58s stride includes an interpolation
     // overlap and only the *full track* end wraps song time.
