@@ -119,7 +119,10 @@ inline float length(Vec2 a){return std::hypot(a.x,a.y);}
 // Never add gain at close range or divide by an unbounded r.
 constexpr std::array<int,11> kDistanceFalloffSteps{
     0,1,2,3,4,6,8,10,12,16,20};
-constexpr float kFalloffReferenceMetres=0.20f;
+// 10cm is INSIDE the minimum permitted mouth-to-ear approach.
+// A 20cm dead zone made even 20x completely ineffective near a
+// 0.5x listener. Scale this reference together with F11 geometry.
+constexpr float kFalloffReferenceMetres=0.10f;
 inline float distanceFalloffGain(float distanceMetres,int strength,
                                  float physicalScale=1.0f){
     if(strength<=0)return 1.0f;
@@ -129,7 +132,7 @@ inline float distanceFalloffGain(float distanceMetres,int strength,
     // attenuation reference MUST scale as well: fixed 20cm made
     // F12 completely inactive inside the 0.1x/0.5x rooms.
     // Ratio now depends on physical source-to-ear distance
-    // relative to the actual, uniformly scaled 20cm reference.
+    // relative to the actual, uniformly scaled 10cm reference.
     const float reference=kFalloffReferenceMetres*physicalScale;
     const float distance=std::max(reference,
                                   std::max(0.0f,distanceMetres));
