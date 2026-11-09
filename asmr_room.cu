@@ -988,7 +988,7 @@ int main(int argc,char** argv){
     // magnification yet progressively FEWER cell updates per second.
     const auto& zoomSteps=asmr::kZoomSteps;
     int zoomIndex=0;
-    int physicsScaleIndex=0; // F11 physical experiment, independent of H/Q/Z/F12
+    int physicsScaleIndex=asmr::kDefaultPhysicsScaleIndex; // 1x default, independent H/Q/Z/F12
     auto physicsScaleValue=[&](){
         return asmr::kPhysicsScales[(size_t)physicsScaleIndex];};
     auto zoomValue=[&](){return zoomSteps[zoomIndex];};
@@ -996,11 +996,14 @@ int main(int argc,char** argv){
     auto activeView=[&](){
         return asmr::roomView(zoomValue(),squareMode());};
     auto liveDx=[&](){
-        return asmr::zoomDx(qualityDx[qualityIndex],zoomIndex);
+        return asmr::physicalScaleDesignDx(
+            asmr::zoomDx(qualityDx[qualityIndex],zoomIndex),
+            physicsScaleValue());
     };
     auto liveBand=[&](){return std::min(
-        qualityBand[qualityIndex]*qualityDx[qualityIndex]/
-            (liveDx()*physicsScaleValue()),
+        std::min(19000.0f,
+            qualityBand[qualityIndex]*qualityDx[qualityIndex]/
+                (liveDx()*physicsScaleValue())),
         0.90f*asmr::tenCellFrequency(
             liveDx()*physicsScaleValue()));};
     float liveCutoff=liveBand();
@@ -1082,12 +1085,14 @@ int main(int argc,char** argv){
     // One atomic transition for ALL H, Q and Z changes. In particular,
     // neither H nor Z is ever allowed to mutate the other dimension.
     // Invalid channel air simply refuses that candidate configuration.
-    const auto candidateValid=[&](int h,int q,int z){
+    const auto candidateValid=[&](int h,int q,int z,
+                                 float physicalScale){
         const auto& shape=h==0?listenerV2:
                           h==1?listenerChannels:listenerSimple;
         const auto view=asmr::roomView(
             zoomSteps[(size_t)z],z==(int)zoomSteps.size()-1);
-        const float dx=asmr::zoomDx(qualityDx[(size_t)q],z);
+        const float dx=asmr::physicalScaleDesignDx(
+            asmr::zoomDx(qualityDx[(size_t)q],z),physicalScale);
         const int nx=(int)std::lround(view.width/dx);
         const int ny=(int)std::lround(view.height/dx);
         const auto mask=asmr::svgRoomMask(nx,ny,dx,shape,
@@ -1102,7 +1107,7 @@ int main(int argc,char** argv){
             physicsScaleIndex:requestedPhysics;
         const float physicalScale=
             asmr::kPhysicsScales[(size_t)physicalIndex];
-        if(!candidateValid(h,q,z)){
+        if(!candidateValid(h,q,z,physicalScale)){
             char message[256];
             std::snprintf(message,sizeof(message),
                 "[%s] BLOCKED %s at Z %.2fx%s Q%d (mic not connected); "
@@ -1121,10 +1126,12 @@ int main(int argc,char** argv){
         selectorNoticeUntil=0;
         const auto* newHead=h==0?&listenerV2:
                              h==1?&listenerChannels:&listenerSimple;
-        const float dx=asmr::zoomDx(qualityDx[(size_t)q],z);
+        const float dx=asmr::physicalScaleDesignDx(
+            asmr::zoomDx(qualityDx[(size_t)q],z),physicalScale);
         const float nextCutoff=std::min(
-            qualityBand[(size_t)q]*qualityDx[(size_t)q]/
-                (dx*physicalScale),
+            std::min(19000.0f,
+                qualityBand[(size_t)q]*qualityDx[(size_t)q]/
+                    (dx*physicalScale)),
             0.90f*asmr::tenCellFrequency(dx*physicalScale));
         std::vector<float> newAudio=waveLoaded?
             asmr::lowpass(fullAudio,nextCutoff,asmr::kOutputRate):
@@ -1178,8 +1185,8 @@ int main(int argc,char** argv){
             zoomValue(),squareMode()?" SQUARE":"",qualityIndex,
             live->dx()*1000,gView.width,gView.height,
             live->nx(),live->ny(),
-            100.0f*asmr::relativeCellWork(live->dx(),gView)/
-                physicsScaleValue(),
+            100.0f*asmr::physicalScaleWork(
+                live->dx(),gView,physicsScaleValue()),
             physicsScaleValue(),live->physicalDx()*1000,
             liveCutoff);
         return true;
@@ -1456,7 +1463,9 @@ int main(int argc,char** argv){
             } else {
                 if(!highQuality)
                     highQuality=std::make_unique<FdtdRoom>(
-                        asmr::zoomDx(asmr::kOfflineDx,zoomIndex),
+                        asmr::physicalScaleDesignDx(
+                            asmr::zoomDx(asmr::kOfflineDx,zoomIndex),
+                            physicsScaleValue()),
                         *head,channels,
                         speakerShape,zoomValue(),squareMode(),
                         physicsScaleValue());
@@ -1873,8 +1882,8 @@ int main(int argc,char** argv){
             falloffStrength(),
             physicsScaleValue()*asmr::length(asmr::sub(
                 asmr::mouth(visibleSource),asmr::listener())),
-            100.0f*asmr::relativeCellWork(
-                live->dx(),live->view())/physicsScaleValue(),
+            100.0f*asmr::physicalScaleWork(
+                live->dx(),live->view(),physicsScaleValue()),
             diagnosticTone?"TEST":waveLoaded?"READY":"MISSING");
         SDL_SetWindowTitle(window,
             SDL_GetTicks64()<selectorNoticeUntil?
