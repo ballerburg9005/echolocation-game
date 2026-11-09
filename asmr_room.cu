@@ -558,15 +558,21 @@ static void drawRoom(SDL_Renderer* renderer,
     // Same exact normalized wall segments as the CUDA material mask;
     // fill across the wall thickness at every portrait/square zoom.
     color(renderer,40,174,145);
+    const int leftH=std::max(2,pixelsForMetres(asmr::kLeftPortHeight));
+    const int rightH=std::max(2,pixelsForMetres(asmr::kRightPortHeight));
+    const int farW=std::max(2,pixelsForMetres(asmr::kFarPortWidth));
     SDL_Rect ports[3]{
        {viewport.x,
-        viewport.y+(int)std::lround(0.30f*viewport.h),wallPx,
-        (int)std::lround(0.08f*viewport.h)},
+        viewport.y+(int)std::lround(
+            (1.0f-asmr::kLeftPortCentre)*viewport.h)-leftH/2,
+        wallPx,leftH},
        {viewport.x+viewport.w-wallPx,
-        viewport.y+(int)std::lround(0.71f*viewport.h),wallPx,
-        (int)std::lround(0.09f*viewport.h)},
-       {viewport.x+(int)std::lround(0.23f*viewport.w),viewport.y,
-        (int)std::lround(0.11f*viewport.w),wallPx}
+        viewport.y+(int)std::lround(
+            (1.0f-asmr::kRightPortCentre)*viewport.h)-rightH/2,
+        wallPx,rightH},
+       {viewport.x+(int)std::lround(
+            asmr::kFarPortCentre*viewport.w)-farW/2,
+        viewport.y,farW,wallPx}
     };
     for(const auto& port:ports)SDL_RenderFillRect(renderer,&port);
     // The movement trail is the path that will be rendered afterwards.
