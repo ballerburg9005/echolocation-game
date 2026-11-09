@@ -20,7 +20,7 @@ constexpr float kListenerY=kRoomHeightMetres/3.0f; // EXACT bottom third
 constexpr float kEardrumSeparation=0.080f; // previous 8cm experimental pair
 constexpr float kNewChannelMicSeparation=0.042f; // +/-21mm: inner cavity pair
 constexpr float kEarCanalLength=0.020f;
-constexpr float kChannelEarY=-0.007f; // new circular-cavity mode, 7mm BELOW
+constexpr float kChannelEarY=0.003f; // new circular-cavity mode, 3mm ABOVE head centre
 constexpr float kPinnaEarY=0.003f; // V2 stays 3mm ABOVE, unchanged
 
 constexpr float kOuterMicSeparation=
