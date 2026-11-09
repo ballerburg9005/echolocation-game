@@ -1327,13 +1327,15 @@ int main(){
         // Never render the physical moving speaker at the cursor
         // target while the CUDA impedance silhouette still occupies
         // the smoothed source position. They must coincide.
+        const bool livePhysicsActive=previewEnabled&&
+                                     (waveLoaded||diagnosticTone);
         const asmr::Vec2 visibleArtist=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
             asmr::interpolate(lastPlaybackPhysicalPath,playbackPhase):
-            sourceCursor;
+            livePhysicsActive?sourceCursor:artist;
         const asmr::Vec2 visibleSource=mode==Mode::Render?
             job.sourceCursor:mode==Mode::Playback?
-            visibleArtist:sourceCursor;
+            visibleArtist:livePhysicsActive?sourceCursor:artist;
         const auto& visibleTrail=mode==Mode::Playback?
             lastPlaybackPath.points:record;
         drawRoom(renderer,visibleTrail,visibleArtist,visibleSource,
