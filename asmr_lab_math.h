@@ -214,11 +214,28 @@ struct RoomView {
     float zoom=1, width=kRoomMetres,height=kRoomHeightMetres;
     float originX=0,originY=0;
 };
-inline RoomView roomView(float zoom=1.0f){
-    const float width=kRoomMetres/zoom;
-    const float height=kRoomHeightMetres/zoom;
-    return {zoom,width,height,kListenerX-width*0.5f,
+// The last Z step is a TRUE physically square room, not a portrait
+// room stretched into the window. 1.80m side preserves enough clearance
+// for the speaking head to circle the stationary listener.
+constexpr float kSquareRoomSide=1.80f;
+inline RoomView roomView(float zoom=1.0f,bool square=false){
+    if(square){
+        return {zoom,kSquareRoomSide,kSquareRoomSide,
+                kListenerX-kSquareRoomSide*0.5f,
+                kListenerY-kSquareRoomSide*0.5f};
+    }
+    // Do not permit old 2x/4x/8x acoustics to overload the GPU.
+    const float scale=std::clamp(zoom,1.0f,1.30f);
+    const float width=kRoomMetres/scale;
+    const float height=kRoomHeightMetres/scale;
+    return {scale,width,height,kListenerX-width*0.5f,
             kListenerY-height/3.0f};
+}
+// Change square topology from 400x711 to ~533x533, still same
+// ~284k total cells, with a gentler 1.48x temporal workload.
+inline float squareDxFromBase(float baseDx){
+    return baseDx*kSquareRoomSide/
+           std::sqrt(kRoomMetres*kRoomHeightMetres);
 }
 inline bool validArtistInView(Vec2 p,RoomView view){
     return validArtist(p) &&
