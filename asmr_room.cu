@@ -928,6 +928,9 @@ static void printUsage(const char* executable){
         "  B             Toggle translucent original SVG on acoustic mask\n"
         "  9, 0          Decrease / increase pressure exposure\n"
         "  D             Toggle real-solver diagnostic chirp\n"
+        "  N             Toggle FOUR-source real FDTD ambient noise probe\n"
+        "                ambient-only replaces the moving MP3; no mic EQ\n"
+        "                F5/F6/F7 can render ambient alone in HQ\n"
         "  T             Toggle live FDTD sound\n"
         "  L             Reload the selected MP3 source\n"
         "  R             Reset recorded path and solver\n"
@@ -1149,6 +1152,7 @@ int main(int argc,char** argv){
     RenderJob job;
     std::vector<float> lastPlayback;
     std::vector<float> lastPlaybackBase; // normalized but NO F12 shaping
+    bool lastPlaybackAmbient=false; // F12 does not color diffuse noise
     std::vector<std::vector<uint32_t>> lastPlaybackWaves;
     int displayedPlaybackWave=-1;
     asmr::PathSelection lastPlaybackPath;
@@ -1294,7 +1298,8 @@ int main(int argc,char** argv){
     std::printf("[CONTROLS] F5 = render last 5s, F6 = 10s, F7 = 20s "
        "in HIGH quality, then play the complete finished WAV.\n");
     std::printf("[CONTROLS] P loop replay, SPACE return to live, "
-       "L reload selected MP3, D FDTD test chirp, T toggle live, "
+       "L reload selected MP3, D FDTD test chirp, N ambient noise, "
+       "T toggle live, "
        "H V2/channel/simple, Q quality, Z 1/1.25/1.55/2/square, "
        "F11 physical metres 0.1/0.2/0.5/1/2/5/10x, "
        "F12 distance 0x-20x (Shift reverses), "
@@ -1363,7 +1368,7 @@ int main(int argc,char** argv){
                             playbackPhase*asmr::kOutputRate)));
                     auto updated=distanceShapedClip(lastPlaybackBase,
                         lastPlaybackPhysicalPath,channels,head->pinnaV2,
-                        ambientEnabled?0:strength,
+                        lastPlaybackAmbient?0:strength,
                         physicsScaleValue());
                     std::vector<float> tail(
                         updated.begin()+2*atFrame,updated.end());
@@ -1407,7 +1412,8 @@ int main(int argc,char** argv){
                             "[F12 DISTANCE] Could not update %s\n",
                             wavPath);
                 }else if(mode==Mode::Preview &&
-                         previewEnabled&&(waveLoaded||diagnosticTone)){
+                         previewEnabled&&
+                         (waveLoaded||diagnosticTone||ambientEnabled)){
                     // Change gain immediately, not after the 160ms of
                     // audio queued under the previous F12 setting.
                     // Do NOT reset/rewind the live wavefield.
@@ -1431,6 +1437,35 @@ int main(int argc,char** argv){
                 0.025f,pressureExposure/1.4f);
             if(key==SDLK_0)pressureExposure=std::min(
                 500.0f,pressureExposure*1.4f);
+            if(key==SDLK_n && mode==Mode::Preview){
+                // A broadband, genuinely FDTD-propagated probe from
+                // four locations, NOT noise added at the ear output.
+                // It REPLACES the MP3/chirp for clean A/B comparisons.
+                ambientEnabled=!ambientEnabled;
+                diagnosticTone=false;
+                SDL_PauseAudioDevice(device,1);
+                SDL_ClearQueuedAudio(device);
+                live->setAmbientEnabled(ambientEnabled);
+                live->uploadAudio(ambientEnabled?
+                    std::vector<float>{}:liveAudio);
+                live->reset();
+                previewStep=0;sourceCursor=artist;
+                liveResampler=echo::StereoLinearResampler(
+                    live->dt(),asmr::kOutputRate);
+                previewFadeFrames=0;
+                primeAudioAfterSwitch=previewEnabled&&
+                                     (ambientEnabled||waveLoaded);
+                if(!primeAudioAfterSwitch)
+                    SDL_PauseAudioDevice(device,0);
+                selectorNotice=ambientEnabled?
+                    "N: 4-SOURCE REAL FDTD AMBIENT NOISE (MP3 muted)":
+                    "N: AMBIENT OFF, MOVING MP3 SOURCE RESTORED";
+                selectorNoticeUntil=SDL_GetTicks64()+3500;
+                std::printf("[AMBIENT N] %s (4 FDTD sources, MP3 %s, "
+                    "no post-microphone EQ, bandwidth %.0fHz).\n",
+                    ambientEnabled?"ON":"OFF",
+                    ambientEnabled?"MUTED":"RESTORED",liveCutoff);
+            }
             if(key==SDLK_d && mode==Mode::Preview) {
                 diagnosticTone=!diagnosticTone;
                 const auto filteredDiagnostic=diagnosticTone?
@@ -1446,7 +1481,13 @@ int main(int argc,char** argv){
                 live->reset();previewStep=0;sourceCursor=artist;
                 liveResampler=echo::StereoLinearResampler(
                     live->dt(),asmr::kOutputRate);
+                SDL_PauseAudioDevice(device,1);
                 SDL_ClearQueuedAudio(device);
+                previewFadeFrames=0;
+                primeAudioAfterSwitch=previewEnabled&&
+                                     (diagnosticTone||waveLoaded);
+                if(!primeAudioAfterSwitch)
+                    SDL_PauseAudioDevice(device,0);
                 std::printf("[FDTD PROBE] %s: 320-2720Hz chirp goes "
                     "through the REAL moving-source FDTD path, "
                     "even if ~/test.mp3 is missing.\n",
@@ -1803,6 +1844,7 @@ int main(int argc,char** argv){
                 // output, or the old automatic gain would cancel the
                 // entire effect for far-away recorded movement.
                 lastPlaybackBase=job.samples;
+                lastPlaybackAmbient=ambientEnabled;
                 job.samples=distanceShapedClip(lastPlaybackBase,
                     job.physicalPath,channels,head->pinnaV2,
                     ambientEnabled?0:falloffStrength(),
@@ -1876,7 +1918,7 @@ int main(int argc,char** argv){
                 liveDelivery,computeCapacity,
                 previewSignalPeak,waveLoaded?"loaded":"missing",
                 previewEnabled?"on":"off",
-                diagnosticTone?"chirp":"off");
+                ambientEnabled?"ambient":diagnosticTone?"chirp":"off");
             // METRES describes the CURRENT physically cropped FDTD
             // world, not just its 1x window. The source-to-ear flight
             // times still use true metres and 343 m/s at every zoom.
@@ -1994,7 +2036,8 @@ int main(int argc,char** argv){
                 asmr::mouth(visibleSource),asmr::listener())),
             100.0f*asmr::physicalScaleWork(
                 live->dx(),live->view(),physicsScaleValue()),
-            diagnosticTone?"TEST":waveLoaded?"READY":"MISSING");
+            ambientEnabled?"AMBIENT":diagnosticTone?"TEST":
+                waveLoaded?"READY":"MISSING");
         SDL_SetWindowTitle(window,
             SDL_GetTicks64()<selectorNoticeUntil?
                 selectorNotice.c_str():title);
