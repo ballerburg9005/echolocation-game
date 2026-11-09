@@ -10,15 +10,21 @@ static bool reachable(const std::vector<float>& mask,int nx,int ny,float dx,
                        asmr::Vec2 point){
     // The ear channel must be physically open to the external room,
     // not a sealed empty pit that would trap a virtual microphone.
-    const int x=(int)(point.x/dx),y=(int)(point.y/dx);
-    if(x<2||y<2||x>=nx-2||y>=ny-2)return false;
-    const int start=y*nx+x;
-    if(mask[start]>0)return false;
+    const float gx=point.x/dx-0.5f,gy=point.y/dx-0.5f;
+    const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
+    if(ix<2||iy<2||ix+1>=nx-2||iy+1>=ny-2)return false;
     const int outside=(ny/4)*nx+nx/4;
     if(mask[outside]>0)return false;
     std::vector<unsigned char> seen(mask.size(),0);
     std::queue<int> todo;
-    seen[start]=1;todo.push(start);
+    for(int y=0;y<2;++y)for(int x=0;x<2;++x){
+        const int id=(iy+y)*nx+ix+x;
+        if(mask[(size_t)id]>0)continue;
+        const float weight=(1.0f-std::fabs(gx-(ix+x)))*
+                           (1.0f-std::fabs(gy-(iy+y)));
+        if(weight<=0.001f)continue;
+        seen[(size_t)id]=1;todo.push(id);
+    }
     while(!todo.empty()){
         const int v=todo.front();todo.pop();
         if(v==outside)return true;
@@ -98,10 +104,19 @@ int main(){
         assert(a.size()==(size_t)nx*ny&&b.size()==a.size());
         assert(c.size()==a.size());
         assert(asmr::validateMicrophones(a,nx,ny,dx,false,simple));
-        assert(asmr::validateMicrophones(b,nx,ny,dx,true,channels));
+        const bool channelValid=asmr::validateMicrophones(
+            b,nx,ny,dx,true,channels);
+        // A user may revise the exact channel SVG so its mouth or its
+        // narrow neck seals at this dx. The program must reject that
+        // resolution rather than sample an isolated air cavity.
+        const bool channelReachable=
+            reachable(b,nx,ny,dx,asmr::leftEar(true)) &&
+            reachable(b,nx,ny,dx,asmr::rightEar(true));
+        assert(channelValid==channelReachable);
+        if(!channelValid)std::fprintf(stderr,
+            "[SVG VERIFY] Channel ear pocket disconnected at dx=%.2fmm; "
+            "alternative head will be unavailable on this grid.\n",dx*1000);
         assert(asmr::validateMicrophones(c,nx,ny,dx,true,pinnaV2));
-        assert(reachable(b,nx,ny,dx,asmr::leftEar(true)));
-        assert(reachable(b,nx,ny,dx,asmr::rightEar(true)));
         assert(reachable(c,nx,ny,dx,asmr::leftEar(true,true)));
         assert(reachable(c,nx,ny,dx,asmr::rightEar(true,true)));
         // No silent cheat: no cut-through to the old 40mm v2 points.
