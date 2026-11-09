@@ -1949,7 +1949,7 @@ int main(int argc,char** argv){
                 asmr::length(asmr::sub(actualMouth,right));
             const float dCentre=physicsScaleValue()*asmr::length(
                 asmr::sub(actualMouth,asmr::listener()));
-            std::printf("[METRES F11 %.0fx] Room=%.3fx%.3fm, "
+            std::printf("[METRES F11 %gx] Room=%.3fx%.3fm, "
                 "listener=(%.3f,%.3f), mouse=(%.3f,%.3f), "
                 "acousticHead=(%.3f,%.3f) mouth=(%.3f,%.3f), "
                 "mouseLag=%.3fm centreRange=%.3fm, "
