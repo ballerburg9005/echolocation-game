@@ -35,7 +35,9 @@ static constexpr int kWindow=800;
 static constexpr int kMaxWavSeconds=60;
 static constexpr int kMaxWavFrames=asmr::kOutputRate*kMaxWavSeconds;
 static constexpr float kInputStrength=3.0f;
-static constexpr int kPressureImage=800; // full screen, no smoothing upscaled 400px tiles
+static constexpr int kPressureImage=800; // full screen, real GPU field
+static constexpr int kReplayPressureImage=256; // playback visual snapshots
+static constexpr int kReplayPressureFps=24; // no effect on FDTD/audio
 
 
 // At the edge of the sculpted ear recess, a bilinear microphone's
@@ -334,14 +336,16 @@ public:
             result.size()*sizeof(float),cudaMemcpyDeviceToHost));
         return result;
     }
-    void pressureImage(std::vector<uint32_t>& pixels,float exposure){
-        pixels.resize((size_t)kPressureImage*kPressureImage);
+    void pressureImage(std::vector<uint32_t>& pixels,float exposure,
+                       int imageSize=kPressureImage){
+        imageSize=std::clamp(imageSize,1,kPressureImage);
+        pixels.resize((size_t)imageSize*imageSize);
         const dim3 thr(16,16);
-        const dim3 blk((kPressureImage+15)/16,
-                       (kPressureImage+15)/16);
+        const dim3 blk((imageSize+15)/16,
+                       (imageSize+15)/16);
         pressureImageKernel<<<blk,thr,0,stream_>>>(
             fields_[1],deviceMask_,deviceImage_,n_,
-            kPressureImage,exposure);
+            imageSize,exposure);
         LAB_CUDA(cudaGetLastError());
         LAB_CUDA(cudaStreamSynchronize(stream_));
         LAB_CUDA(cudaMemcpy(pixels.data(),deviceImage_,
@@ -652,6 +656,9 @@ struct RenderJob {
     int window=0;
     uint64_t current=0,total=0;
     std::vector<float> samples;
+    // Precomputed actual FDTD pressure snapshots for looping visual playback.
+    std::vector<std::vector<uint32_t>> waveFrames;
+    size_t nextWaveFrame=0;
     asmr::Vec2 sourceCursor{};
     std::unique_ptr<echo::StereoLinearResampler> resampler;
 };
@@ -684,6 +691,12 @@ int main(){
         kPressureImage,kPressureImage);
     if(!waveTexture)
         std::fprintf(stderr,"[VISUAL] Cannot display CUDA pressure map: %s\n",
+                     SDL_GetError());
+    SDL_Texture* replayWaveTexture=SDL_CreateTexture(renderer,
+        SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,
+        kReplayPressureImage,kReplayPressureImage);
+    if(!replayWaveTexture)
+        std::fprintf(stderr,"[VISUAL] Replay pressure texture: %s\n",
                      SDL_GetError());
     std::vector<uint32_t> pressurePixels;
     SDL_AudioSpec desired{},obtained{};
@@ -774,6 +787,8 @@ int main(){
     double recordingClock=0;
     RenderJob job;
     std::vector<float> lastPlayback;
+    std::vector<std::vector<uint32_t>> lastPlaybackWaves;
+    int displayedPlaybackWave=-1;
     asmr::PathSelection lastPlaybackPath;
     uint64_t playbackEnqueuedCycles=0;
     double playbackPhase=0.0;
@@ -787,6 +802,7 @@ int main(){
                          SDL_GetError());
         playbackEnqueuedCycles=1;
         playbackPhase=0.0;
+        displayedPlaybackWave=-1;
         mode=Mode::Playback;
     };
     uint64_t lastFrame=SDL_GetPerformanceCounter();
@@ -1000,6 +1016,9 @@ int main(){
                 job.samples.clear();
                 job.samples.reserve(
                     asmr::clipFrames(job.window)*2+16);
+                job.waveFrames.clear();job.nextWaveFrame=0;
+                job.waveFrames.reserve((size_t)job.window*
+                                       kReplayPressureFps);
                 job.resampler=std::make_unique<echo::StereoLinearResampler>(
                     highQuality->dt(),asmr::kOutputRate);
                 SDL_ClearQueuedAudio(device);
@@ -1099,6 +1118,20 @@ int main(){
                         samples[2*i],samples[2*i+1],job.samples);
                 job.current+=count;
             }
+            // Keep 24 fps REAL FDTD pressure snapshots separate from
+            // untouched high-resolution stereo sound computation.
+            const size_t targetWaveFrames=(size_t)job.window*
+                                          kReplayPressureFps;
+            const double simulatedTime=job.current*highQuality->dt();
+            if(job.nextWaveFrame<targetWaveFrames &&
+               simulatedTime >= (double)job.nextWaveFrame/
+                                kReplayPressureFps){
+                std::vector<uint32_t> frame;
+                highQuality->pressureImage(frame,pressureExposure,
+                                            kReplayPressureImage);
+                job.waveFrames.push_back(std::move(frame));
+                ++job.nextWaveFrame;
+            }
             if(job.current>=job.total){
                 // DO NOT derive the playback length from the number
                 // of FDTD steps, block boundaries or float dt.
@@ -1117,6 +1150,12 @@ int main(){
                 lastWindow=job.window;
                 lastPlaybackPath=job.selected;
                 lastPlayback.swap(job.samples);
+                while(job.waveFrames.size()<targetWaveFrames)
+                    job.waveFrames.push_back(job.waveFrames.empty()?
+                        std::vector<uint32_t>((size_t)kReplayPressureImage*
+                            kReplayPressureImage,0xff150e09u):
+                        job.waveFrames.back());
+                lastPlaybackWaves.swap(job.waveFrames);
                 startReplay();
                 std::printf("[RENDER] Complete. Saved %s and %s; "
                     "now looping EXACTLY %.2fs of pre-rendered stereo. "
@@ -1184,12 +1223,23 @@ int main(){
         }
         const float progress=mode==Mode::Render&&job.total>0?
             (float)((double)job.current/job.total):0.0f;
-        if(showPressure && waveTexture){
-            // This GPU pressure snapshot is from the exact field
-            // that produces the ear samples. Render the offline wave
-            // grid too while a slow 15kHz capture is processing.
-            FdtdRoom* active=((mode==Mode::Render||
-                               mode==Mode::Playback) && highQuality)?
+        SDL_Texture* displayedWaves=waveTexture;
+        if(showPressure && mode==Mode::Playback &&
+           replayWaveTexture && !lastPlaybackWaves.empty()){
+            // SDL-consumed audio frames also determine the visual
+            // frame, so wave snapshots loop with the PCM exactly.
+            const int index=std::clamp((int)std::floor(
+                playbackPhase*kReplayPressureFps),0,
+                (int)lastPlaybackWaves.size()-1);
+            if(index!=displayedPlaybackWave) {
+                SDL_UpdateTexture(replayWaveTexture,nullptr,
+                    lastPlaybackWaves[index].data(),
+                    kReplayPressureImage*sizeof(uint32_t));
+                displayedPlaybackWave=index;
+            }
+            displayedWaves=replayWaveTexture;
+        }else if(showPressure && waveTexture){
+            FdtdRoom* active=(mode==Mode::Render && highQuality)?
                 highQuality.get():live.get();
             active->pressureImage(pressurePixels,pressureExposure);
             SDL_UpdateTexture(waveTexture,nullptr,
@@ -1207,7 +1257,7 @@ int main(){
         drawRoom(renderer,visibleTrail,visibleArtist,visibleSource,
                  progress,mode==Mode::Render,mode==Mode::Playback,
                  lastWindow>0?(float)(playbackPhase/lastWindow):0.0f,
-                 mouseMode,waveTexture,showPressure,
+                 mouseMode,displayedWaves,showPressure,
                  *head,speakerShape,
                  headIndex==0?pinnaV2Sprite:
                      headIndex==1?channelsSprite:simpleSprite,
@@ -1231,6 +1281,7 @@ int main(){
     if(simpleSprite)SDL_DestroyTexture(simpleSprite);
     if(channelsSprite)SDL_DestroyTexture(channelsSprite);
     if(pinnaV2Sprite)SDL_DestroyTexture(pinnaV2Sprite);
+    if(replayWaveTexture)SDL_DestroyTexture(replayWaveTexture);
     if(waveTexture)SDL_DestroyTexture(waveTexture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
