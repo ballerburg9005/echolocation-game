@@ -7,14 +7,17 @@
 int main(){
     static_assert(asmr::kGraphBatch%3==0,
                   "CUDA graph must preserve triple-buffer identity");
-    assert(asmr::cells(asmr::kLiveDx)==200);
-    assert(asmr::cells(asmr::kOfflineDx)==800);
-    assert(asmr::tenCellFrequency(asmr::kLiveDx)<3500.0f);
-    assert(asmr::tenCellFrequency(asmr::kOfflineDx)>13000.0f);
+    assert(asmr::cells(asmr::kLiveDx)==400);
+    assert(asmr::cells(asmr::kMediumDx)==250);
+    assert(asmr::cells(asmr::kSafeDx)==200);
+    assert(asmr::cells(asmr::kOfflineDx)==1000);
+    assert(asmr::tenCellFrequency(asmr::kLiveDx)>6800.0f);
+    assert(asmr::tenCellFrequency(asmr::kOfflineDx)>17000.0f);
     assert(asmr::kOfflinePassband>=8000.0f);
     assert(asmr::kOfflinePassband<asmr::tenCellFrequency(asmr::kOfflineDx));
 
-    for(float dx:{asmr::kLiveDx,asmr::kOfflineDx}){
+    for(float dx:{asmr::kLiveDx,asmr::kMediumDx,
+                  asmr::kSafeDx,asmr::kOfflineDx}){
         const int n=asmr::cells(dx);
         const auto mask=asmr::roomMask(n,dx);
         assert(mask.size()==(size_t)n*n);
@@ -48,6 +51,33 @@ int main(){
         assert(asmr::length(asmr::sub(mouth,restricted))<
                asmr::kArtistRadius);
     }
+    // One physical source timeline must advance monotonically across
+    // dozens of CUDA graph batches; the old code repeatedly swept the
+    // mouth from old mouse position to new within each mini-batch.
+    // This produces artificial grain when the mouse is moving.
+    const asmr::Vec2 target{1.40f,1.50f};
+    asmr::Vec2 smoothed{1.52f,1.0f};
+    float previousDistance=asmr::length(asmr::sub(smoothed,target));
+    float previousStep=0.0f;
+    const float dt=(float)asmr::stepSeconds(asmr::kLiveDx);
+    for(int batch=0;batch<25;++batch)
+        for(int step=0;step<asmr::kGraphBatch;++step) {
+            const auto updated=asmr::advanceSource(
+                smoothed,target,dt,0.012f,2.25f);
+            const float displacement=asmr::length(
+                asmr::sub(updated,smoothed));
+            assert(displacement<=2.25f*dt+1e-6f);
+            const float distance=asmr::length(
+                asmr::sub(updated,target));
+            assert(distance<=previousDistance+1e-6f);
+            previousDistance=distance;
+            previousStep=displacement;
+            smoothed=updated;
+        }
+    assert(previousDistance<0.45f);
+    assert(previousStep>=0.0f);
+    assert(asmr::length(asmr::sub(
+        asmr::advanceSource(smoothed,target,0.0f),smoothed))<1e-7f);
     const auto roomEdge=asmr::moveArtist({1.60f,1.3f},{5,-2});
     assert(asmr::validArtist(roomEdge));
 
@@ -97,5 +127,5 @@ int main(){
     assert(rms(liveLow)>0.5);
     assert(rms(liveHigh)<0.03);
     assert(rms(offlineHigh)>0.45);
-    std::puts("ASMR lab: 2m room, rubber walls, binaural shadow head, exact mouse collisions, captured paths, 3/12kHz filters passed");
+    std::puts("ASMR lab: true 5/8/10mm live and 2mm offline FDTD geometry, contiguous source timeline, 5/10/20s paths, 5.5/15kHz filters passed");
 }
