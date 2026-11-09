@@ -512,6 +512,13 @@ int main(){
         SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
     if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);
     if(!renderer){SDL_DestroyWindow(window);SDL_Quit();return 1;}
+    SDL_Texture* waveTexture=SDL_CreateTexture(renderer,
+        SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,
+        kPressureImage,kPressureImage);
+    if(!waveTexture)
+        std::fprintf(stderr,"[VISUAL] Cannot display CUDA pressure map: %s\n",
+                     SDL_GetError());
+    std::vector<uint32_t> pressurePixels;
     SDL_AudioSpec desired{},obtained{};
     desired.freq=asmr::kOutputRate;
     desired.format=AUDIO_F32SYS;
@@ -547,6 +554,8 @@ int main(){
     uint64_t previewStep=0;
     asmr::Vec2 artist{1.50f,1.0f},sourceCursor=artist;
     bool mouseMode=true,previewEnabled=true,quit=false;
+    bool showPressure=true;
+    float pressureExposure=1.0f;
     Mode mode=Mode::Preview;
     SDL_WarpMouseInWindow(window,screenX(artist.x),screenY(artist.y));
     std::vector<asmr::PathPoint> record{{0.0,artist}};
@@ -601,7 +610,40 @@ int main(){
             if(key==SDLK_F6||key==SDLK_1)captureSeconds=10;
             if(key==SDLK_F7||key==SDLK_2)captureSeconds=20;
             if(key==SDLK_l)reload=true;
-            if(key==SDLK_t)previewEnabled=!previewEnabled;
+            if(key==SDLK_v)showPressure=!showPressure;
+            if(key==SDLK_9)pressureExposure=std::max(
+                0.025f,pressureExposure/1.4f);
+            if(key==SDLK_0)pressureExposure=std::min(
+                500.0f,pressureExposure*1.4f);
+            if(key==SDLK_t) {
+                previewEnabled=!previewEnabled;
+                SDL_ClearQueuedAudio(device);
+                live->reset();previewStep=0;
+                sourceCursor=artist;
+                liveResampler=echo::StereoLinearResampler(
+                    live->dt(),asmr::kOutputRate);
+            }
+            if(key==SDLK_q && mode==Mode::Preview){
+                qualityIndex=(qualityIndex+1)%3;
+                liveCutoff=qualityBand[qualityIndex];
+                if(waveLoaded)liveAudio=asmr::lowpass(
+                    fullAudio,liveCutoff,asmr::kOutputRate);
+                SDL_ClearQueuedAudio(device);
+                // The old graph/device field is released before
+                // allocating the new-size pressure grid.
+                live.reset();
+                live=std::make_unique<FdtdRoom>(
+                    qualityDx[qualityIndex]);
+                live->uploadAudio(liveAudio);
+                previewStep=0;sourceCursor=artist;
+                liveResampler=echo::StereoLinearResampler(
+                    live->dt(),asmr::kOutputRate);
+                std::printf("[QUALITY] Real FDTD dx=%.1fmm, "
+                            "%dx%d cells, WAV input spectrum %.0fHz\n",
+                            live->dx()*1000,
+                            asmr::cells(live->dx()),
+                            asmr::cells(live->dx()),liveCutoff);
+            }
             if(key==SDLK_r){
                 record.clear();recordingClock=0;
                 record.push_back({0,artist});
@@ -789,8 +831,19 @@ int main(){
         }
         const float progress=mode==Mode::Render&&job.total>0?
             (float)((double)job.current/job.total):0.0f;
+        if(showPressure && waveTexture){
+            // This GPU pressure snapshot is from the exact field
+            // that produces the ear samples. Render the offline wave
+            // grid too while a slow 15kHz capture is processing.
+            FdtdRoom* active=(mode==Mode::Render && highQuality)?
+                highQuality.get():live.get();
+            active->pressureImage(pressurePixels,pressureExposure);
+            SDL_UpdateTexture(waveTexture,nullptr,
+                pressurePixels.data(),kPressureImage*sizeof(uint32_t));
+        }
         drawRoom(renderer,record,artist,progress,
-                 mode==Mode::Render,mode==Mode::Playback,mouseMode);
+                 mode==Mode::Render,mode==Mode::Playback,
+                 mouseMode,waveTexture,showPressure);
         char title[255];
         std::snprintf(title,sizeof(title),
             "ASMR CUDA FDTD | %s | MP3:%s | path %.1fs | live %.0fHz / offline %.0fHz | Q quality | V pressure",
@@ -805,6 +858,7 @@ int main(){
     SDL_ClearQueuedAudio(device);
     SDL_CloseAudioDevice(device);
     highQuality.reset();
+    if(waveTexture)SDL_DestroyTexture(waveTexture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
