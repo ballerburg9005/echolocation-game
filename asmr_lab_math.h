@@ -556,6 +556,38 @@ inline Vec2 rightEar(bool earChannels=false,bool pinnaV2=false){
     return {kListenerX+0.5f*micSpacing(earChannels,pinnaV2),
             kListenerY+micOffsetY(earChannels,pinnaV2)};
 }
+// Streaming source-window filter: two stable biquads (4th-order
+// Butterworth). The existing FIR below is O(81*N) and was applied
+// *twice to every sample in a 20-minute track* before opening audio:
+// >9 billion MACs. This is O(N), works in place, and only processes
+// the active 60-second CUDA source cache. One-second cache pre-roll
+// lets the IIR settle before the next 58-second window is consumed.
+inline std::vector<float> lowpassSourceWindow(std::vector<float> pcm,
+                                               float cutoff,int sampleRate){
+    if(pcm.empty()||sampleRate<=0)return pcm;
+    const double fc=std::clamp((double)cutoff,20.0,
+                               0.48*(double)sampleRate);
+    const double w=2.0*echo::kPi*fc/(double)sampleRate;
+    const double sn=std::sin(w),co=std::cos(w);
+    constexpr double q[2]{0.541196100146197,1.306562964876377};
+    for(double quality:q){
+        const double alpha=sn/(2.0*quality);
+        const double divisor=1.0+alpha;
+        const double b0=(1.0-co)*0.5/divisor;
+        const double b1=(1.0-co)/divisor;
+        const double b2=b0;
+        const double a1=-2.0*co/divisor;
+        const double a2=(1.0-alpha)/divisor;
+        double x1=0,x2=0,y1=0,y2=0;
+        for(float& sample:pcm){
+            const double x=std::isfinite(sample)?sample:0.0;
+            const double y=b0*x+b1*x1+b2*x2-a1*y1-a2*y2;
+            x2=x1;x1=x;y2=y1;y1=y;
+            sample=std::isfinite(y)?(float)y:0.0f;
+        }
+    }
+    return pcm;
+}
 inline std::vector<float> lowpass(const std::vector<float>& input,
                                   float cutoff,int sampleRate,
                                   int halfWidth=40){
