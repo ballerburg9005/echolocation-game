@@ -186,21 +186,43 @@ int main(){
     }
     // The zoomed acoustic mask must remain in physical registration
     // with the unchanged listener SVG, including the real mic points.
-    for(float zoom:{1.0f,2.0f,4.0f,6.0f,8.0f}){
-        const float dx=asmr::kLiveDx/zoom;
-        const auto view=asmr::roomView(zoom);
-        const int nx=asmr::cells(dx*zoom),ny=asmr::cellsY(dx*zoom);
+    constexpr float zoomSteps[]{1.0f,1.08f,1.16f,1.30f,1.40f};
+    for(int stage=0;stage<5;++stage){
+        const bool square=stage==4;
+        const float zoom=zoomSteps[stage];
+        const float dx=square?asmr::squareDxFromBase(asmr::kLiveDx):
+                               asmr::kLiveDx/zoom;
+        const auto view=asmr::roomView(zoom,square);
+        const int nx=(int)std::lround(view.width/dx);
+        const int ny=(int)std::lround(view.height/dx);
         const auto mask=asmr::svgRoomMask(nx,ny,dx,pinnaV2,
                                           view.originX,view.originY);
-        assert(nx==400&&ny==711);
+        assert(std::abs(nx*ny-400*711)<1800);
         const int cx=(int)std::floor((asmr::kListenerX-view.originX)/dx);
         const int cy=(int)std::floor((asmr::kListenerY-view.originY)/dx);
+        assert(cx>=0&&cx<nx&&cy>=0&&cy<ny);
         assert(mask[(size_t)cy*nx+cx]==1.0f);
-        assert(view.originX<asmr::kListenerX);
-        assert(view.originY<asmr::kListenerY);
-        // Absorbing door and high window are geometry, not UI paint.
+        // The ACTIVE microphone locations must be connected to the
+        // SAME material grid as the head rendered on this camera.
+        assert(asmr::validateMicrophones(mask,nx,ny,dx,
+            true,pinnaV2,view.originX,view.originY));
+        // Perimeter openings are true material cells, not decorative
+        // strokes at a different position.
         assert(mask[(int)(ny*0.65f)*nx]==asmr::kPortMaterial);
         assert(mask[(ny-1)*nx+(int)(nx*0.27f)]==asmr::kPortMaterial);
+        // The pressure-image sampler maps top-left screen pixels to
+        // high-Y grid cells. Inverting it places the listener's
+        // acoustic mask within <2 cells of the authored SVG centre.
+        const int imageW=360,imageH=square?360:640;
+        const int texX=(int)(((asmr::kListenerX-view.originX)/
+                    view.width)*imageW);
+        const int texY=(int)(((view.originY+view.height-
+                    asmr::kListenerY)/view.height)*imageH);
+        const int fieldX=std::min(nx-1,(int)(((float)texX+0.5f)*nx/imageW));
+        const int fieldY=std::min(ny-1,(int)(
+            ((float)(imageH-texY)-0.5f)*ny/imageH));
+        assert(std::abs(fieldX-cx)<3&&std::abs(fieldY-cy)<3);
+        assert(mask[(size_t)fieldY*nx+fieldX]==1.0f);
     }
     // Real CUDA moving-scatterer stencil samples exactly the same
     // alpha pixels as librsvg used for the artist's display.
