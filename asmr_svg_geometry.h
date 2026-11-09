@@ -50,8 +50,9 @@ inline bool headSolidAt(const SvgSilhouette& svg,Vec2 centre,
     return svg.solid(localX,localY);
 }
 inline std::vector<float> svgRoomMask(int nx,int ny,float dx,
-                    const SvgSilhouette& listenerSvg){
-    std::vector<float> mask=roomMask(nx,ny,dx);
+                    const SvgSilhouette& listenerSvg,
+                    float originX=0,float originY=0){
+    std::vector<float> mask=roomMask(nx,ny,dx,originX,originY);
     if(!listenerSvg.present())return mask;
     // Remove the former circular fallback ENTIRELY before stamping the
     // real SVG, including above and below its narrower child-size bbox.
@@ -59,18 +60,19 @@ inline std::vector<float> svgRoomMask(int nx,int ny,float dx,
     for(float& material:mask)
         if(material>0.0f && material<3.5f)material=0.0f;
     const int xmin=std::max(1,(int)std::floor(
-        (kListenerX-listenerSvg.widthMetres*0.5f)/dx)-1);
+        (kListenerX-listenerSvg.widthMetres*0.5f-originX)/dx)-1);
     const int xmax=std::min(nx-2,(int)std::ceil(
-        (kListenerX+listenerSvg.widthMetres*0.5f)/dx)+1);
+        (kListenerX+listenerSvg.widthMetres*0.5f-originX)/dx)+1);
     const int ymin=std::max(1,(int)std::floor(
-        (kListenerY-listenerSvg.heightMetres*0.5f)/dx)-1);
+        (kListenerY-listenerSvg.heightMetres*0.5f-originY)/dx)-1);
     const int ymax=std::min(ny-2,(int)std::ceil(
-        (kListenerY+listenerSvg.heightMetres*0.5f)/dx)+1);
+        (kListenerY+listenerSvg.heightMetres*0.5f-originY)/dx)+1);
     for(int y=ymin;y<=ymax;++y)
         for(int x=xmin;x<=xmax;++x) {
             const size_t i=(size_t)y*nx+x;
             if(mask[i]==echo::kOuterBoundaryMaterial)continue;
-            const float worldX=(x+0.5f)*dx,worldY=(y+0.5f)*dx;
+            const float worldX=originX+(x+0.5f)*dx;
+            const float worldY=originY+(y+0.5f)*dx;
             float lx=worldX-kListenerX;
             const float ly=worldY-kListenerY;
             bool solid=listenerSvg.solid(lx,ly);
@@ -94,11 +96,11 @@ inline std::vector<float> svgRoomMask(int nx,int ny,float dx,
         // spacing would lie INSIDE a pressure-zero solid cell.
         // The user SVG paths themselves remain byte-for-byte exact.
         for(int y=0;y<ny;++y) {
-            const float localY=(y+0.5f)*dx-kListenerY;
+            const float localY=originY+(y+0.5f)*dx-kListenerY;
             if(std::fabs(localY)>0.0027f)continue;
             for(int side:{-1,1}) {
                 for(int x=0;x<nx;++x) {
-                    const float localX=(x+0.5f)*dx-kListenerX;
+                    const float localX=originX+(x+0.5f)*dx-kListenerX;
                     const float distance=side*localX;
                     if(distance>=0.0450f&&distance<=0.059f &&
                        mask[(size_t)y*nx+x]<3.5f)
@@ -118,11 +120,13 @@ inline std::vector<float> svgRoomMask(int n,float dx,
 // Rasterizing a thin user-authored ear channel can close its neck at
 // coarse dx; do not carve the SVG or accept a silent disconnected mic.
 inline bool microphoneConnectedToRoom(const std::vector<float>& mask,
-                         int nx,int ny,float dx,Vec2 mic) {
+                         int nx,int ny,float dx,Vec2 mic,
+                         float originX=0,float originY=0) {
     if(mask.size()!=(size_t)nx*ny || nx<8 || ny<8)return false;
-    const int exterior=(ny/4)*nx+nx/4;
+    const int exterior=(ny/20)*nx+nx/20; // air at even 8x zoom
     if(mask[(size_t)exterior]!=0.0f)return false;
-    const float gx=mic.x/dx-0.5f,gy=mic.y/dx-0.5f;
+    const float gx=(mic.x-originX)/dx-0.5f;
+        const float gy=(mic.y-originY)/dx-0.5f;
     const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
     if(ix<2||iy<2||ix+1>=nx-2||iy+1>=ny-2)return false;
     std::vector<unsigned char> seen(mask.size(),0);
@@ -154,7 +158,8 @@ inline bool microphoneConnectedToRoom(const std::vector<float>& mask,
 // inner-channel model keeps the original 8cm eardrum target.
 inline bool validateMicrophones(const std::vector<float>& mask,int nx,int ny,
                         float dx,bool channel,
-                        const SvgSilhouette& svg) {
+                        const SvgSilhouette& svg,
+                        float originX=0,float originY=0) {
     const Vec2 left=leftEar(channel,svg.pinnaV2);
     const Vec2 right=rightEar(channel,svg.pinnaV2);
     const auto check=[&](Vec2 mic) {
@@ -165,7 +170,8 @@ inline bool validateMicrophones(const std::vector<float>& mask,int nx,int ny,
         // visually or physically buried in the V2 head material.
         if(svg.pinnaV2 && svg.solid(mic.x-kListenerX,
                                     mic.y-kListenerY))return false;
-        const float gx=mic.x/dx-0.5f,gy=mic.y/dx-0.5f;
+        const float gx=(mic.x-originX)/dx-0.5f;
+        const float gy=(mic.y-originY)/dx-0.5f;
         const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
         if(ix<2||iy<2||ix+1>=nx-2||iy+1>=ny-2)return false;
         // Bilinear microphone sampling is explicitly mask-aware:
@@ -181,8 +187,8 @@ inline bool validateMicrophones(const std::vector<float>& mask,int nx,int ny,
         return airWeights>(svg.pinnaV2?0.98f:0.20f);
     };
     return check(left)&&check(right) &&
-        microphoneConnectedToRoom(mask,nx,ny,dx,left) &&
-        microphoneConnectedToRoom(mask,nx,ny,dx,right);
+        microphoneConnectedToRoom(mask,nx,ny,dx,left,originX,originY) &&
+        microphoneConnectedToRoom(mask,nx,ny,dx,right,originX,originY);
 }
 inline bool validateMicrophones(const std::vector<float>& mask,int n,
                         float dx,bool channel,const SvgSilhouette& svg){
