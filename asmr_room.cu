@@ -628,7 +628,7 @@ static void drawRoom(SDL_Renderer* renderer,
     const asmr::SvgSilhouette& listenerShape,
     const asmr::SvgSilhouette& speakerShape,
     SDL_Texture* listenerTexture,SDL_Texture* speakerTexture,
-    bool channels){
+    bool channels,bool ambientProbe){
     color(renderer,9,14,21);SDL_RenderClear(renderer);
     const SDL_Rect viewport=roomViewport();
     // GPU pressure and the SVG/mic/cursor share ONE physical viewport.
@@ -665,6 +665,15 @@ static void drawRoom(SDL_Renderer* renderer,
         viewport.y,farW,wallPx}
     };
     for(const auto& port:ports)SDL_RenderFillRect(renderer,&port);
+    if(ambientProbe){
+        // N's four field emitters are plotted at their true
+        // numerical geometry locations (not a graphic-only noise).
+        color(renderer,255,204,70);
+        for(int source=0;source<asmr::kAmbientSourceCount;++source){
+            const auto p=asmr::ambientSource(gView,source);
+            circle(renderer,screenX(p.x),screenY(p.y),4,true);
+        }
+    }
     // The movement trail is the path that will be rendered afterwards.
     color(renderer,66,85,89);
     for(size_t i=1;i<record.size();++i)
@@ -1329,11 +1338,11 @@ int main(int argc,char** argv){
             if(event.type==SDL_QUIT)quit=true;
             if(event.type!=SDL_KEYDOWN||event.key.repeat)continue;
             const SDL_Keycode key=event.key.keysym.sym;
-            if((key==SDLK_h||key==SDLK_z||key==SDLK_q)&&
-               mode!=Mode::Preview){
+            if((key==SDLK_h||key==SDLK_z||key==SDLK_q||
+                key==SDLK_n)&&mode!=Mode::Preview){
                 selectorNotice=mode==Mode::Playback?
-                    "[H/Z/Q] REPLAY ACTIVE: press SPACE to return to live":
-                    "[H/Z/Q] OFFLINE RENDER ACTIVE: navigation locked";
+                    "[H/Z/Q/N] REPLAY ACTIVE: SPACE returns to live":
+                    "[H/Z/Q/N] OFFLINE RENDER ACTIVE: locked";
                 selectorNoticeUntil=SDL_GetTicks64()+4000;
             }
             if(key==SDLK_ESCAPE)quit=true;
@@ -2010,7 +2019,8 @@ int main(int argc,char** argv){
                  *head,speakerShape,
                  headIndex==0?pinnaV2Sprite:
                      headIndex==1?channelsSprite:simpleSprite,
-                 speakerSprite,channels);
+                 speakerSprite,channels,
+                 mode==Mode::Playback?lastPlaybackAmbient:ambientEnabled);
         char title[255];
         std::snprintf(title,sizeof(title),
             "ASMR %s | F11 %gx (%.2fx%.2fm) | "
