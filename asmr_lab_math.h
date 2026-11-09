@@ -174,14 +174,17 @@ inline std::vector<float> roomMask(int n,float dx){
     // Circle-only fallback: mics must be in a connected air notch
     // inside the bounds, never sampled from a zero-pressure solid.
     for(int sign:{-1,1}){
-        const float a=kListenerX+sign*kEarOffset;
+        // Include the two sample cells on the inward-facing side of
+        // the 2x2 bilinear microphone footprint, not only the
+        // exact mic centre.
+        const float a=kListenerX+sign*(kEarOffset-2.0f*dx);
         const float b=kListenerX+sign*(kHeadRadius+.007f);
         const int x0=std::max(0,(int)std::floor(std::min(a,b)/dx-.5f));
         const int x1=std::min(n-1,(int)std::ceil(std::max(a,b)/dx-.5f));
         const int y0=std::max(0,(int)std::floor(
-            (kListenerY-.004f)/dx-.5f));
+            (kListenerY-std::max(.004f,1.5f*dx))/dx-.5f));
         const int y1=std::min(n-1,(int)std::ceil(
-            (kListenerY+.004f)/dx-.5f));
+            (kListenerY+std::max(.004f,1.5f*dx))/dx-.5f));
         for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x)
             if(mask[(size_t)y*n+x]==1.0f)mask[(size_t)y*n+x]=0.0f;
     }
