@@ -183,8 +183,9 @@ inline std::vector<float> svgRoomMask(int n,float dx,
 }
 // A valid microphone must sample AIR connected to the room, not a
 // sealed groove that appears blue/empty but cannot receive sound.
-// Rasterizing a thin user-authored ear channel can close its neck at
-// coarse dx; do not carve the SVG or accept a silent disconnected mic.
+// A narrow SVG-authored air channel is restored along its proven
+// high-resolution transparent path before validating connectivity;
+// do not accept a sealed virtual microphone.
 inline bool microphoneConnectedToRoom(const std::vector<float>& mask,
                          int nx,int ny,float dx,Vec2 mic,
                          float originX=0,float originY=0) {
