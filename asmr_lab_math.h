@@ -96,6 +96,25 @@ inline Vec2 add(Vec2 a,Vec2 b){return {a.x+b.x,a.y+b.y};}
 inline Vec2 sub(Vec2 a,Vec2 b){return {a.x-b.x,a.y-b.y};}
 inline Vec2 scale(Vec2 a,float t){return {a.x*t,a.y*t};}
 inline float length(Vec2 a){return std::hypot(a.x,a.y);}
+// 2D point-source pressure falls roughly as r^-0.5, whereas 3D
+// free-field pressure falls as r^-1 (inverse-square INTENSITY).
+// F12 changes ONLY captured stereo microphone pressure, not the
+// wave propagation or phase. 1x adds the sqrt(r0/r) correction
+// needed to approximate 3D amplitude; 20x exaggerates that
+// additional attenuation 20-fold in its exponent. 0x is raw FDTD.
+// Never add gain at close range or divide by an unbounded r.
+constexpr std::array<int,11> kDistanceFalloffSteps{
+    0,1,2,3,4,6,8,10,12,16,20};
+constexpr float kFalloffReferenceMetres=0.20f;
+inline float distanceFalloffGain(float distanceMetres,int strength){
+    if(strength<=0)return 1.0f;
+    if(!std::isfinite(distanceMetres))return 0.0f;
+    const float d=std::max(kFalloffReferenceMetres,
+                           std::max(0.0f,distanceMetres));
+    const float ratio=kFalloffReferenceMetres/d;
+    return std::pow(ratio,0.5f*std::min(strength,20));
+}
+
 inline Vec2 listener(){return {kListenerX,kListenerY};}
 inline Vec2 faceListener(Vec2 centre) {
     const Vec2 toward=sub(listener(),centre);
