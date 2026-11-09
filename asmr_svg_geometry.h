@@ -133,6 +133,11 @@ inline std::vector<float> svgRoomMask(int n,float dx,
                     const SvgSilhouette& listenerSvg){
     std::vector<float> mask=roomMask(n,dx);
     if(!listenerSvg.present())return mask;
+    // Remove the former circular fallback ENTIRELY before stamping the
+    // real SVG, including above and below its narrower child-size bbox.
+    // Otherwise ghost semicircles remain around the authored silhouette.
+    for(float& material:mask)
+        if(material>0.0f && material<3.5f)material=0.0f;
     const int xmin=std::max(1,(int)std::floor(
         (kListenerX-listenerSvg.widthMetres*0.5f)/dx)-1);
     const int xmax=std::min(n-2,(int)std::ceil(
