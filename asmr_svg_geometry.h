@@ -83,25 +83,9 @@ inline std::vector<float> svgRoomMask(int n,float dx,
                 solid=true;
             mask[i]=solid?1.0f:0.0f;
         }
-    if(listenerSvg.pinnaV2) {
-        // The authored v2 outer pinnae have a large recess, but an
-        // 8cm eardrum separation lies slightly INWARD of its air end.
-        // Create a physically traversable ~8mm ear-canal lumen from
-        // the open pinna concavity to each user's ±40mm eardrum, not
-        // a microphone sample in zero-pressure solid. It is at least
-        // two 3.5mm cells wide and becomes 5+ cells at 1.5mm offline.
-        for(int y=0;y<n;++y) {
-            const float localY=(y+0.5f)*dx-kListenerY;
-            if(std::fabs(localY-kChannelEarY)>0.0042f)continue;
-            for(int x=0;x<n;++x) {
-                const float localX=(x+0.5f)*dx-kListenerX;
-                const float distance=std::fabs(localX);
-                if(distance>=0.035f && distance<=0.077f &&
-                   mask[(size_t)y*n+x]<3.5f)
-                    mask[(size_t)y*n+x]=0.0f;
-            }
-        }
-    } else if(!listenerSvg.channels) {
+    // V2 microphones are IN AUTHORED AIR at +-62mm. Do not erase
+    // solid head material to create synthetic canals for this mode.
+    if(!listenerSvg.channels) {
         // The author's simple SVG recess ends roughly 1-2mm OUTSIDE
         // the specifically requested ±48mm microphone positions.
         // Extend only its central 5mm-wide air notch ~3mm inward as
@@ -124,19 +108,22 @@ inline std::vector<float> svgRoomMask(int n,float dx,
     }
     return mask;
 }
-// These positions are deliberately specified by this user's 8cm child
-// eardrum-to-eardrum experiment, not generic adult HRTF anthropology.
-// For the simple head, recess microphones are 8cm + 0.8*2cm = 9.6cm
-// apart. The explicit canal and pinna-v2 modes place eardrums 8cm
-// apart at ±4cm, entirely within connected fluid at every usable dx.
+// V2 microphones sit farther out in the actual 12.4cm-separated
+// pinna recess air, with no carved artificial tunnel. The separate
+// inner-channel model keeps the original 8cm eardrum target.
 inline bool validateMicrophones(const std::vector<float>& mask,int n,
                         float dx,bool channel,
                         const SvgSilhouette& svg) {
-    const Vec2 left=leftEar(channel),right=rightEar(channel);
+    const Vec2 left=leftEar(channel,svg.pinnaV2);
+    const Vec2 right=rightEar(channel,svg.pinnaV2);
     const auto check=[&](Vec2 mic) {
         if(channel&&svg.present()&&!svg.pinnaV2 &&
            svg.solid(mic.x-kListenerX,mic.y-kListenerY))
             return false; // channel eardrum in authored recess
+        // Avoid passing a partially air-overlapping sample that is
+        // visually or physically buried in the V2 head material.
+        if(svg.pinnaV2 && svg.solid(mic.x-kListenerX,
+                                    mic.y-kListenerY))return false;
         const float gx=mic.x/dx-0.5f,gy=mic.y/dx-0.5f;
         const int ix=(int)std::floor(gx),iy=(int)std::floor(gy);
         if(ix<2||iy<2||ix+1>=n-2||iy+1>=n-2)return false;
@@ -150,7 +137,7 @@ inline bool validateMicrophones(const std::vector<float>& mask,int n,
             airWeights+=(1-std::fabs(gx-(ix+x)))*
                         (1-std::fabs(gy-(iy+y)));
         }
-        return airWeights>0.20f;
+        return airWeights>(svg.pinnaV2?0.98f:0.20f);
     };
     return check(left)&&check(right);
 }
