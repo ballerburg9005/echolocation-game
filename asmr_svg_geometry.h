@@ -161,14 +161,21 @@ inline std::vector<float> svgRoomMask(int nx,int ny,float dx,
         // an acoustic microphone port. Otherwise a correct 9.6cm
         // spacing would lie INSIDE a pressure-zero solid cell.
         // The user SVG paths themselves remain byte-for-byte exact.
+        // The original 5.4mm-high port becomes narrower than ONE
+        // grid cell at inverse F11 scales. Cell-center sampling can
+        // then miss it entirely and apparently disable the head.
+        // Area-overlap rasterization preserves one connected fluid
+        // cell across the EXISTING prescribed 45-59mm acoustic port;
+        // it is not a new tunnel or a change to the user's SVG file.
         for(int y=0;y<ny;++y) {
             const float localY=originY+(y+0.5f)*dx-kListenerY;
-            if(std::fabs(localY)>0.0027f)continue;
+            if(std::fabs(localY)>0.0027f+0.5f*dx)continue;
             for(int side:{-1,1}) {
                 for(int x=0;x<nx;++x) {
                     const float localX=originX+(x+0.5f)*dx-kListenerX;
                     const float distance=side*localX;
-                    if(distance>=0.0450f&&distance<=0.059f &&
+                    if(distance+0.5f*dx>=0.0450f &&
+                       distance-0.5f*dx<=0.059f &&
                        mask[(size_t)y*nx+x]<3.5f)
                         mask[(size_t)y*nx+x]=0.0f;
                 }
