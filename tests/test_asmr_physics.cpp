@@ -66,7 +66,80 @@ static PulseResponse testWallPulse(float material) {
     return response;
 }
 
+// After a single impulse, a 2D room with partially absorbing walls and
+// three low-reflection ports must lose wave energy rather than accumulate
+// pressure without a continuing source. Include a rigid head obstruction.
+static void testRoomRingdown() {
+    constexpr int nx=84,ny=132,steps=1200;
+    const float dt=(float)asmr::physicalStepSeconds(0.010f,1.0f);
+    const float c2=echo::kCourantSquared;
+    std::vector<float> mask((size_t)nx*ny,0.0f);
+    for(int y=0;y<ny;++y)for(int x=0;x<nx;++x) {
+        const int id=y*nx+x;
+        if(x<2||x>=nx-2||y<2||y>=ny-2)
+            mask[id]=echo::kOuterBoundaryMaterial;
+        if((x<2&&std::abs(y-86)<7)||
+           (x>=nx-2&&std::abs(y-33)<8)||
+           (y>=ny-2&&std::abs(x-24)<6))
+            mask[id]=asmr::kPortMaterial;
+        if((x-nx/2)*(x-nx/2)+(y-ny/3)*(y-ny/3)<64)
+            mask[id]=1.0f;
+    }
+    std::vector<float> previous((size_t)nx*ny),
+                       now(previous),next(previous);
+    for(int y=0;y<ny;++y)for(int x=0;x<nx;++x) {
+        const int id=y*nx+x;
+        const float r2=(float)((x-20)*(x-20)+(y-55)*(y-55));
+        now[id]=mask[id]==0.0f?std::exp(-r2/(2.0f*3.4f*3.4f)):0.0f;
+    }
+    previous=now;
+    const auto energy=[&]() {
+        double kinetic=0.0,potential=0.0;
+        for(int y=0;y<ny-1;++y)for(int x=0;x<nx-1;++x) {
+            const int id=y*nx+x;
+            if(mask[id]>0.0f)continue;
+            const double velocity=now[id]-previous[id];
+            kinetic+=velocity*velocity;
+            const double ddx=now[id+1]-now[id];
+            const double ddy=now[id+nx]-now[id];
+            potential+=(ddx*ddx+ddy*ddy)*c2;
+        }
+        return kinetic+potential;
+    };
+    const double initialEnergy=energy();
+    double midpointEnergy=0.0;
+    assert(initialEnergy>0.5);
+    for(int t=0;t<steps;++t){
+        std::fill(next.begin(),next.end(),0.0f);
+        for(int y=1;y<ny-1;++y)for(int x=1;x<nx-1;++x) {
+            const int id=y*nx+x;
+            if(mask[id]>0.0f)continue;
+            const float p=now[id];
+            const float mL=mask[id-1],mR=mask[id+1];
+            const float mD=mask[id-nx],mU=mask[id+nx];
+            const float l=mL>0.0f?p:now[id-1];
+            const float r=mR>0.0f?p:now[id+1];
+            const float d=mD>0.0f?p:now[id-nx];
+            const float u=mU>0.0f?p:now[id+nx];
+            const float damping=asmr::boundaryDamping(
+                mL,mR,mD,mU)+asmr::bulkDamping(dt);
+            next[id]=echo::impedanceWaveStep(
+                p,previous[id],l,r,d,u,c2,damping);
+            assert(std::isfinite(next[id]));
+        }
+        previous.swap(now);now.swap(next);
+        if(t==599)midpointEnergy=energy();
+    }
+    const double finalEnergy=energy();
+    assert(midpointEnergy<initialEnergy*0.50);
+    assert(finalEnergy<midpointEnergy*0.50);
+    std::printf("2D room impulse energy proxy: initial %.4g, "
+                "600 steps %.4g, 1200 steps %.4g\n",
+                initialEnergy,midpointEnergy,finalEnergy);
+}
+
 int main() {
+    testRoomRingdown();
     testUniformPressure();
     const PulseResponse wall=testWallPulse(echo::kOuterBoundaryMaterial);
     const PulseResponse port=testWallPulse(asmr::kPortMaterial);
