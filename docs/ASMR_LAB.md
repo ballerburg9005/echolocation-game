@@ -570,6 +570,42 @@ the GPU, not a visualization-only oscillator. Solid listener head
 walls are drawn as hard reflecting geometry. The 2D shader displays
 raw signed pressure with adjustable exposure.
 
+### Physics verification and optional ultra-quality recording
+
+The ASMR room uses a second-order-in-time, 2D acoustic pressure FDTD stencil.
+The old per-step output multiplier, \`p_next *= exp(-0.6 * dt)\`, was
+**not** the standard damped-wave equation: even constant, stationary pressure
+acquired a spurious low-frequency oscillation (frequency depended on dx).
+The field now solves the phenomenological damped-wave form
+\`p_tt + 2 sigma p_t = c^2 laplacian(p)\`, with \`sigma = 0.6/s\`, by
+adding \`sigma*dt\` to the same centered-time impedance damping term already
+used for wall loss. This preserves constant pressure and adds amplitude
+loss through the wave dynamics instead of blindly scaling the updated field.
+
+The CPU regression \`tests/test_asmr_physics.cpp\` checks that a uniform
+stationary field remains stationary, and launches a Gaussian pulse at the
+real wall and window stencil: a wall of nominal reflection R=0.82 should
+return approximately 0.82 of incident **pressure amplitude**, while the
+absorbing port nominal R=0.035 returns very little. These are
+normal-incidence, 1D-section checks of the exact solver stencil; they
+do **not** establish calibrated 2D angular/frequency behavior or real
+headphone loudness. The head's original 12.98/17.02/18.53cm SVG widths,
+and model-specific microphone points, remain unchanged.
+
+For F5/F6/F7 the existing standard offline mesh remains the default:
+2.0mm base grid, nominal 16kHz source passband (with stricter limits at
+some F11/Z settings). **Shift+F5 / Shift+F6 / Shift+F7** instead selects
+an **ULTRA recording-only mesh**: 1.5mm base grid, nominal 19kHz
+source passband. The F11/Z physical scaling and anti-alias source
+low-pass still apply. At the same room size this is approximately
+\`(2/1.5)^3 = 2.37x\` as many acoustic cell updates per simulated
+second; CUDA runtime and memory usage can be considerably higher.
+The render finishes before audio plays and produces the same exact
+5/10/20-second 48kHz stereo WAV and synchronized replay snapshots.
+The live solver remains unchanged. This resolves finer **2D** contours;
+it does not introduce the missing third spatial dimension, HRTFs or
+a true 3D room.
+
 ## Acoustic limitations and validation
 
 - **F11 is a genuine uniform physical metre/CFL scaling experiment**:
