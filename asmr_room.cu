@@ -1045,6 +1045,7 @@ static void printUsage(const char* executable){
         "                no looping until actual track end\n"
         "  R             Reset recorded path and solver\n"
         "  F5, F6, F7    Offline render/replay last 5, 10, 20 seconds\n"
+        "  Shift+F5/F6/F7  ULTRA offline mesh (~2.4x cell work)\n"
         "  P             Replay last completed offline recording\n"
         "  Space         Stop replay, return to live mode\n"
         "  Esc           Quit\n"
