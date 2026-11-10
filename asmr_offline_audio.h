@@ -61,10 +61,13 @@ inline OfflineAudioNormalization normalizeOfflineAudio(
                          magnitudes.begin()+rank,magnitudes.end());
         result.referencePeak=magnitudes[rank];
     }
-    // RMS backstop avoids treating long silence as signal and provides
-    // a stable normalization reference for bursts and narrow pulses.
-    const double reference=std::max(
-        result.referencePeak,result.before.rms*1.5);
+    // Use the high-percentile amplitude when a genuine signal
+    // occupies the timeline. Raw RMS can be dominated by the single
+    // enormous spike we are explicitly trying to reject.
+    // For very sparse signals fall back conservatively; the caller
+    // diagnoses almost-empty audio rather than amplifying numerical dust.
+    const double reference=result.referencePeak>1e-9?
+        result.referencePeak:result.before.rms*1.5;
     // Keep actual silence silent; never amplify floating-point dust.
     if(reference>1e-10 && std::isfinite(reference))
         result.gain=std::min(64.0,0.38/reference);
