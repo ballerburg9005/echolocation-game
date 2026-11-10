@@ -45,7 +45,11 @@ constexpr float kUltraDx=0.0025f;  // 800², 13.7kHz
 constexpr float kSafeDx=0.0050f;   // 400², 6.86kHz
 constexpr float kLowDx=0.0080f;    // 250² fallback
 constexpr float kLowestDx=0.0100f; // 200² fallback
-constexpr float kOfflineDx=0.0020f;// 1000x1778 ~= 1333² cells; 17.15kHz at 10 cells / wave
+constexpr float kOfflineDx=0.0020f;// normal offline FDTD mesh
+// Deliberately expensive, RECORDING-ONLY mesh: finer pinna/channel contours.
+// At identical room/zoom/scale, ~ (2/1.5)^3 = 2.37x as many
+// acoustic cell updates as regular offline mode; no live GPU cost.
+constexpr float kUltraOfflineDx=0.0015f;
 constexpr float kLivePassband=6000.0f; // <6.86kHz ten-cell numerical limit
 constexpr float kBalancedPassband=6800.0f;
 constexpr float kPreviousPassband=8500.0f;
@@ -54,7 +58,8 @@ constexpr float kUltraPassband=12000.0f;
 constexpr float kSafePassband=5500.0f;
 constexpr float kLowPassband=4000.0f;
 constexpr float kLowestPassband=2800.0f;
-constexpr float kOfflinePassband=16000.0f; // below 17.15kHz 10-cell limit
+constexpr float kOfflinePassband=16000.0f; // normal offline input band
+constexpr float kUltraOfflinePassband=19000.0f; // ultra, within 48kHz audio Nyquist
 constexpr int kOutputRate=48000;
 // Keep one short window on the CUDA device, not the complete MP3.
 // The 2-second overlap means a 126-step graph batch can cross a
@@ -75,6 +80,15 @@ constexpr float kHeadReflection=0.74f;
 constexpr float kOutsideReflection=0.82f;
 constexpr float kPortMaterial=5.0f;
 constexpr float kPortReflection=0.035f;
+// Phenomenological air attenuation p_tt + 2*sigma*p_t = c^2*Laplacian(p).
+// The second-order centered-time impedance stencil takes sigma*dt
+// as its dimensionless damping coefficient, ADDITIVE with wall loss.
+// Do not multiply only p_next by exp(-sigma*dt): that changes the
+// zero-spatial-frequency eigenmode into an artificial oscillation.
+constexpr float kAirAmplitudeDecayPerSecond=0.6f;
+inline float bulkDamping(float dt){
+    return kAirAmplitudeDecayPerSecond*dt;
+}
 // Port extents are PHYSICAL metre values so they grow in relative
 // screen size as the acoustic room is cropped. Shares parameters
 // with the SDL wall drawing; all ports terminate sound.
