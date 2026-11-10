@@ -13,6 +13,7 @@
 #include "asmr_svg_geometry.h"
 #include "asmr_dynamic_head.h"
 #include "asmr_mp3_audio.h"
+#include "asmr_offline_audio.h"
 #include "source_model.h"
 #include <cuda_runtime.h>
 #include <SDL2/SDL.h>
@@ -917,25 +918,6 @@ static void writeTrajectory(const std::string& file,
            <<std::atan2(d.y,d.x)<<"\n";
     }
 }
-static void makeSafePlayback(std::vector<float>& audio){
-    float largest=0;
-    for(float v:audio)if(std::isfinite(v))
-        largest=std::max(largest,std::fabs(v));
-    const float gain=largest>1e-8f?
-        std::min(12.0f,0.38f/largest):0.0f;
-    const size_t frames=audio.size()/2;
-    for(size_t i=0;i<frames;++i){
-        const float fadeIn=(float)std::min(1.0,
-            (double)i/(asmr::kOutputRate*0.035));
-        const float fadeOut=(float)std::min(1.0,
-            (double)(frames-i)/(asmr::kOutputRate*0.060));
-        for(int ear=0;ear<2;++ear){
-            float& v=audio[i*2+ear];
-            v=std::isfinite(v)?
-                gain*v*std::min(fadeIn,fadeOut):0.0f;
-        }
-    }
-}
 // Post-solver attenuation audition. Work on already normalized,
  // unmodified 48kHz stereo PCM so the offline peak normalizer does
 // NOT undo distance changes. Geometry uses the smoothed physical
@@ -993,6 +975,7 @@ static std::vector<float> distanceShapedClip(
 struct RenderJob {
     asmr::PathSelection selected;
     int window=0;
+    bool ultra=false;
     uint64_t current=0,total=0;
     std::vector<float> samples;
     // The displayed replay head must follow the *same smoothed physical
@@ -1045,7 +1028,7 @@ static void printUsage(const char* executable){
         "                no looping until actual track end\n"
         "  R             Reset recorded path and solver\n"
         "  F5, F6, F7    Offline render/replay last 5, 10, 20 seconds\n"
-        "  Shift+F5/F6/F7  ULTRA offline mesh (~2.4x cell work)\n"
+        "  F1, F2, F3    ULTRA 5, 10, 20-second recording (~2.4x GPU work)\n"
         "  P             Replay last completed offline recording\n"
         "  Space         Stop replay, return to live mode\n"
         "  Esc           Quit\n"
@@ -1265,6 +1248,7 @@ int main(int argc,char** argv){
     std::vector<float> lastPlayback;
     std::vector<float> lastPlaybackBase; // normalized but NO F12 shaping
     bool lastPlaybackAmbient=false; // F12 does not color diffuse noise
+    bool lastPlaybackUltra=false;
     std::vector<std::vector<uint32_t>> lastPlaybackWaves;
     int displayedPlaybackWave=-1;
     asmr::PathSelection lastPlaybackPath;
@@ -1272,6 +1256,7 @@ int main(int argc,char** argv){
     uint64_t playbackEnqueuedCycles=0;
     double playbackPhase=0.0;
     int lastWindow=5;
+    int fallbackSeconds=0; // retry only failed ULTRA audio at normal HQ
     auto startReplay=[&]() {
         if(lastPlayback.empty())return;
         SDL_ClearQueuedAudio(device);
@@ -1283,6 +1268,7 @@ int main(int argc,char** argv){
         playbackPhase=0.0;
         displayedPlaybackWave=-1;
         mode=Mode::Playback;
+        SDL_PauseAudioDevice(device,0); // render may start with SDL paused
     };
     uint64_t lastFrame=SDL_GetPerformanceCounter();
     const double perfFrequency=(double)SDL_GetPerformanceFrequency();
@@ -1436,8 +1422,9 @@ int main(int argc,char** argv){
         const float frameDt=(float)std::min(0.05,wallSeconds);
         lastFrame=currentCounter;
         SDL_Event event;
-        int captureSeconds=0;
+        int captureSeconds=fallbackSeconds;
         bool captureUltra=false;
+        fallbackSeconds=0;
         bool reload=false;
         while(SDL_PollEvent(&event)){
             if(event.type==SDL_QUIT)quit=true;
@@ -1459,8 +1446,10 @@ int main(int argc,char** argv){
             if(key==SDLK_F5||key==SDLK_5)captureSeconds=5;
             if(key==SDLK_F6||key==SDLK_1)captureSeconds=10;
             if(key==SDLK_F7||key==SDLK_2)captureSeconds=20;
-            if(key==SDLK_F5||key==SDLK_F6||key==SDLK_F7)
-                captureUltra=(event.key.keysym.mod&KMOD_SHIFT)!=0;
+            if(key==SDLK_F1){captureSeconds=5;captureUltra=true;}
+            if(key==SDLK_F2){captureSeconds=10;captureUltra=true;}
+            if(key==SDLK_F3){captureSeconds=20;captureUltra=true;}
+            // The difficult Shift+F5/F6/F7 shortcut is intentionally removed.
             if(key==SDLK_l)reload=true;
             if(key==SDLK_F12){
                 const int oldStrength=falloffStrength();
@@ -1545,7 +1534,8 @@ int main(int argc,char** argv){
                     SDL_PauseAudioDevice(device,0);
                     char wavPath[80];
                     std::snprintf(wavPath,sizeof(wavPath),
-                        "asmr_last_%02ds.wav",lastWindow);
+                        lastPlaybackUltra?"asmr_last_%02ds_ultra.wav":
+                                          "asmr_last_%02ds.wav",lastWindow);
                     if(!writeWav(wavPath,lastPlayback))
                         std::fprintf(stderr,
                             "[F12 DISTANCE] Could not update %s\n",
@@ -1740,7 +1730,7 @@ int main(int argc,char** argv){
                     "[RENDER] Need >=0.15 seconds of path and MP3, D chirp or N noise (input %s).\n",
                     filename.c_str());
             } else {
-                // Shift+F5/F6/F7: finer, slower 2D mesh in recording only.
+                // F1/F2/F3: finer, slower 2D mesh in recording only.
                 if(highQuality && highQualityUltra!=captureUltra)
                     highQuality.reset();
                 highQualityUltra=captureUltra;
@@ -1779,6 +1769,7 @@ int main(int argc,char** argv){
                     (double)captureSeconds,true);
                 highQuality->reset();
                 job.window=captureSeconds;
+                job.ultra=captureUltra;
                 job.current=0;
                 job.sourceCursor=asmr::interpolate(
                     job.selected.points,job.selected.start);
@@ -1982,7 +1973,19 @@ int main(int argc,char** argv){
                 // of FDTD steps, block boundaries or float dt.
                 // Both saved WAV and SDL loop are N*48000 frames.
                 asmr::fitStereoClip(job.samples,job.window);
-                makeSafePlayback(job.samples);
+                const auto normalized=asmr::normalizeOfflineAudio(job.samples);
+                std::fprintf(stderr,
+                    "[RENDER AUDIO %s] raw peak=%.8g rms=%.8g "
+                    "nonfinite=%llu | robustPeak=%.8g gain=%.4g "
+                    "safePeak=%.6g rms=%.6g active=%.2f%% "
+                    "clipped=%llu\n",
+                    job.ultra?"ULTRA":"HQ",
+                    normalized.before.peak,normalized.before.rms,
+                    (unsigned long long)normalized.before.nonFinite,
+                    normalized.referencePeak,normalized.gain,
+                    normalized.after.peak,normalized.after.rms,
+                    normalized.after.activeFraction*100.0,
+                    (unsigned long long)normalized.clipped);
                 if(ambientEnabled){
                     // Silence-to-room-tone diagnostic, not a full
                     // scale noise recording: cap after normalizer.
@@ -2004,16 +2007,43 @@ int main(int argc,char** argv){
                     job.physicalPath,channels,head->pinnaV2,
                     ambientEnabled?0:falloffStrength(),
                     physicsScaleValue());
+                const auto finalStats=asmr::offlineAudioStats(job.samples);
+                std::fprintf(stderr,
+                    "[RENDER AUDIO FINAL %s] peak=%.6g rms=%.6g "
+                    "active=%.2f%% nonfinite=%llu F12=%dx\n",
+                    job.ultra?"ULTRA":"HQ",finalStats.peak,finalStats.rms,
+                    finalStats.activeFraction*100.0,
+                    (unsigned long long)finalStats.nonFinite,
+                    ambientEnabled?0:falloffStrength());
+                // An isolated transient followed by silence is not a
+                // usable recording. Never silently loop a near-empty WAV.
+                if(job.ultra &&
+                   (finalStats.nonFinite>0 ||
+                    finalStats.rms<1e-4 ||
+                    finalStats.activeFraction<0.01)) {
+                    std::fprintf(stderr,
+                        "[ULTRA FALLBACK] Recording is effectively silent "
+                        "or nonfinite. Retrying the SAME path with normal "
+                        "offline FDTD. Check both [RENDER AUDIO] logs.\n");
+                    fallbackSeconds=job.window;
+                    highQuality.reset();
+                    job.samples.clear();job.waveFrames.clear();
+                    mode=Mode::Preview;
+                    continue;
+                }
                 char soundPath[80],trackPath[80];
                 std::snprintf(soundPath,sizeof(soundPath),
-                              "asmr_last_%02ds.wav",job.window);
+                              job.ultra?"asmr_last_%02ds_ultra.wav":
+                                        "asmr_last_%02ds.wav",job.window);
                 std::snprintf(trackPath,sizeof(trackPath),
-                              "asmr_last_%02ds_path.csv",job.window);
+                              job.ultra?"asmr_last_%02ds_ultra_path.csv":
+                                        "asmr_last_%02ds_path.csv",job.window);
                 if(!writeWav(soundPath,job.samples))
                     std::fprintf(stderr,
                         "[RENDER] Could not save %s\n",soundPath);
                 writeTrajectory(trackPath,job.selected);
                 lastWindow=job.window;
+                lastPlaybackUltra=job.ultra;
                 lastPlaybackPath=job.selected;
                 lastPlaybackView=highQuality->view();
                 lastPlaybackPhysicalPath.swap(job.physicalPath);
