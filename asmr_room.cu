@@ -1269,6 +1269,14 @@ int main(int argc,char** argv){
         displayedPlaybackWave=-1;
         mode=Mode::Playback;
         SDL_PauseAudioDevice(device,0); // render may start with SDL paused
+        const auto queued=SDL_GetQueuedAudioSize(device);
+        const auto stats=asmr::offlineAudioStats(lastPlayback);
+        std::fprintf(stderr,
+            "[PLAYBACK SDL] status=%d queued=%.2fs "
+            "peak=%.6g rms=%.6g active=%.2f%%\n",
+            (int)SDL_GetAudioDeviceStatus(device),
+            (double)queued/(2.0*sizeof(float)*asmr::kOutputRate),
+            stats.peak,stats.rms,stats.activeFraction*100.0);
     };
     uint64_t lastFrame=SDL_GetPerformanceCounter();
     const double perfFrequency=(double)SDL_GetPerformanceFrequency();
