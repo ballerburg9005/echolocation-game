@@ -523,6 +523,7 @@ efficient window filter's passband, stopband and finite output.
 | F5 / 5 | Render and then **loop exactly 5 s** |
 | F6 / 1 | Render and then **loop exactly 10 s** |
 | F7 / 2 | Render and then **loop exactly 20 s** |
+| **F1 / F2 / F3** | **ULTRA** high-resolution render of last 5 / 10 / 20 s, with separate WAV outputs |
 | P | Restart the most recently completed replay loop |
 | **Space** | Stop playback and return to live movement/recording |
 | D | Toggle in-solver FDTD test chirp even without MP3 |
@@ -547,7 +548,9 @@ for the remainder.
 The complete rendered stereo buffer is saved as
 `asmr_last_05s.wav` / `asmr_last_10s.wav` /
 `asmr_last_20s.wav`, with the companion timestamped
-`asmr_last_XXs_path.csv`. These are **outputs only**: MP3 remains
+`asmr_last_XXs_path.csv`. ULTRA produces
+`asmr_last_XXs_ultra.wav` and `asmr_last_XXs_ultra_path.csv`, so it does
+not overwrite the standard render. These are **outputs only**: MP3 remains
 the default input.
 
 Playback begins only after the full offline calculation finishes.
@@ -594,7 +597,7 @@ and model-specific microphone points, remain unchanged.
 
 For F5/F6/F7 the existing standard offline mesh remains the default:
 2.0mm base grid, nominal 16kHz source passband (with stricter limits at
-some F11/Z settings). **Shift+F5 / Shift+F6 / Shift+F7** instead selects
+some F11/Z settings). **F1 / F2 / F3** instead select
 an **ULTRA recording-only mesh**: 1.5mm base grid, nominal 19kHz
 source passband. The F11/Z physical scaling and anti-alias source
 low-pass still apply. At the same room size this is approximately
@@ -605,6 +608,20 @@ The render finishes before audio plays and produces the same exact
 The live solver remains unchanged. This resolves finer **2D** contours;
 it does not introduce the missing third spatial dimension, HRTFs or
 a true 3D room.
+
+A report tagged `[RENDER AUDIO ULTRA]` prints raw peak/RMS, invalid
+sample count, robust normalization gain and resulting signal levels.
+The older peak-only normalizer could reduce almost an entire recording
+to silence if the pressure trace contained a single extreme spike.
+Normalization now uses a robust high percentile instead, with a fixed
+linear gain and safety clamping of isolated outliers. If a finished
+ULTRA recording is still effectively silent, the program retries the
+same requested duration with the regular HQ mesh and prints
+`[ULTRA FALLBACK]`. The resulting WAV only starts playback after the
+complete FDTD render. If both passes are silent, check the logged
+`raw rms`, `active`, `F12`, source MP3/chirp/noise and room microphone
+connectivity; this is not evidence that the enhanced 2D mesh is a
+realistic 3D ear model.
 
 ## Acoustic limitations and validation
 
