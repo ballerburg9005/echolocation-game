@@ -1735,9 +1735,9 @@ int main(int argc,char** argv){
             const double now=record.empty()?0:record.back().t;
             job.selected=asmr::selectLast(record,now,captureSeconds);
             if(job.selected.duration<0.15||
-               (!waveLoaded&&!ambientEnabled)){
+               (!waveLoaded&&!ambientEnabled&&!diagnosticTone)){
                 std::fprintf(stderr,
-                    "[RENDER] Need >=0.15 seconds of path AND readable %s.\n",
+                    "[RENDER] Need >=0.15 seconds of path and MP3, D chirp or N noise (input %s).\n",
                     filename.c_str());
             } else {
                 // Shift+F5/F6/F7: finer, slower 2D mesh in recording only.
@@ -1760,8 +1760,12 @@ int main(int argc,char** argv){
                     offlineBand,
                     0.90f*asmr::tenCellFrequency(
                         highQuality->physicalDx()));
+                // Use the same selected excitation as live preview:
+                // a D chirp must remain a D chirp in the recording.
                 highQuality->uploadAudio(
-                    ambientEnabled?emptyAudio:fullAudio,offlineCutoff);
+                    ambientEnabled?emptyAudio:
+                    diagnosticTone?diagnosticAudio:fullAudio,
+                    offlineCutoff);
                 highQuality->uploadAmbient(
                     asmr::lowpassSourceWindow(
                         ambientNoise,offlineCutoff,
