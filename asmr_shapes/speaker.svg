@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original Inkscape millimetre geometry supplied by user; exact path commands/rotation preserved. The two channel halves are intentionally the same solid material, so their seam is NOT a waveguide. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="134.48267mm" height="130.03357mm" viewBox="0 0 134.48267 130.03357">
+  <g transform="translate(-37.758689,-29.732907)">
+    <path fill="#ff00ff" transform="rotate(-109.5169)" d="m -63.395989,89.788923 a 68.590439,67.069962 0 0 0 4.362689,-25.575267 68.590439,67.069962 0 0 0 -69.56414,-65.10153861 68.590439,67.069962 0 0 0 -46.43612,18.62094661 33.315907,32.436859 19.5169 0 1 9.18332,34.494137 33.315907,32.436859 19.5169 0 1 -29.87098,21.733596 68.590439,67.069962 0 0 0 71.13479,59.219423 68.590439,67.069962 0 0 0 61.190441,-43.391297 z" />
+  </g>
+</svg>
