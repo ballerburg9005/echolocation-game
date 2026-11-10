@@ -118,7 +118,7 @@ __global__ void asmrPressureStep(
     const float4* mouthLocations,const uint64_t* blockBase,
     const float* ambientPCM,const int* ambientLength,
     const int* ambientOn,const float2* ambientPositions,
-    float* outStereo,int localStep,int nx,int ny,float dx,float dt,float decay,
+    float* outStereo,int localStep,int nx,int ny,float dx,float dt,float bulkDamping,
     float originX,float originY,float halfMicSeparation,float micYOffset,double absoluteStart,
     double recordingDuration,bool offline,
     const unsigned char* speakerPixels,int speakerW,int speakerH,
@@ -175,8 +175,10 @@ __global__ void asmrPressureStep(
         center,now[idx-nx],b0,bD);
     const float u=mask[idx+nx]>0?center:asmr::movingHeadNeighbor(
         center,now[idx+nx],b0,bU);
+    // Centered-time damped wave equation: avoid artificial DC ringing.
     const float damping=asmr::boundaryDamping(
-        mask[idx-1],mask[idx+1],mask[idx-nx],mask[idx+nx]);
+        mask[idx-1],mask[idx+1],mask[idx-nx],mask[idx+nx])+
+        bulkDamping;
     float pressure=echo::impedanceWaveStep(
         center,previous[idx],l,r,d,u,echo::kCourantSquared,damping);
 
@@ -227,7 +229,7 @@ __global__ void asmrPressureStep(
         pressure+=kInputStrength*asmr::kAmbientInjection*
             noise*envelope*echo::sourceWeight(p.x,p.y,x,y);
     }
-    next[idx]=pressure*decay;
+    next[idx]=pressure;
 }
 
 // This is the SAME field advanced by asmrPressureStep and sampled by
@@ -373,7 +375,7 @@ public:
         LAB_CUDA(cudaStreamCreate(&stream_));
         const dim3 threads(16,16);
         const dim3 blocks((nx_+15)/16,(ny_+15)/16);
-        const float decay=std::exp(-dt_*0.6f);
+        const float bulkDamping=asmr::bulkDamping(dt_);
         LAB_CUDA(cudaStreamBeginCapture(stream_,
                     cudaStreamCaptureModeGlobal));
         for(int t=0;t<asmr::kGraphBatch;++t){
@@ -387,7 +389,7 @@ public:
                 deviceAmbientPCM_,deviceAmbientFrames_,
                 deviceAmbientOn_,deviceAmbientPositions_,
                 deviceOutput_,t,
-                nx_,ny_,dx_,dt_,decay,view_.originX,view_.originY,
+                nx_,ny_,dx_,dt_,bulkDamping,view_.originX,view_.originY,
                 halfMicSeparation_,micYOffset_,
                 0.0,1e12,false,deviceSpeaker_,speakerW_,speakerH_,
                 speakerWidthCells_,speakerHeightCells_);
@@ -405,7 +407,7 @@ public:
         if(execution_){LAB_CUDA(cudaGraphExecDestroy(execution_));execution_=nullptr;}
         if(graph_){LAB_CUDA(cudaGraphDestroy(graph_));graph_=nullptr;}
         const dim3 threads(16,16),blocks((nx_+15)/16,(ny_+15)/16);
-        const float decay=std::exp(-dt_*0.6f);
+        const float bulkDamping=asmr::bulkDamping(dt_);
         LAB_CUDA(cudaStreamBeginCapture(stream_,
                     cudaStreamCaptureModeGlobal));
         for(int t=0;t<asmr::kGraphBatch;++t)
@@ -417,7 +419,7 @@ public:
                 deviceAmbientPCM_,deviceAmbientFrames_,
                 deviceAmbientOn_,deviceAmbientPositions_,
                 deviceOutput_,t,
-                nx_,ny_,dx_,dt_,decay,view_.originX,view_.originY,
+                nx_,ny_,dx_,dt_,bulkDamping,view_.originX,view_.originY,
                 halfMicSeparation_,micYOffset_,
                 absoluteStart,length,offline,
                 deviceSpeaker_,speakerW_,speakerH_,
@@ -1231,6 +1233,7 @@ int main(int argc,char** argv){
     live->uploadAmbient(asmr::lowpass(
         ambientNoise,liveCutoff,asmr::kOutputRate),ambientEnabled);
     std::unique_ptr<FdtdRoom> highQuality;
+    bool highQualityUltra=false; // cached offline solver grid type
     echo::StereoLinearResampler liveResampler(live->dt(),
                                                 asmr::kOutputRate);
     std::vector<float> queued,blockSamples;
@@ -1433,6 +1436,7 @@ int main(int argc,char** argv){
         lastFrame=currentCounter;
         SDL_Event event;
         int captureSeconds=0;
+        bool captureUltra=false;
         bool reload=false;
         while(SDL_PollEvent(&event)){
             if(event.type==SDL_QUIT)quit=true;
@@ -1454,6 +1458,8 @@ int main(int argc,char** argv){
             if(key==SDLK_F5||key==SDLK_5)captureSeconds=5;
             if(key==SDLK_F6||key==SDLK_1)captureSeconds=10;
             if(key==SDLK_F7||key==SDLK_2)captureSeconds=20;
+            if(key==SDLK_F5||key==SDLK_F6||key==SDLK_F7)
+                captureUltra=(event.key.keysym.mod&KMOD_SHIFT)!=0;
             if(key==SDLK_l)reload=true;
             if(key==SDLK_F12){
                 const int oldStrength=falloffStrength();
@@ -1733,16 +1739,24 @@ int main(int argc,char** argv){
                     "[RENDER] Need >=0.15 seconds of path AND readable %s.\n",
                     filename.c_str());
             } else {
+                // Shift+F5/F6/F7: finer, slower 2D mesh in recording only.
+                if(highQuality && highQualityUltra!=captureUltra)
+                    highQuality.reset();
+                highQualityUltra=captureUltra;
+                const float offlineBaseDx=captureUltra?
+                    asmr::kUltraOfflineDx:asmr::kOfflineDx;
+                const float offlineBand=captureUltra?
+                    asmr::kUltraOfflinePassband:asmr::kOfflinePassband;
                 if(!highQuality)
                     highQuality=std::make_unique<FdtdRoom>(
                         asmr::physicalScaleDesignDx(
-                            asmr::zoomDx(asmr::kOfflineDx,zoomIndex),
+                            asmr::zoomDx(offlineBaseDx,zoomIndex),
                             physicsScaleValue()),
                         *head,channels,
                         speakerShape,zoomValue(),squareMode(),
                         physicsScaleValue());
                 const float offlineCutoff=std::min(
-                    asmr::kOfflinePassband,
+                    offlineBand,
                     0.90f*asmr::tenCellFrequency(
                         highQuality->physicalDx()));
                 highQuality->uploadAudio(
@@ -1751,8 +1765,9 @@ int main(int argc,char** argv){
                     asmr::lowpassSourceWindow(
                         ambientNoise,offlineCutoff,
                         asmr::kOutputRate),ambientEnabled);
-                std::printf("[F11 OFFLINE] physical dx %.2fmm, "
+                std::printf("[F11 OFFLINE%s] physical dx %.2fmm, "
                     "band-limited MP3 to %.0fHz, F11 %gx.\n",
+                    captureUltra?" ULTRA":"",
                     highQuality->physicalDx()*1000,offlineCutoff,
                     physicsScaleValue());
                 highQuality->setRenderTiming(job.selected.start,
@@ -1780,10 +1795,11 @@ int main(int argc,char** argv){
                 SDL_ClearQueuedAudio(device);
                 mode=Mode::Render;
                 gView=highQuality->view();
-                std::printf("[RENDER] Captured last %.2fs; "
+                std::printf("[RENDER%s] Captured last %.2fs; "
                   "offline %.1fmm / %.0fHz. %.0f million grid steps.\n",
+                  captureUltra?" ULTRA":"",
                   job.selected.duration,highQuality->dx()*1000,
-                  asmr::kOfflinePassband,
+                  offlineCutoff,
                   (double)job.total*highQuality->nx()*
                       highQuality->ny()/1e6);
             }
